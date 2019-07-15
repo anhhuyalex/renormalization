@@ -15,8 +15,11 @@ print("data", data[:10])
 # Create uncorrelated samples
 uncorrelated_data = []
 for _ in range(10000):
+    # Get random block from 10000 samples
     sample = np.random.randint(0, 10000, (3, 3))
+    # Pick horizontal, vertical position of 3x3 block in 9x9 block
     horizontal, vertical = np.random.randint(0, 3, (2, 3, 3))
+    # Concatenate blocks
     uncorrelated = []
     for i in range(3):
         tile = []
