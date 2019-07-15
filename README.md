@@ -3,6 +3,7 @@
 
 * Requirements
 	* numpy, pytorch
+* For overview of code + some plots, check out `main.ipynb`
 * Generate Ising model data:
 	* run `python generate_data.py`
 	* Place correlated .npy file in correct temperature directory
