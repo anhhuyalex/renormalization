@@ -149,12 +149,14 @@ class IsingModel:
         for _ in range(steps):
             self.run_cluster_epoch()
         
-data = []
-for _ in range(10000):
-    i = IsingModel((81), 2.269185)
-    i.initialize()
-    for _ in range(10):
-        i.update_SW(1)
-    data.append(i.state)
-data = np.array(data)
-np.save("ising81x81_temp2.269.npy", data)
+
+for temp in [1, 2.269185, 5]:
+    data = []
+    for _ in range(10000):
+        i = IsingModel((81), 2.269185)
+        i.initialize()
+        for _ in range(10):
+            i.update_SW(1)
+        data.append(i.state)
+    data = np.array(data)
+    np.save("ising81x81_temp_{}.npy".format(temp), data)
