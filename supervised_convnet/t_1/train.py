@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
-import sys; 
+import sys;
 sys.path.insert(0, "../")
 import supervised_convnet
 import numpy as np
@@ -48,7 +48,7 @@ train_loader = torch.utils.data.DataLoader(train_isingdataset, batch_size=batch_
 
 validate_isingdataset = supervised_convnet.IsingDataset(X_train[-1000:], y_train[-1000:])
 validate_loader = torch.utils.data.DataLoader(validate_isingdataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-
+supervised_convnet.print_model_parameters(model)
 for epoch in range(1, n_epochs+1):
     # monitor training loss
     accuracy = 0.0
@@ -65,7 +65,7 @@ for epoch in range(1, n_epochs+1):
         target = target.type('torch.FloatTensor')
         optimizer.zero_grad()
         output = model(data)[-1].view(-1)
-        loss = criterion(output, target) 
+        loss = criterion(output, target)
         # add regularization
         for param in model.parameters():
             loss += ((param)**2).sum()/300
@@ -75,9 +75,9 @@ for epoch in range(1, n_epochs+1):
         # update running training loss
         accuracy += (torch.sign(output) == target).sum().item() / batch_size
         train_loss += loss.item() * batch_size
-    
-    
-    # print avg training statistics 
+
+
+    # print avg training statistics
     # train_loss = train_loss/len(train_loader)
     if epoch % 10 == 0:
         validate_accuracy = 0
@@ -88,16 +88,14 @@ for epoch in range(1, n_epochs+1):
             validate_accuracy += (torch.sign(output) == target).sum().item() / batch_size
 
         print('Epoch: {} \t Accuracy: {} \t Validate_Accuracy: {}'.format(
-            epoch, 
+            epoch,
             accuracy/len(train_loader),
             validate_accuracy/len(validate_loader),
             ))
 #         print("data", data[:10])
         # print("output", (output)[:10])
         # print("target", (target)[:10])
-        # for name, param in model.named_parameters():
-        #     if param.requires_grad:
-        #         print (name, param.data)
+
 
 patience = 0
 for batch_idx, (data, target) in enumerate(train_loader):
@@ -135,7 +133,7 @@ for batch_idx, (data, target) in enumerate(train_loader):
     patience += 1
     if patience > 100:
         break
-    
+
 
 v = torch.tensor([[[[-1., -1., -1., -1., -1., -1., -1., -1., -1.],
           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],

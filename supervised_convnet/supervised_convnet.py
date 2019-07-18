@@ -14,10 +14,10 @@ class SupervisedConvNet(nn.Module):
         self.filter_size = filter_size
         self.square_size = square_size
         self.leakyrelu = torch.nn.LeakyReLU(0.1)
-        self.conv2d = nn.Conv2d(1, 1, filter_size, padding=0, stride = filter_size)  
+        self.conv2d = nn.Conv2d(1, 1, filter_size, padding=0, stride = filter_size)
         self.linear1 = nn.Linear(filter_size ** 2, 1)
         # self.linear2 = nn.Linear(100, 1)
-        
+
 
     def forward(self, x):
         # add hidden layers with relu activation function
@@ -37,11 +37,11 @@ class IsingDataset(Dataset):
     def __init__(self, data, label):
         self.X = data
         self.y = label
-        
-        
+
+
     def __getitem__(self, index):
         return self.X[index], self.y[index]
-    
+
     def __len__(self):
         return len(self.X)
 
@@ -51,3 +51,14 @@ def adjust_learning_rate(optimizer, epoch, lr):
     print ("learning rate", lr)
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
+
+def print_model_parameters(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print (name, param.data)
+
+
+def print_model_gradient(model):
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            print (name, param.grad)

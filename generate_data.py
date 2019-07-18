@@ -7,13 +7,13 @@ class IsingModel:
     def __init__(self, size, T = 1, J = 1, h = 0):
         self.size = size # size of lattice
         self.T = T # k_B * temperature (default 1)
-        self.J = J # strength of interaction 
+        self.J = J # strength of interaction
         self.h = h # strength of magnetic field
-    
+
     def initialize(self):
         self.state = np.random.choice([-1, 1], (self.size, self.size))
         
-    
+
     def update_mh(self, steps = 10000):
         for _ in range(steps):
             r_ind, c_ind = np.random.choice(self.size, 2)
@@ -28,8 +28,8 @@ class IsingModel:
 
             if np.random.random() < prob:
                 self.state[r_ind][c_ind] *= -1
-        
-        
+
+
     def display(self):
         cmap = colors.ListedColormap(['blue', 'red'])
         bounds=[-1,0,1]
@@ -53,7 +53,7 @@ class IsingModel:
                 NN[i] = (NN[i] + j)%(site_ranges[i]);
                 Nearest_Neighbors.append(tuple(NN))
         return Nearest_Neighbors;
-    
+
     def SW_BFS(self, bonded, clusters, start, beta, nearest_neighbors = 1):
         '''
         function currently cannot generalize to dimensions higher than 2...
@@ -74,11 +74,11 @@ class IsingModel:
                                      #this particular BFS search
         if(bonded[tuple(start)] != 0): #cannot construct a cluster from this site
             return bonded, clusters, visited;
-        
+
         p = 1 - np.exp(-2 * beta * self.J); #bond forming probability
-        
+
         queue = list();
-        
+
 
         queue.append(start);
         index = tuple(start)
@@ -87,7 +87,7 @@ class IsingModel:
         color = np.max(bonded) + 1;
 
         ## need to make sub2ind work in arbitrary dimensions
-        
+
         #whatever the input coordinates are
         while(len(queue) > 0):
             #print(queue)
@@ -107,9 +107,9 @@ class IsingModel:
                             queue.append(rn); #add coordinate to search
                             clusters[index].append(rn) #add point to the cluster
                             bonded[rn] = color; #indicate site is no longer available
-        
+
         return bonded, clusters, visited;
-    
+
     def run_cluster_epoch(self, nearest_neighbors = 1):
         """
         Implements 1 step of the Swendsen Wang algorithm
@@ -117,7 +117,7 @@ class IsingModel:
         #simulation parameters
         beta = 1.0 / self.T
         Nx, Ny = self.state.shape
-        
+
         #scan through every element of the lattice
 
         #propose a random lattice site to generate a cluster
@@ -129,8 +129,8 @@ class IsingModel:
             for j in range(Ny):
                 ## at this point, we do a BFS search to create the cluster
                 bonded, clusters, visited = self.SW_BFS(bonded, clusters, [i,j], beta, nearest_neighbors=1);
-        
-        
+
+
         for cluster_index in clusters.keys():
             [x0, y0] = np.unravel_index(cluster_index, (Nx,Ny));
             r = np.random.rand();
@@ -141,22 +141,24 @@ class IsingModel:
                     self.state[x,y] = -1*self.state[x,y];
 
         return self.state;
-    
+
     def update_SW(self, steps = 30):
         """
         Runs some steps of the Swendsen Wang algorithm
         """
         for _ in range(steps):
             self.run_cluster_epoch()
-        
+
 
 for temp in [1, 2.269185, 5]:
     data = []
-    for _ in range(10000):
+    for _ in range(1):
         i = IsingModel((81), 2.269185)
         i.initialize()
         for _ in range(10):
             i.update_SW(1)
         data.append(i.state)
     data = np.array(data)
-    np.save("ising81x81_temp_{}.npy".format(temp), data)
+np.set_printoptions(threshold=10000)
+print(data)
+# np.save("ising81x81_temp_{}.npy".format(temp), data)
