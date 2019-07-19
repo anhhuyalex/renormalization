@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
+from torch.utils.tensorboard import SummaryWriter
 import sys;
 sys.path.insert(0, "../")
 import supervised_convnet
@@ -10,6 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import sys
 from sklearn.model_selection import train_test_split
 
+writer = SummaryWriter()
 
 uncorrelated_data = np.load("ising81x81_temp1_uncorrelated9x9.npy")
 correlated_data = np.load("ising81x81_temp1.npy")[:10000,:9,:9]
@@ -24,11 +26,11 @@ X_train, X_test, y_train, y_test = train_test_split(data, label, test_size=0.33,
 # Create training and test dataloaders
 num_workers = 0
 # how many samples per batch to load
-batch_size = 1000
+batch_size = 100
 # number of epochs to train the model
-n_epochs = 500
+n_epochs = 100
 # learning rate
-lr = 0.001
+lr = 0.01
 # adjust learning rate?
 adjust_learning_rate = False
 
@@ -39,11 +41,11 @@ criterion = nn.MSELoss()
 model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3)
 
 # specify optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay = 0.01)
 
 
 # prepare data loaders
-train_isingdataset = supervised_convnet.IsingDataset(X_train[:3000], y_train[:3000])
+train_isingdataset = supervised_convnet.IsingDataset(X_train[:2000], y_train[:2000])
 train_loader = torch.utils.data.DataLoader(train_isingdataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
 
 validate_isingdataset = supervised_convnet.IsingDataset(X_train[-1000:], y_train[-1000:])
@@ -79,76 +81,78 @@ for epoch in range(1, n_epochs+1):
 
     # print avg training statistics
     # train_loss = train_loss/len(train_loader)
-    if epoch % 10 == 0:
+    if epoch % 100 == 0:
         validate_accuracy = 0
         for batch_idx, (data, target) in enumerate(validate_loader):
             data = data.unsqueeze(1).type('torch.FloatTensor')
             target = target.type('torch.FloatTensor')
             output = model(data)[-1].view(-1)
             validate_accuracy += (torch.sign(output) == target).sum().item() / batch_size
+        # print('Epoch: {} \t Accuracy: {} \t Validate_Accuracy: {}'.format(
+        #     epoch,
+        #     accuracy/len(train_loader),
+        #     validate_accuracy/len(validate_loader),
+        #     ))
+        # supervised_convnet.print_model_gradient(model)
+        writer.add_scalar("validation_accuracy", validate_accuracy, epoch)
+    writer.add_scalar("train_accuracy", accuracy, epoch)
+print("model parameters! \n")
+supervised_convnet.print_model_parameters(model)
 
-        print('Epoch: {} \t Accuracy: {} \t Validate_Accuracy: {}'.format(
-            epoch,
-            accuracy/len(train_loader),
-            validate_accuracy/len(validate_loader),
-            ))
-#         print("data", data[:10])
-        # print("output", (output)[:10])
-        # print("target", (target)[:10])
-
-
-patience = 0
-for batch_idx, (data, target) in enumerate(train_loader):
-    data = data.unsqueeze(1).type('torch.FloatTensor')#[0].unsqueeze(1)
-    # print("data", data)
-    target = target.type('torch.FloatTensor')
-    optimizer.zero_grad()
-    output = [i.view(-1) for i in model(data)]
-    print("data", data[:10])
-    print("output", (output[:10]))
-    print("target", target[:10])
-    v = torch.tensor([[[[-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-        [-1., -1., -1., -1., -1., -1., -1., -1., -1.]]]])
-    print("correlated model(v)", model(v))
-    v = torch.tensor([[[[ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-        [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-        [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-        [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-        [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-        [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-        [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.],
-        [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.],
-        [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.]]]])
-    print("uncorrelated model(v)", model(v))
-    # loss = criterion(output, target[0])
-    # print("loss.data", loss.data)
-    # loss.backward()
-    patience += 1
-    if patience > 100:
-        break
-
-
-v = torch.tensor([[[[-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1.,  1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-          [-1., -1., -1., -1., -1., -1., -1., -1., -1.]]]])
-print("negative", model(v))
-print("positive", model(-v))
-for name, param in model.named_parameters():
-    if param.requires_grad:
-        print (name, param.data)
-
-# torch.save(model.state_dict(), "9x9->3x3.pt")
-    # optimizer.step()
+writer.add_graph(model, data)
+writer.close()
+# patience = 0
+# for batch_idx, (data, target) in enumerate(train_loader):
+#     data = data.unsqueeze(1).type('torch.FloatTensor')#[0].unsqueeze(1)
+#     # print("data", data)
+#     target = target.type('torch.FloatTensor')
+#     optimizer.zero_grad()
+#     output = [i.view(-1) for i in model(data)]
+#     print("data", data[:10])
+#     print("output", (output[:10]))
+#     print("target", target[:10])
+#     v = torch.tensor([[[[-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.]]]])
+#     print("correlated model(v)", model(v))
+#     v = torch.tensor([[[[ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
+#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
+#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
+#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
+#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
+#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
+#         [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.],
+#         [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.],
+#         [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.]]]])
+#     print("uncorrelated model(v)", model(v))
+#     # loss = criterion(output, target[0])
+#     # print("loss.data", loss.data)
+#     # loss.backward()
+#     patience += 1
+#     if patience > 100:
+#         break
+#
+#
+# v = torch.tensor([[[[-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1.,  1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
+#           [-1., -1., -1., -1., -1., -1., -1., -1., -1.]]]])
+# print("negative", model(v))
+# print("positive", model(-v))
+# for name, param in model.named_parameters():
+#     if param.requires_grad:
+#         print (name, param.data)
+#
+# # torch.save(model.state_dict(), "9x9->3x3.pt")
+#     # optimizer.step()

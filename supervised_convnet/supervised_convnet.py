@@ -61,4 +61,4 @@ def print_model_parameters(model):
 def print_model_gradient(model):
     for name, param in model.named_parameters():
         if param.requires_grad:
-            print (name, param.grad)
+            print (name, "grad", param.grad)
