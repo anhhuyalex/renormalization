@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 import sys
 from sklearn.model_selection import train_test_split
 
-writer = SummaryWriter()
+writer = SummaryWriter(comment="--batch size 100, training set 2000, epoch 200, lr 1, weight decay 0.1")
 
 uncorrelated_data = np.load("ising81x81_temp1_uncorrelated9x9.npy")
 correlated_data = np.load("ising81x81_temp1.npy")[:10000,:9,:9]
@@ -28,9 +28,9 @@ num_workers = 0
 # how many samples per batch to load
 batch_size = 100
 # number of epochs to train the model
-n_epochs = 100
+n_epochs = 200
 # learning rate
-lr = 0.01
+lr = 1
 # adjust learning rate?
 adjust_learning_rate = False
 
@@ -41,17 +41,20 @@ criterion = nn.MSELoss()
 model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3)
 
 # specify optimizer
-optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay = 0.01)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay = 0.1)
 
 
 # prepare data loaders
 train_isingdataset = supervised_convnet.IsingDataset(X_train[:2000], y_train[:2000])
 train_loader = torch.utils.data.DataLoader(train_isingdataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
 
-validate_isingdataset = supervised_convnet.IsingDataset(X_train[-1000:], y_train[-1000:])
+validate_isingdataset = supervised_convnet.IsingDataset(X_train[-2000:], y_train[-2000:])
 validate_loader = torch.utils.data.DataLoader(validate_isingdataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
 supervised_convnet.print_model_parameters(model)
+
+global_step = 0
 for epoch in range(1, n_epochs+1):
+    print("epoch", epoch)
     # monitor training loss
     accuracy = 0.0
     train_loss = 0.0
@@ -68,38 +71,48 @@ for epoch in range(1, n_epochs+1):
         optimizer.zero_grad()
         output = model(data)[-1].view(-1)
         loss = criterion(output, target)
-        # add regularization
-        for param in model.parameters():
-            loss += ((param)**2).sum()/300
         loss.backward()
         optimizer.step()
-
+        global_step += 1
         # update running training loss
         accuracy += (torch.sign(output) == target).sum().item() / batch_size
         train_loss += loss.item() * batch_size
 
 
+
+
     # print avg training statistics
     # train_loss = train_loss/len(train_loader)
-    if epoch % 100 == 0:
-        validate_accuracy = 0
-        for batch_idx, (data, target) in enumerate(validate_loader):
-            data = data.unsqueeze(1).type('torch.FloatTensor')
-            target = target.type('torch.FloatTensor')
-            output = model(data)[-1].view(-1)
-            validate_accuracy += (torch.sign(output) == target).sum().item() / batch_size
+    # if epoch % 1 == 0:
+    validate_accuracy = 0
+    for batch_idx, (data, target) in enumerate(validate_loader):
+        data = data.unsqueeze(1).type('torch.FloatTensor')
+        target = target.type('torch.FloatTensor')
+        output = model(data)[-1].view(-1)
+        validate_accuracy += (torch.sign(output) == target).sum().item() / batch_size
         # print('Epoch: {} \t Accuracy: {} \t Validate_Accuracy: {}'.format(
         #     epoch,
         #     accuracy/len(train_loader),
         #     validate_accuracy/len(validate_loader),
         #     ))
         # supervised_convnet.print_model_gradient(model)
-        writer.add_scalar("validation_accuracy", validate_accuracy, epoch)
-    writer.add_scalar("train_accuracy", accuracy, epoch)
+    # writer.add_scalar("validation_accuracy", validate_accuracy/len(train_loader))
+    print("accuracy", accuracy/len(train_loader))
+    model_params = supervised_convnet.get_param_histogram(model)
+    model_grad = supervised_convnet.get_param_grad_histogram(model)
+    writer.add_scalar("training_accuracy", accuracy/len(train_loader), global_step)
+    writer.add_scalar("validate_accuracy", validate_accuracy/len(validate_loader), global_step)
+    writer.add_scalar("parameter_mean", np.mean(model_params), global_step)
+    writer.add_scalar("parameter_grad_mean", np.mean(model_grad), global_step)
+    writer.add_scalar("parameter_std", np.std(model_params), global_step)
+    writer.add_scalar("parameter_grad_std", np.std(model_grad), global_step)
+    writer.add_histogram("parameter_histogram", model_params, global_step)
+    writer.add_histogram("parameter_grad_histogram", model_grad, global_step)
+
 print("model parameters! \n")
 supervised_convnet.print_model_parameters(model)
 
-writer.add_graph(model, data)
+# writer.add_graph(model, data)
 writer.close()
 # patience = 0
 # for batch_idx, (data, target) in enumerate(train_loader):

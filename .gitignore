@@ -3,3 +3,4 @@
 events.out.tf*
 *.pyc
 .ipynb_checkpoints/
+runs/
