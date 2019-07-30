@@ -20,7 +20,7 @@ class SupervisedConvNet(nn.Module):
         self.square_size = square_size
         self.leakyrelu = torch.nn.LeakyReLU(0.1)
         self.conv2d = nn.Conv2d(1, 1, filter_size, padding=0, stride = filter_size)
-        self.linear_hidden = nn.Linear(filter_size ** 2, hidden_size)
+        self.linear_hidden = nn.Linear(square_size ** 2, hidden_size)
         self.linear_output = nn.Linear(hidden_size, 1)
 
 

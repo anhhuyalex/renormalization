@@ -14,12 +14,12 @@ print("data", data[:10])
 # Create uncorrelated samples
 uncorrelated_data = []
 for _ in range(10000):
-    sample = np.random.randint(0, 10000, (3, 3))
+    sample = np.random.randint(0, 10000, (9, 9))
     horizontal, vertical = np.random.randint(0, 3, (2, 3, 3))
     uncorrelated = []
-    for i in range(3):
+    for i in range(9):
         tile = []
-        for j in range(3):
+        for j in range(9):
             tile.append(data[sample[i, j], 3*horizontal[i, j]:(3*horizontal[i, j] + 3), \
                     3*vertical[i, j]:(3*vertical[i, j] + 3)])
         uncorrelated.append(np.hstack(tile))
