@@ -12,8 +12,8 @@ import sys
 from sklearn.model_selection import train_test_split
 
 
-uncorrelated_data = np.load("ising81x81_temp2.269_uncorrelated9x9.npy")
-correlated_data = np.load("../ising81x81_temp2.269.npy")[:10000,:9,:9]
+uncorrelated_data = np.load("ising81x81_temp5_uncorrelated81x81.npy")
+correlated_data = np.load("../ising81x81_temp5.npy")
 print("Uncorrelated", uncorrelated_data[10])
 print("Correlated", correlated_data[0])
 
@@ -26,17 +26,17 @@ X_train, X_test, y_train, y_test = train_test_split(data, label, test_size=0.33,
 # Create training and test dataloaders
 num_workers = 0
 # how many samples per batch to load
-batch_size = 100
+batch_size = 1000
 # how many samples of training set to train on
 train_size = 8000
 # number of epochs to train the model
 n_epochs = 300
 # learning rate
-lr = 0.003
+lr = 0.1
 # weight decay
-weight_decay = 0.000
+weight_decay = 0.0001
 # hidden layer size
-hidden_size = 10
+hidden_size = 100
 # adjust learning rate?
 adjust_learning_rate = False
 
@@ -51,7 +51,7 @@ writer = SummaryWriter(comment="--batch size {}, training set {}, epoch {}, lr {
 
 
 # build model
-model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3, hidden_size = hidden_size)
+model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 27, hidden_size = hidden_size)
 
 # specify optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay = weight_decay)

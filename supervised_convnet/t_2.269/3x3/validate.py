@@ -32,9 +32,9 @@ train_size = 8000
 # number of epochs to train the model
 n_epochs = 300
 # learning rate
-lr = 0.003
+lr = 0.03
 # weight decay
-weight_decay = 0.000
+weight_decay = 0.0001
 # hidden layer size
 hidden_size = 10
 # adjust learning rate?
@@ -49,9 +49,50 @@ writer = SummaryWriter(comment="--batch size {}, training set {}, epoch {}, lr {
                         batch_size, train_size, n_epochs, lr, weight_decay, hidden_size
 ))
 
+# parameters
+param = {}
+param['conv2d.weight'] = torch.tensor([[[[1.0, 1.0, 1.0],
+          [1.0, 1.0, 1.0],
+          [1.0, 1.0, 1.0]]]])/8
+param['conv2d.bias'] = torch.tensor([0.0])
+
+# Load parameters
+class SupervisedConvNet(nn.Module):
+    def __init__(self, filter_size, square_size, hidden_size):
+        """
+        Arguments:
+        filter_size ~ size of the convolution kernel (3 x 3)
+        square size ~ how many strides of convolution in the input
+        """
+        super(SupervisedConvNet, self).__init__()
+        self.filter_size = filter_size
+        self.square_size = square_size
+        self.leakyrelu = torch.nn.LeakyReLU(0.1)
+        self.conv2d = nn.Conv2d(1, 1, filter_size, padding=0, stride = filter_size)
+        self.conv2d.weight = torch.nn.Parameter(param['conv2d.weight'], requires_grad=False)
+        self.conv2d.bias = torch.nn.Parameter(param['conv2d.bias'], requires_grad=False)
+        self.linear_hidden = nn.Linear(square_size ** 2, hidden_size)
+        self.linear_output = nn.Linear(hidden_size, 1)
+
+
+    def forward(self, x):
+        # add hidden layers with relu activation function
+        convolution = (self.conv2d(x)).view(-1, 1, self.square_size**2)
+
+        hidden_output = torch.sigmoid(self.linear_hidden(convolution))
+
+        output = torch.sigmoid(self.linear_output(hidden_output))
+
+        # print("input", x)
+        # print("convolution", convolution)
+        # print("hidden_output", hidden_output)
+        # print("output", output)
+
+        return convolution, hidden_output, output
+
 
 # build model
-model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3, hidden_size = hidden_size)
+model = SupervisedConvNet(filter_size = 3, square_size = 3, hidden_size = hidden_size)
 
 # specify optimizer
 optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay = weight_decay)
