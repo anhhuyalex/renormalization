@@ -9,7 +9,7 @@ import numpy as np
 import sys
 
 class SupervisedConvNet(nn.Module):
-    def __init__(self, filter_size, square_size):
+    def __init__(self, filter_size, square_size, hidden_size):
         """
         Arguments:
         filter_size ~ size of the convolution kernel (3 x 3)
@@ -20,16 +20,24 @@ class SupervisedConvNet(nn.Module):
         self.square_size = square_size
         self.leakyrelu = torch.nn.LeakyReLU(0.1)
         self.conv2d = nn.Conv2d(1, 1, filter_size, padding=0, stride = filter_size)
-        self.linear1 = nn.Linear(filter_size ** 2, 1)
+        self.linear_hidden = nn.Linear(filter_size ** 2, hidden_size)
+        self.linear_output = nn.Linear(hidden_size, 1)
 
 
     def forward(self, x):
         # add hidden layers with relu activation function
-        layer1 = torch.tanh(self.conv2d(x))
-        reshape = layer1.view(-1, 1, self.square_size**2)
-        layer2 = torch.tanh(self.linear1(reshape))
+        convolution = torch.tanh(self.conv2d(x)).view(-1, 1, self.square_size**2)
 
-        return reshape, layer2#, layer3
+        hidden_output = torch.sigmoid(self.linear_hidden(convolution))
+
+        output = torch.sigmoid(self.linear_output(hidden_output))
+
+        # print("input", x)
+        # print("convolution", convolution)
+        # print("hidden_output", hidden_output)
+        # print("output", output)
+
+        return convolution, hidden_output, output
 
 class IsingDataset(Dataset):
     def __init__(self, data, label):
