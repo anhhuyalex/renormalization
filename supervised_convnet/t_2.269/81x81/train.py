@@ -82,7 +82,7 @@ for epoch in range(1, n_epochs+1):
         data = data.unsqueeze(1).type('torch.FloatTensor')
         target = target.type('torch.FloatTensor')
         optimizer.zero_grad()
-        output = model(data)[-1].view(-1).squeeze(1)
+        output = model(data)[-1].view(-1)
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
@@ -101,7 +101,7 @@ for epoch in range(1, n_epochs+1):
         for batch_idx, (data, target) in enumerate(validate_loader):
             data = data.unsqueeze(1).type('torch.FloatTensor')
             target = target.type('torch.FloatTensor')
-            output = model(data)[-1].view(-1).squeeze(1)
+            output = model(data)[-1].view(-1)
             validate_accuracy += (torch.abs(target - output) < 0.5).sum().item() / batch_size
         print('Epoch: {} \t Train Loss: {} \t Validate_Accuracy: {}'.format(
             epoch,

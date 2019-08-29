@@ -111,7 +111,7 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
             data = data.unsqueeze(1).type('torch.FloatTensor')
             target = target.type('torch.FloatTensor')
             optimizer.zero_grad()
-            output = model(data)
+            output = model(data).squeeze(1)
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
@@ -131,8 +131,7 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
         for batch_idx, (data, target) in enumerate(validate_loader):
             data = data.unsqueeze(1).type('torch.FloatTensor')
             target = target.type('torch.FloatTensor')
-            output = model(data)
-            output = output.squeeze(1)
+            output = model(data).squeeze(1)
             validate_accuracy += (torch.abs(target - output) < 0.5).sum().item()
         print('Epoch: {} \t Train Loss: {} \t Validate_Accuracy: {}'.format(
             epoch,
