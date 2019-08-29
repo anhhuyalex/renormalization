@@ -49,7 +49,7 @@ def train_evaluate(parameterization):
 
 
 
-    pool = mp.Pool(processes=5)
+    pool = mp.Pool(processes=4)
     # accuracy = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
     #             weight_decay = weight_decay,
     #             betas0 = 1-betas0, betas1 = 0.99)[0]
@@ -62,6 +62,8 @@ def train_evaluate(parameterization):
     output = [p.get()[0] for p in results] # only 1st argument is last accuracy
     mean = np.mean(output)
     SEM = np.std(output)/np.sqrt(5)
+    pool.close() # no more tasks
+    pool.join()  # wrap up current tasks
     return mean, SEM
 
 ax.create_experiment(
