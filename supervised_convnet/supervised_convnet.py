@@ -9,7 +9,9 @@ import numpy as np
 import sys
 
 class SupervisedConvNet(nn.Module):
-    def __init__(self, filter_size, square_size, hidden_size):
+    def __init__(self, filter_size, square_size, hidden_size, num_hidden_layers,
+                first_activation = "tanh", activation_func = "sigmoid",
+                out_channels = 1):
         """
         Arguments:
         filter_size ~ size of the convolution kernel (3 x 3)
@@ -18,26 +20,41 @@ class SupervisedConvNet(nn.Module):
         super(SupervisedConvNet, self).__init__()
         self.filter_size = filter_size
         self.square_size = square_size
-        self.leakyrelu = torch.nn.LeakyReLU(0.1)
-        self.conv2d = nn.Conv2d(1, 1, filter_size, padding=0, stride = filter_size)
-        self.linear_hidden = nn.Linear(square_size ** 2, hidden_size)
+        self.hidden_size = hidden_size
+        self.out_channels = out_channels
+        if first_activation == "tanh":
+            self.first_activation = torch.tanh
+        elif first_activation == "relu":
+            self.first_activation = torch.nn.LeakyReLU(0.1)
+        if activation_func == "sigmoid":
+            self.activation_func = torch.sigmoid
+        elif activation_func == "relu":
+            self.activation_func = torch.tanh
+        self.conv1 = nn.Conv2d(1, out_channels, filter_size, padding=0, stride = filter_size)
+        self.first_linear = nn.Linear(self.out_channels * square_size ** 2, hidden_size)
+        hidden_layer = [nn.Linear(hidden_size, hidden_size) for _ in range(num_hidden_layers)]
+        self.linear_hidden = nn.ModuleList(hidden_layer)
         self.linear_output = nn.Linear(hidden_size, 1)
+
+        self.trace = []
+
 
 
     def forward(self, x):
         # add hidden layers with relu activation function
-        convolution = torch.tanh(self.conv2d(x)).view(-1, 1, self.square_size**2)
 
-        hidden_output = torch.sigmoid(self.linear_hidden(convolution))
-
-        output = torch.sigmoid(self.linear_output(hidden_output))
-
+        x = self.first_activation(self.conv1(x)).view(-1, 1, self.out_channels * self.square_size**2)
+        x = self.activation_func(self.first_linear(x))
+        for linear in self.linear_hidden:
+            x = self.activation_func(linear(x))
+        x = torch.sigmoid(self.linear_output(x))
+        x = x.squeeze(1)
         # print("input", x)
         # print("convolution", convolution)
         # print("hidden_output", hidden_output)
         # print("output", output)
 
-        return convolution, hidden_output, output
+        return x
 
 class IsingDataset(Dataset):
     def __init__(self, data, label):
@@ -82,3 +99,11 @@ def get_param_grad_histogram(model):
         if param.requires_grad:
             param_grad_histogram.extend(param.data.reshape(-1))
     return np.array(param_grad_histogram)
+
+if __name__ == "__main__":
+    hidden_size = 10
+    out_channels = 1
+    num_hidden_layers = 3
+    model = SupervisedConvNet(filter_size = 3, square_size = 3, \
+            hidden_size = hidden_size, out_channels = out_channels, num_hidden_layers = num_hidden_layers)
+    print_model_parameters(model)
