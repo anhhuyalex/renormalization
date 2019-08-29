@@ -7,16 +7,18 @@ from torch.utils.data.dataset import Dataset
 import math
 import numpy as np
 import sys
+import time
 
 class SupervisedConvNet(nn.Module):
     def __init__(self, filter_size, square_size, hidden_size, num_hidden_layers,
                 first_activation = "tanh", activation_func = "sigmoid",
-                out_channels = 1):
+                out_channels = 1, seed = time.time()):
         """
         Arguments:
         filter_size ~ size of the convolution kernel (3 x 3)
         square size ~ how many strides of convolution in the input
         """
+        torch.manual_seed(seed)
         super(SupervisedConvNet, self).__init__()
         self.filter_size = filter_size
         self.square_size = square_size

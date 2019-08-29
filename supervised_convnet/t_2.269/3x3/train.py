@@ -122,36 +122,35 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
 
 
 
-
-
         # print avg training statistics
         # train_loss = train_loss/len(train_loader)
-        if epoch % 1 == 0:
-            validate_accuracy = 0
-            for batch_idx, (data, target) in enumerate(validate_loader):
-                data = data.unsqueeze(1).type('torch.FloatTensor')
-                target = target.type('torch.FloatTensor')
-                output = model(data)
-                output = output.squeeze(1)
-                validate_accuracy += (torch.abs(target - output) < 0.5).sum().item()
-            print('Epoch: {} \t Train Loss: {} \t Validate_Accuracy: {}'.format(
-                epoch,
-                train_loss/len(train_loader),
-                validate_accuracy/validate_size,
-                ))
 
-            if validate_accuracy/validate_size > best_validate_accuracy:
-                best_validate_accuracy = validate_accuracy/validate_size
+    # Validation phase
+    validate_accuracy = 0
+    if epoch % 1 == 0:
+        for batch_idx, (data, target) in enumerate(validate_loader):
+            data = data.unsqueeze(1).type('torch.FloatTensor')
+            target = target.type('torch.FloatTensor')
+            output = model(data)
+            output = output.squeeze(1)
+            validate_accuracy += (torch.abs(target - output) < 0.5).sum().item()
+        print('Epoch: {} \t Train Loss: {} \t Validate_Accuracy: {}'.format(
+            epoch,
+            train_loss/len(train_loader),
+            validate_accuracy/validate_size,
+            ))
 
-            if epoch == 1:
-                first_epoch_validate_accuracy = validate_accuracy/validate_size
-            # supervised_convnet.print_model_gradient(model)
+        # if validate_accuracy/validate_size > best_validate_accuracy:
+        #     best_validate_accuracy = validate_accuracy/validate_size
+
+
+        # supervised_convnet.print_model_gradient(model)
 
         # writer.add_scalar("validation_accuracy", validate_accuracy/len(train_loader))
         # print("trainLoss", train_loss/len(train_loader))
         # print("accuracy", accuracy/len(train_loader))
-        model_params = supervised_convnet.get_param_histogram(model)
-        model_grad = supervised_convnet.get_param_grad_histogram(model)
+        # model_params = supervised_convnet.get_param_histogram(model)
+        # model_grad = supervised_convnet.get_param_grad_histogram(model)
         # writer.add_scalar("training_accuracy", accuracy/len(train_loader), global_step)
         # # writer.add_scalar("validate_accuracy", validate_accuracy/len(validate_loader), global_step)
         # writer.add_scalar("parameter_mean", np.mean(model_params), global_step)
@@ -161,11 +160,11 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
         # writer.add_histogram("parameter_histogram", model_params, global_step)
         # writer.add_histogram("parameter_grad_histogram", model_grad, global_step)
 
-    print("model parameters! \n")
-    supervised_convnet.print_model_parameters(model)
+    # print("model parameters! \n")
+    # supervised_convnet.print_model_parameters(model)
 
     # return last accuracy
-    return validate_accuracy/validate_size, model.state_dict(), first_epoch_validate_accuracy
+    return validate_accuracy/validate_size, model.state_dict()
 # writer.add_graph(model, data)
 # writer.close()
 # patience = 0
