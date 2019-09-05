@@ -54,10 +54,10 @@ class SupervisedConvNet(nn.Module):
                       [1.0, 1.0, 1.0]]]])/8
             # param['conv2d.bias'] = torch.tensor([0.0])
         elif center == "pre_trained":
-            param['conv2d.weight'] = torch.tensor([[[[-0.1530, -0.0738, -0.1771],
-          [-0.0629,  0.0113, -0.0665],
-          [-0.1553, -0.0718, -0.1509]]]])
-            param['conv2d.bias'] = torch.tensor([0.8439])
+            param['conv2d.weight'] = torch.tensor([[[[-0.1137, -0.0469, -0.0950],
+          [-0.0510,  0.0144, -0.0559],
+          [-0.1285, -0.0525, -0.1073]]]])
+            param['conv2d.bias'] = torch.tensor([0.0147])
             self.conv1.bias = torch.nn.Parameter(param['conv2d.bias'], requires_grad=False)
         self.conv1.weight = torch.nn.Parameter(param['conv2d.weight'], requires_grad=False)
 

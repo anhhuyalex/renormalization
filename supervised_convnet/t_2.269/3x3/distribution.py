@@ -5,9 +5,9 @@ import supervised_convnet
 import pickle
 from collections import defaultdict
 import numpy as np
+import time
 
-
-mode = "analysis"
+mode = "run"
 
 """
 Default activation function: sigmoid
@@ -47,15 +47,15 @@ if mode == "run":
                 results = pickle.load(handle)
         except:
             results = []
+        results = []
         first_epoch_validate_accuracy_list = []
-        for _ in range(1000):
+        for _ in range(500):
             model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3, \
                     hidden_size = hidden_size, out_channels = out_channels,
                     first_activation = "tanh", activation_func = "relu",
-                    num_hidden_layers = num_hidden_layers)
-            best_val_acc, param_dict, first_epoch_validate_accuracy = train.trainer(model = model)
+                    num_hidden_layers = num_hidden_layers, seed = time.time() + _)
+            best_val_acc, param_dict = train.trainer(model = model)
             results.append(best_val_acc)
-            first_epoch_validate_accuracy_list.append(first_epoch_validate_accuracy)
             conv_params["weight"].append(param_dict["conv1.weight"])
             conv_params["bias"].append(param_dict["conv1.bias"])
     elif run_mode == "frozen_convolution_no_center":
@@ -84,12 +84,14 @@ if mode == "run":
                 results = pickle.load(handle)
         except:
             results = []
+        results = []
         for _ in range(500):
             model = frozen.SupervisedConvNet(filter_size = 3, square_size = 3, \
                     hidden_size = hidden_size, out_channels = out_channels,
                     center = "omit", first_activation = "tanh",
                     activation_func = "relu", num_hidden_layers = num_hidden_layers)
-            best_val_acc, param_dict, first_epoch_validate_accuracy = train.trainer(model = model)
+            best_val_acc, param_dict = train.trainer(model = model)
+            # conv_params["weight"].append(param_dict["conv1.weight"])
             conv_params["bias"].append(param_dict["conv1.bias"])
             results.append(best_val_acc)
     elif run_mode == "frozen_convolution_with_center":
@@ -134,20 +136,20 @@ if mode == "run":
                 results = pickle.load(handle)
         except:
             results = []
+        results = []
         first_epoch_validate_accuracy_list = []
         for _ in range(500):
             model = frozen.SupervisedConvNet(filter_size = 3, square_size = 3, \
                     hidden_size = hidden_size, out_channels = out_channels,
                     center = "pre_trained", first_activation = "tanh",
                     activation_func = "relu", num_hidden_layers = num_hidden_layers)
-            best_val_acc, param_dict, first_epoch_validate_accuracy = train.trainer(model = model)
-            first_epoch_validate_accuracy_list.append(first_epoch_validate_accuracy)
+            best_val_acc, param_dict = train.trainer(model = model, lr = 0.005)
             results.append(best_val_acc)
     elif run_mode == "unfrozen_convolution_many_channels":
         """
         check to make sure that out_channels below is not 1
         """
-        out_channels = 3
+        out_channels = 2
         filename = "unfrozen_convolution_{}_channels.pl".format(out_channels)
         print("filename", filename)
         try:
@@ -158,14 +160,17 @@ if mode == "run":
         for _ in range(500):
             model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3,
                     hidden_size = hidden_size, out_channels = out_channels,
-                    activation_func = "sigmoid", num_hidden_layers = num_hidden_layers)
+                    activation_func = "sigmoid", num_hidden_layers = num_hidden_layers,
+                    seed = time.time() + _)
             best_val_acc, param_dict, first_epoch_validate_accuracy = train.trainer(model = model)
             results.append(best_val_acc)
+            conv_params["weight"].append(param_dict["conv1.weight"])
+            conv_params["bias"].append(param_dict["conv1.bias"])
     elif run_mode == "unfrozen_convolution_many_channels_relu":
         """
         check to make sure that out_channels below is not 1
         """
-        out_channels = 3
+        out_channels = 2
         filename = "unfrozen_convolution_{}_channels_relu.pl".format(out_channels)
         print("filename", filename)
         try:
@@ -176,9 +181,12 @@ if mode == "run":
         for _ in range(500):
             model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3,
                     hidden_size = hidden_size, out_channels = out_channels,
-                    activation_func = "relu", num_hidden_layers = num_hidden_layers)
-            best_val_acc, param_dict, first_epoch_validate_accuracy = train.trainer(model = model)
+                    first_activation = "tanh", activation_func = "relu",
+                    num_hidden_layers = num_hidden_layers, seed = time.time() + _)
+            best_val_acc, param_dict = train.trainer(model = model)
             results.append(best_val_acc)
+            conv_params["weight"].append(param_dict["conv1.weight"])
+            conv_params["bias"].append(param_dict["conv1.bias"])
     elif run_mode == "unfrozen_convolution_many_channel_many_hidden":
         """
         check to make sure that out_channels, num_hidden_layers above is not 1
@@ -200,9 +208,9 @@ if mode == "run":
 
     new_results = {}
     new_results["best_val_acc_hist"] = results
-    # new_results["conv_params"] = conv_params
-    # new_results["annotation"] = "bias + weights histogram saved"
-    new_results["first_epoch_validate_accuracy_list"] = first_epoch_validate_accuracy_list
+    new_results["conv_params"] = conv_params
+    new_results["annotation"] = "bias + weights histogram saved"
+    # new_results["first_epo    ch_validate_accuracy_list"] = first_epoch_validate_accuracy_list
     with open(filename, "wb") as handle:
         pickle.dump(new_results, handle, protocol = pickle.HIGHEST_PROTOCOL)
 elif mode == "analysis":

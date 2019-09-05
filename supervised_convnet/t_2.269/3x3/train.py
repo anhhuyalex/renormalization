@@ -20,7 +20,7 @@ print("Correlated", correlated_data[0])
 
 data = np.vstack((uncorrelated_data, correlated_data))
 label = np.hstack((np.zeros(10000), np.ones(10000)))
-X_train, X_test, y_train, y_test = train_test_split(data, label, test_size=0.33, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(data, label, test_size=0.33)
 # raise ValueError
 
 # Create training and test dataloaders
@@ -91,7 +91,7 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
 
     validate_isingdataset = supervised_convnet.IsingDataset(X_train[-validate_size:], y_train[-validate_size:])
     validate_loader = torch.utils.data.DataLoader(validate_isingdataset, batch_size=batch_size, num_workers=num_workers, shuffle=True)
-    supervised_convnet.print_model_parameters(model)
+    # supervised_convnet.print_model_parameters(model)
 
     global_step = 0
     first_epoch_validate_accuracy = 0
@@ -159,8 +159,8 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
         # writer.add_histogram("parameter_histogram", model_params, global_step)
         # writer.add_histogram("parameter_grad_histogram", model_grad, global_step)
 
-    # print("model parameters! \n")
-    # supervised_convnet.print_model_parameters(model)
+    print("model parameters! \n")
+    supervised_convnet.print_model_parameters(model)
 
     # return last accuracy
     return validate_accuracy/validate_size, model.state_dict()
