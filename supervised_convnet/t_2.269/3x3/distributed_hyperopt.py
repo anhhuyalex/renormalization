@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 import pickle
-
+import ray
 
 from ax import RangeParameter, ParameterType
 from ax.service.ax_client import AxClient
@@ -19,13 +19,25 @@ import train, frozen
 # Parameters
 num_hidden_layers = 1
 out_channels = 1
-num_workers = 5
+num_workers = 4
 run_mode =  sys.argv[1]
 n_loops = 3000
 save_loop = min(n_loops, 10)
+use_cuda = True
 
+# Start Ray.
+ray.init()
+#ray.init(num_gpus=1)
+
+# GPU for use in colab
+def model_to_cuda(model):
+    if use_cuda and torch.cuda.is_available():
+        model = model.cuda()
+    return model
+
+@ray.remote(num_gpus = 1/num_workers)
 def init_model_and_train(hidden_size, batch_size, train_size, n_epochs, lr, weight_decay,
-            betas0, betas1, seed):
+            betas0, betas1, seed, use_cuda):
     # Parameters
     num_hidden_layers = 1
     out_channels = 1
@@ -36,39 +48,43 @@ def init_model_and_train(hidden_size, batch_size, train_size, n_epochs, lr, weig
                 hidden_size = hidden_size, out_channels = out_channels,
                 first_activation = "tanh", activation_func = "relu",
                 num_hidden_layers = num_hidden_layers, seed = seed)
+        model = model_to_cuda(model)
         results = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
                     weight_decay = weight_decay,
-                    betas0 = 1-betas0, betas1 = 1-betas1)
+                    betas0 = 1-betas0, betas1 = 1-betas1, use_cuda = use_cuda)
     elif run_mode == "frozen_convolution_no_center_relu":
         model = frozen.SupervisedConvNet(filter_size = 3, square_size = 3, \
                 hidden_size = hidden_size, out_channels = out_channels,
                 center = "omit", first_activation = "tanh",
                 activation_func = "relu", num_hidden_layers = num_hidden_layers)
+        model = model_to_cuda(model)
         results = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
                     weight_decay = weight_decay,
-                    betas0 = 1-betas0, betas1 = 1-betas1)
+                    betas0 = 1-betas0, betas1 = 1-betas1, use_cuda = use_cuda)
     elif run_mode == "frozen_convolution_pretrained_relu":
         model = frozen.SupervisedConvNet(filter_size = 3, square_size = 3, \
                 hidden_size = hidden_size, out_channels = out_channels,
                 center = "pre_trained", first_activation = "tanh",
                 activation_func = "relu", num_hidden_layers = num_hidden_layers)
+        model = model_to_cuda(model)
         results = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
                     weight_decay = weight_decay,
-                    betas0 = 1-betas0, betas1 = 1-betas1)
+                    betas0 = 1-betas0, betas1 = 1-betas1, use_cuda = use_cuda)
     elif run_mode == "unfrozen_convolution_2_channels":
         out_channels = 2
         model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3,
                 hidden_size = hidden_size, out_channels = out_channels,
                 first_activation = "tanh", activation_func = "relu",
                 num_hidden_layers = num_hidden_layers, seed = seed)
+        model = model_to_cuda(model)
         results = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
                     weight_decay = weight_decay,
-                    betas0 = 1-betas0, betas1 = 1-betas1)
+                    betas0 = 1-betas0, betas1 = 1-betas1, use_cuda = use_cuda)
     return (results[0])
 
 
 
-def train_evaluate(parameterization):
+def train_evaluate(parameterization, use_cuda = use_cuda):
     # parameters
     batch_size = parameterization["batch_size"]
     train_size = parameterization["train_size"]
@@ -78,16 +94,30 @@ def train_evaluate(parameterization):
     betas0 = parameterization["betas0"]
     betas1 = parameterization["betas1"]
     hidden_size = 10
+    use_cuda = use_cuda
 
     results = []
-    for seed in range(num_workers):
-        results.append(init_model_and_train(hidden_size, batch_size, train_size,
-        n_epochs, lr, weight_decay, betas0, betas1,
-        time.time() + seed))
+    # Start 4 tasks in parallel.
+    for _ in range(4):
+        result_ids = []
+        for seed in range(num_workers):
+            result_ids.append(init_model_and_train.remote(hidden_size, batch_size, train_size,
+            n_epochs, lr, weight_decay, betas0, betas1,
+            time.time() + seed, use_cuda))
+
+        # Wait for the tasks to complete and retrieve the results.
+        # With at least 4 cores, this will take 1 second.
+        results.append(ray.get(result_ids))  # [0, 1, 2, 3]
+
+    # results = []
+    # for seed in range(num_workers):
+    #     results.append(init_model_and_train(hidden_size, batch_size, train_size,
+    #     n_epochs, lr, weight_decay, betas0, betas1,
+    #     time.time() + seed))
 
     print ("results", results)
     mean = np.mean(results)
-    SEM = np.std(results)/np.sqrt(num_workers)
+    SEM = np.std(results)/np.sqrt(len(results))
     # pool.close() # no more tasks
     # pool.join()  # wrap up current tasks
     return {"objective": (mean, SEM)}

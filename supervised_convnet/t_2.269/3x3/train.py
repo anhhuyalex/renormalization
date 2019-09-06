@@ -3,6 +3,8 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
+from torch.autograd import Variable
+
 import sys;
 sys.path.insert(0, "../../")
 import supervised_convnet
@@ -49,8 +51,10 @@ hidden_size = 10
 num_hidden_layers = 3
 # number of convolutional filters SupervisedConvNet
 out_channels = 1
-# adjust learning rate?ss
+# adjust learning rate?
 adjust_learning_rate = False
+# GPU?
+use_cuda = True
 
 # specify loss function
 criterion = nn.BCELoss()
@@ -65,7 +69,7 @@ model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3, \
 
 def trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
             weight_decay = weight_decay, adjust_learning_rate = adjust_learning_rate, amsgrad = amsgrad,
-            betas0 = betas0, betas1 = betas1):
+            betas0 = betas0, betas1 = betas1, use_cuda = use_cuda):
     print("Testing out: ")
     print("batch_size: ", batch_size)
     print("train_size: ", train_size)
@@ -82,7 +86,8 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
 
 
     # specify optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay = weight_decay, amsgrad = amsgrad)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr,
+                        weight_decay = weight_decay, amsgrad = amsgrad, betas=(betas0, betas1))
 
 
     # prepare data loaders
@@ -108,8 +113,13 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
         # train the model #
         ###################
         for batch_idx, (data, target) in enumerate(train_loader):
-            data = data.unsqueeze(1).type('torch.FloatTensor')
-            target = target.type('torch.FloatTensor')
+            data = Variable(data.unsqueeze(1).type('torch.FloatTensor'))
+            target = Variable(target.type('torch.FloatTensor'))
+
+            if use_cuda and torch.cuda.is_available():
+                data = data.cuda()
+                target = target.cuda()
+
             optimizer.zero_grad()
             output = model(data).squeeze(1)
             loss = criterion(output, target)
@@ -129,8 +139,13 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
     validate_accuracy = 0
     if epoch % 1 == 0:
         for batch_idx, (data, target) in enumerate(validate_loader):
-            data = data.unsqueeze(1).type('torch.FloatTensor')
-            target = target.type('torch.FloatTensor')
+            data = Variable(data.unsqueeze(1).type('torch.FloatTensor'))
+            target = Variable(target.type('torch.FloatTensor'))
+
+            if use_cuda and torch.cuda.is_available():
+                data = data.cuda()
+                target = target.cuda()
+
             output = model(data).squeeze(1)
             validate_accuracy += (torch.abs(target - output) < 0.5).sum().item()
         print('Epoch: {} \t Train Loss: {} \t Validate_Accuracy: {}'.format(
