@@ -13,9 +13,11 @@ from torch.utils.tensorboard import SummaryWriter
 import sys
 from sklearn.model_selection import train_test_split
 
+# just want the first 9x9 squares
+uncorrelated_data = np.load("ising27x27coarsegrained_temp2.269_uncorrelated.npy")[:,:9,:9]
+correlated_data = np.load("ising27x27coarsegrained_temp2.269.npy")[:,:9,:9]
+np.set_printoptions(precision=2)
 
-uncorrelated_data = np.load("ising81x81_temp2.269_uncorrelated9x9.npy")
-correlated_data = np.load("../ising81x81_temp2.269.npy")[:10000,:9,:9]
 print("Uncorrelated", uncorrelated_data[10])
 print("Correlated", correlated_data[0])
 
@@ -179,45 +181,6 @@ def trainer(model = model, batch_size = batch_size, train_size = train_size, n_e
 
     # return last accuracy
     return validate_accuracy/validate_size, model.state_dict()
-# writer.add_graph(model, data)
-# writer.close()
-# patience = 0
-# for batch_idx, (data, target) in enumerate(validate_loader):
-#     data = data.unsqueeze(1).type('torch.FloatTensor')#[0].unsqueeze(1)
-#     # print("data", data)
-#     target = target.type('torch.FloatTensor')
-#     optimizer.zero_grad()
-#     output = model(data)[-1].view(-1)
-#     print("data", data[:10])
-#     print("output", (output[:10]))
-#     print("target", target[:10])
-#     v = torch.tensor([[[[-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.],
-#         [-1., -1., -1., -1., -1., -1., -1., -1., -1.]]]])
-#     print("correlated model(v)", model(v))
-#     v = torch.tensor([[[[ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-#         [ 1.,  1.,  1.,  1.,  1.,  1., -1., -1., -1.],
-#         [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.],
-#         [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.],
-#         [-1., -1., -1.,  1.,  1.,  1., -1., -1., -1.]]]])
-#     print("uncorrelated model(v)", model(v))
-#     # loss = criterion(output, target[0])
-#     # print("loss.data", loss.data)
-#     # loss.backward()
-#     patience += 1
-#     if patience > 100:
-#         break
-#
-#
-# torch.save(model.state_dict(), "9x9->3x3.pt")
-    # optimizer.step()
+
+if __name__ == "__main__":
+    trainer()
