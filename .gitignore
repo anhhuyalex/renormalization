@@ -5,3 +5,4 @@ events.out.tf*
 .ipynb_checkpoints/
 runs/
 *.pl
+mnist/MNIST/*
