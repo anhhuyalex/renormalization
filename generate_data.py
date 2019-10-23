@@ -14,6 +14,8 @@ class IsingModel:
         self.J = J # strength of interaction
         self.h = h # strength of magnetic field
 
+        self.num_spin_updates = 0
+
     def initialize(self):
         self.state = np.random.choice([-1, 1], (self.size, self.size))
 
@@ -202,28 +204,36 @@ class IsingModel:
         Runs some steps of the Swendsen Wang algorithm
         """
         for _ in range(steps):
-            if _ % 1 == 0:
-                cluster = self.update_wolff_step()
-                print(len(cluster))
-            else:
-                self.update_wolff_step()
+            cluster = self.update_wolff_step()
+            print(len(cluster))
+
+            self.num_spin_updates += len(cluster)
+
+    def save(self):
+        np.save("ising_samples/ising6561x6561_temp_{}_sample{}.npy".format(2.269185, time.time()), self.state)
+        self.num_spin_updates = 0
 
 ray.init()
+num_times = 1
+num_workers = 4
+N = 2187
 
 @ray.remote
 def generate_data(lattice_file):
-    i = IsingModel(size = 2187*3, T = 2.269185)
-    i.state = np.load(lattice_file)
-    # i.update_wolff(1000)
-    for _ in range(1000):
-        i.update_wolff(100)
-        np.save("ising_samples/ising6561x6561_temp_{}_sample{}.npy".format(2.269185, time.time()), i.state)
+    i = IsingModel(size = N, T = 2.269185)
+    # i.state = np.load(lattice_file)
+    i.initialize()
+    i.update_wolff(1000)
+    for _ in range(100000):
+        i.update_wolff()
+        if i.num_spin_updates >= N ** 2:
+            i.save()
+
     return i.state
 
 # i = generate_data()
 # np.random.randint(100, size=2)
-num_times = 1#2500
-num_workers = 4
+
 # Start Ray.
 # ray.init()
 
@@ -246,15 +256,15 @@ for _ in range(num_times):
     for seed in range(num_workers):
         result_ids.append(generate_data.remote(lattice_files[seed]))
     data.append(ray.get(result_ids))
-data = np.array(data)
-toc = time.time()
-np.set_printoptions(threshold=10000)
-print(data)
-print("shape", data.shape)
-print("time", toc-tic)
+# data = np.array(data)
+# toc = time.time()
+# np.set_printoptions(threshold=10000)
+# print(data)
+# print("shape", data.shape)
+# print("time", toc-tic)
 # i[:100, :100]
 # import matplotlib.pyplot as plt
 # plt.imshow(i)
 # plt.show()
-np.save("ising_samples/ising6561x6561_temp_{}.npy".format(2.269185), data)
+# np.save("ising_samples/ising6561x6561_temp_{}.npy".format(2.269185), data)
 ray.shutdown()
