@@ -14,8 +14,8 @@ import sys
 from sklearn.model_selection import train_test_split
 
 # just want the first 9x9 squares
-uncorrelated_data = np.load("ising27x27coarsegrained_temp2.269_uncorrelated.npy")[:,:9,:9]
-correlated_data = np.load("ising27x27coarsegrained_temp2.269.npy")[:,:9,:9]
+uncorrelated_data = np.load("ising9x9coarsegrained_temp2.269_uncorrelated.npy")[:,:9,:9]
+correlated_data = np.load("ising9x9coarsegrained_temp2.269.npy")[:,:9,:9]
 np.set_printoptions(precision=2)
 
 print("Uncorrelated", uncorrelated_data[10])

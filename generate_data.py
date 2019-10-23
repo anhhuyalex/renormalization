@@ -2,6 +2,10 @@ import numpy as np
 # import matplotlib.pyplot as plt
 # from matplotlib import colors
 from copy import deepcopy
+from orderedset import OrderedSet
+from collections import defaultdict
+import ray
+import time
 
 class IsingModel:
     def __init__(self, size, T = 1, J = 1, h = 0):
@@ -12,7 +16,7 @@ class IsingModel:
 
     def initialize(self):
         self.state = np.random.choice([-1, 1], (self.size, self.size))
-        
+
 
     def update_mh(self, steps = 10000):
         for _ in range(steps):
@@ -108,6 +112,7 @@ class IsingModel:
                             clusters[index].append(rn) #add point to the cluster
                             bonded[rn] = color; #indicate site is no longer available
 
+
         return bonded, clusters, visited;
 
     def run_cluster_epoch(self, nearest_neighbors = 1):
@@ -127,10 +132,11 @@ class IsingModel:
         ## and clusters
         for i in range(Nx):
             for j in range(Ny):
+                print("Nx, Ny", i, j)
                 ## at this point, we do a BFS search to create the cluster
                 bonded, clusters, visited = self.SW_BFS(bonded, clusters, [i,j], beta, nearest_neighbors=1);
 
-
+        print("finish with SW_BFS!")
         for cluster_index in clusters.keys():
             [x0, y0] = np.unravel_index(cluster_index, (Nx,Ny));
             r = np.random.rand();
@@ -142,23 +148,113 @@ class IsingModel:
 
         return self.state;
 
-    def update_SW(self, steps = 30):
+    def update_SW(self, steps = 1):
         """
         Runs some steps of the Swendsen Wang algorithm
         """
         for _ in range(steps):
             self.run_cluster_epoch()
 
+    def update_wolff_step(self):
+        """
+        Runs some steps of the Wolff algorithm
+        """
+        beta = 1 / self.T
+        #Choose random site i.
+        x, y = np.random.randint(self.size, size=2)
+        s_i = self.state[x, y]
+        cluster = {(x, y)} #indices of cluster (implemented as a set)
+        # cluster = OrderedSet([(x, y)])
+        queue = [(x, y)]
+        visited = defaultdict(int)
 
-for temp in [1, 2.269185, 5]:
-    data = []
-    for _ in range(1):
-        i = IsingModel((81), 2.269185)
-        i.initialize()
-        for _ in range(10):
-            i.update_SW(1)
-        data.append(i.state)
-    data = np.array(data)
+        while len(queue) > 0: # Repeat for all elements added to the cluster
+            x, y = queue.pop()
+            # print("len visited", len(visited))
+            # Check neighboring sites
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    x_prime = (x + dx)%(self.size)
+                    y_prime = (y + dy)%(self.size)
+                    if ((x_prime, y_prime) not in cluster) & (visited[(x_prime, y_prime)] == 0) & (x_prime != 0 or y_prime != 0):
+                        candidate = self.state[x_prime, y_prime]
+                        if candidate == s_i:
+                            rand = np.random.rand()
+                            if rand < 1 - np.exp(-2 * beta): # join site j to cluster with probability p = 1 − exp(−2β).
+                                cluster.add((x_prime, y_prime))
+                                queue.append((x_prime, y_prime))
+            visited[(x, y)] = 1
+        # invert all spins in the cluster
+        # cluster = list(cluster)
+        # print("cluster", cluster)
+        # print(tuple(zip(cluster)))
+        # print("cluster", cluster)
+        # print("zipcluster", tuple(zip(*cluster)))
+        self.state[tuple(zip(*cluster))] *= -1
+        # for x, y in cluster:
+        #     self.state[x, y] *= -1
+
+        return cluster
+
+
+    def update_wolff(self, steps = 1):
+        """
+        Runs some steps of the Swendsen Wang algorithm
+        """
+        for _ in range(steps):
+            if _ % 1 == 0:
+                cluster = self.update_wolff_step()
+                print(len(cluster))
+            else:
+                self.update_wolff_step()
+
+ray.init()
+
+@ray.remote
+def generate_data(lattice_file):
+    i = IsingModel(size = 2187*3, T = 2.269185)
+    i.state = np.load(lattice_file)
+    # i.update_wolff(1000)
+    for _ in range(1000):
+        i.update_wolff(100)
+        np.save("ising_samples/ising6561x6561_temp_{}_sample{}.npy".format(2.269185, time.time()), i.state)
+    return i.state
+
+# i = generate_data()
+# np.random.randint(100, size=2)
+num_times = 1#2500
+num_workers = 4
+# Start Ray.
+# ray.init()
+
+# @ray.remote
+# def generate_data():
+#     i = IsingModel(size = 6561, T = 2.269185)
+#     i.initialize()
+#     i.update_SW(steps = 1)
+#     return i.state
+
+import time
+tic = time.time()
+data = []
+for _ in range(num_times):
+    result_ids = []
+    lattice_files = ["ising_samples/ising6561x6561_temp_2.269185_sample1571857139.575895.npy",
+                     "ising_samples/ising6561x6561_temp_2.269185_sample1571854227.0954611.npy",
+                     "ising_samples/ising6561x6561_temp_2.269185_sample1571854112.154505.npy",
+                     "ising_samples/ising6561x6561_temp_2.269185_sample1571854084.229632.npy"]
+    for seed in range(num_workers):
+        result_ids.append(generate_data.remote(lattice_files[seed]))
+    data.append(ray.get(result_ids))
+data = np.array(data)
+toc = time.time()
 np.set_printoptions(threshold=10000)
 print(data)
-# np.save("ising81x81_temp_{}.npy".format(temp), data)
+print("shape", data.shape)
+print("time", toc-tic)
+# i[:100, :100]
+# import matplotlib.pyplot as plt
+# plt.imshow(i)
+# plt.show()
+np.save("ising_samples/ising6561x6561_temp_{}.npy".format(2.269185), data)
+ray.shutdown()
