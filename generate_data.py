@@ -210,7 +210,7 @@ class IsingModel:
             self.num_spin_updates += len(cluster)
 
     def save(self):
-        np.save("ising_samples/ising{}x{}_temp_{}_sample{}.npy".format(self.size, self.size, 2.269185, time.time()), self.state)
+        np.save("ising_samples/ising{}x{}_temp_{}_sample{}.npy".format(self.size, self.size, self.T, time.time()), self.state)
         self.num_spin_updates = 0
 
 ray.init()
@@ -223,10 +223,11 @@ def generate_data(lattice_file):
     i = IsingModel(size = N, T = 2.269185)
     # i.state = np.load(lattice_file)
     i.initialize()
-    i.update_wolff(100)
+    i.update_wolff(1)
     for _ in range(100000):
         i.update_wolff()
-        if i.num_spin_updates >= N ** 2:
+        if i.num_spin_updates >= 10:
+            print("yo i'm saving!")
             i.save()
 
     return i.state
