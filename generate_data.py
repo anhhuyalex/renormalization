@@ -223,11 +223,10 @@ def generate_data(lattice_file):
     i = IsingModel(size = N, T = 2.269185)
     # i.state = np.load(lattice_file)
     i.initialize()
-    i.update_wolff(1)
+    i.update_wolff(100)
     for _ in range(100000):
         i.update_wolff()
-        if i.num_spin_updates >= 10:
-            print("yo i'm saving!")
+        if i.num_spin_updates >= N ** 2:
             i.save()
 
     return i.state
