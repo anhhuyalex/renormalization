@@ -1,5 +1,6 @@
 *.npy
 *.npz
+*tar.xz
 .DS_Store
 events.out.tf*
 *.pyc
