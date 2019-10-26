@@ -1,16 +1,12 @@
-import torch
-import torch.nn as nn
-import torch.utils.data
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 import sys
 
 # Batch size, channels, height, width
 
 # train on 3 x 3
 
-data = np.load("ising81x81_temp2.269.npy")
-# print("data", data[:10])
+data = np.load("../../ising81x81.npz")["array1"]
+print("data", data.shape)
 # Create uncorrelated samples
 uncorrelated_data = []
 
@@ -28,5 +24,5 @@ for _ in range(10000):
 
 uncorrelated_data = np.array(uncorrelated_data)
 # print("uncorrelated_data", uncorrelated_data[0, :20, :20])
-np.save("81x81/ising81x81_temp2.269_uncorrelated81x81.npy", uncorrelated_data)
+np.savez_compressed("81x81/ising81x81_temp2.269_uncorrelated81x81.npz", uncorrelated_data)
 # # print(sample, vertical, horizontal)

@@ -1,4 +1,5 @@
 *.npy
+*.npz
 .DS_Store
 events.out.tf*
 *.pyc

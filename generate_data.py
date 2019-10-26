@@ -220,7 +220,7 @@ N = 2187
 
 @ray.remote
 def generate_data(lattice_file):
-    i = IsingModel(size = N, T = 2.359185)
+    i = IsingModel(size = N, T = 2.459185)
     # i.state = np.load(lattice_file)
     i.initialize()
     i.update_wolff(100)
