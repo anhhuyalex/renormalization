@@ -303,7 +303,7 @@ Tc = 2. / scipy.log(1. + scipy.sqrt(2.))
 print("Tc={}".format(Tc))
 N = 2187 # size of lattice edge
 
-thermalizeSweeps = 0 # number of sweeps to wait for thermalization before calculating correlation averages
+thermalizeSweeps = 10 # number of sweeps to wait for thermalization before calculating correlation averages
 nSweeps = 10000 + thermalizeSweeps # number of roughly independent configurations to generate (plus the thermalize sweeps to throw away)
 
 chains = 4 # 4 independent chains running at once, for efficiency
