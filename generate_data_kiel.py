@@ -316,7 +316,7 @@ fname_template = folder+'/lattice_{:05d}'
 ray.init()
 
 @ray.remote
-def mainrun(t = t, m = m, corr = corr, ising = ising, thermalizeSweeps = thermalizeSweeps,
+def mainrun(t, m = m, corr = corr, ising = ising, thermalizeSweeps = thermalizeSweeps,
             corr_range = corr_range, fname_template = fname_template):
     print(t,end='\r')
     #plt.figure()
@@ -332,7 +332,7 @@ def mainrun(t = t, m = m, corr = corr, ising = ising, thermalizeSweeps = thermal
 
 
 for t in range(nSweeps):
-    mainrun.remote()
+    mainrun.remote(t)
 
 
 # corr = np.array(corr)
