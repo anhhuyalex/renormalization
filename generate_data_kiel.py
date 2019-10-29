@@ -307,6 +307,7 @@ ising = IsingModel(N, T=Tc)
 m = []
 corr = []
 corr_range = range(2,int(N/2))
+chains = 4 # 4 independent chains running at once, for efficiency
 
 folder = 'ising_dat/data_{}_{}'.format(N,int(time.time()))
 os.mkdir(folder)
@@ -316,23 +317,24 @@ fname_template = folder+'/lattice_{:05d}'
 ray.init()
 
 @ray.remote
-def mainrun(t, m = m, corr = corr, ising = ising, thermalizeSweeps = thermalizeSweeps,
+def mainrun(nSweeps = nSweeps, m = m, corr = corr, ising = ising, thermalizeSweeps = thermalizeSweeps,
             corr_range = corr_range, fname_template = fname_template):
-    print(t,end='\r')
-    #plt.figure()
-    #plt.imshow(ising.lattice)
+    for t in range(nSweeps):
+        print(t,end='\r')
+        #plt.figure()
+        #plt.imshow(ising.lattice)
 
-    m.append(np.mean(ising.lattice))
-    corr.append([ising.calculate_correlation(r) for r in corr_range])
-    if t > thermalizeSweeps:
-        np.savez_compressed(fname_template.format(t),ising.lattice)
+        m.append(np.mean(ising.lattice))
+        corr.append([ising.calculate_correlation(r) for r in corr_range])
+        if t > thermalizeSweeps:
+            np.savez_compressed(fname_template.format(t),ising.lattice)
 
-    ising.SweepMetropolis() # run both a Metropolis
-    ising.SweepWolff() # and a Wolf sweep to randomize effectively at large and shorter scales
+        ising.SweepMetropolis() # run both a Metropolis
+        ising.SweepWolff() # and a Wolf sweep to randomize effectively at large and shorter scales
 
 
-for t in range(nSweeps):
-    mainrun.remote(t)
+for t in range(chains):
+    mainrun.remote()
 
 
 # corr = np.array(corr)
