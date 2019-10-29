@@ -1,4 +1,5 @@
 import scipy
+import ray
 
 """
 based on code at http://pages.physics.cornell.edu/~myers/teaching/ComputationalMethods/
@@ -299,9 +300,9 @@ import os
 Tc = 2. / scipy.log(1. + scipy.sqrt(2.))
 print("Tc={}".format(Tc))
 N = 2187 # size of lattice edge
-nSweeps = 10000 # number of roughly independent configurations to generate
-thermalizeSweeps = 10 # number of sweeps to wait for thermalization before calculating correlation averages
 
+thermalizeSweeps = 0 # number of sweeps to wait for thermalization before calculating correlation averages
+nSweeps = 10000 + thermalizeSweeps # number of roughly independent configurations to generate (plus the thermalize sweeps to throw away)
 ising = IsingModel(N, T=Tc)
 m = []
 corr = []
@@ -312,18 +313,28 @@ os.mkdir(folder)
 print('saving to folder {}'.format(folder))
 fname_template = folder+'/lattice_{:05d}'
 
-for t in range(nSweeps):
+ray.init()
+
+@ray.remote
+def mainrun(t = t, m = m, corr = corr, ising = ising, thermalizeSweeps = thermalizeSweeps,
+            corr_range = corr_range, fname_template = fname_template):
     print(t,end='\r')
     #plt.figure()
     #plt.imshow(ising.lattice)
 
     m.append(np.mean(ising.lattice))
     corr.append([ising.calculate_correlation(r) for r in corr_range])
-    np.savez_compressed(fname_template.format(t),ising.lattice)
+    if t > thermalizeSweeps:
+        np.savez_compressed(fname_template.format(t),ising.lattice)
 
     ising.SweepMetropolis() # run both a Metropolis
     ising.SweepWolff() # and a Wolf sweep to randomize effectively at large and shorter scales
 
-corr = np.array(corr)
-corr_avg = np.mean(corr[thermalizeSweeps:],axis=0)
-m = np.array(m)
+
+for t in range(nSweeps):
+    mainrun.remote()
+
+
+# corr = np.array(corr)
+# corr_avg = np.mean(corr[thermalizeSweeps:],axis=0)
+# m = np.array(m)
