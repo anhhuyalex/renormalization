@@ -172,6 +172,7 @@ class IsingModel:
                     set spin lattice[i][j]=1
             else set it to zero
         """
+
         for time in range(nTimes):
             iArr = scipy.random.randint(0, self.N, self.N * self.N)
             jArr = scipy.random.randint(0, self.N, self.N * self.N)
@@ -304,10 +305,7 @@ N = 2187 # size of lattice edge
 
 thermalizeSweeps = 0 # number of sweeps to wait for thermalization before calculating correlation averages
 nSweeps = 10000 + thermalizeSweeps # number of roughly independent configurations to generate (plus the thermalize sweeps to throw away)
-ising = IsingModel(N, T=Tc)
-m = []
-corr = []
-corr_range = range(2,int(N/2))
+
 chains = 4 # 4 independent chains running at once, for efficiency
 
 folder = 'ising_dat/data_{}_{}'.format(N,int(time.time()))
@@ -318,20 +316,26 @@ fname_template = folder+'/lattice_{:05d}'
 ray.init()
 
 @ray.remote
-def mainrun(nSweeps = nSweeps, m = m, corr = corr, ising = ising, thermalizeSweeps = thermalizeSweeps,
+def mainrun(nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps,
             corr_range = corr_range, fname_template = fname_template):
+    ising = IsingModel(N, T=Tc)
+    m = []
+    corr_range = range(2,int(N/2))
+
     for t in range(nSweeps):
         print(t,end='\r')
         #plt.figure()
         #plt.imshow(ising.lattice)
 
-        m.append(np.mean(ising.lattice))
-        corr.append([ising.calculate_correlation(r) for r in corr_range])
+        # m.append(np.mean(ising.lattice))
+        # corr.append([ising.calculate_correlation(r) for r in corr_range])
         if t > thermalizeSweeps:
             np.savez_compressed(fname_template.format(t),ising.lattice)
 
         ising.SweepMetropolis() # run both a Metropolis
         ising.SweepWolff() # and a Wolf sweep to randomize effectively at large and shorter scales
+
+    return ising, corr
 
 result_ids = []
 for t in range(chains):
