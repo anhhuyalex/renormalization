@@ -332,11 +332,14 @@ def mainrun(nSweeps = nSweeps, m = m, corr = corr, ising = ising, thermalizeSwee
         ising.SweepMetropolis() # run both a Metropolis
         ising.SweepWolff() # and a Wolf sweep to randomize effectively at large and shorter scales
 
-
+result_ids = []
 for t in range(chains):
-    mainrun.remote()
+    result_ids.append(mainrun.remote())
 
+results = ray.get(result_ids)
 
 # corr = np.array(corr)
 # corr_avg = np.mean(corr[thermalizeSweeps:],axis=0)
 # m = np.array(m)
+
+ray.shutdown()
