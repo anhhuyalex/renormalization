@@ -1,5 +1,8 @@
 import scipy
 import ray
+import numpy as np
+import time
+import os
 
 """
 based on code at http://pages.physics.cornell.edu/~myers/teaching/ComputationalMethods/
@@ -294,8 +297,6 @@ class IsingModel:
 # All rights reserved.
 # Apache License, Version 2.0
 
-import time
-import os
 
 Tc = 2. / scipy.log(1. + scipy.sqrt(2.))
 print("Tc={}".format(Tc))
