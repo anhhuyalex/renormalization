@@ -316,11 +316,9 @@ fname_template = folder+'/lattice_{:05d}'
 ray.init()
 
 @ray.remote
-def mainrun(nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps,
-            corr_range = corr_range, fname_template = fname_template):
+def mainrun(nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps, fname_template = fname_template):
     ising = IsingModel(N, T=Tc)
     m = []
-    corr_range = range(2,int(N/2))
 
     for t in range(nSweeps):
         print(t,end='\r')
