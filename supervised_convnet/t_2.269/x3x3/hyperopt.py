@@ -19,7 +19,7 @@ import train, frozen
 # Parameters
 num_hidden_layers = 1
 out_channels = 1
-num_workers = 5
+num_workers = 1
 run_mode =  sys.argv[1]
 n_loops = 3000
 save_loop = min(n_loops, 10)
@@ -55,8 +55,8 @@ def init_model_and_train(hidden_size, batch_size, train_size, n_epochs, lr, weig
         results = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
                     weight_decay = weight_decay,
                     betas0 = 1-betas0, betas1 = 1-betas1)
-    elif run_mode == "unfrozen_convolution_2_channels":
-        out_channels = 2
+    elif run_mode == "unfrozen_convolution_3_channels":
+        out_channels = 3
         model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3,
                 hidden_size = hidden_size, out_channels = out_channels,
                 first_activation = "tanh", activation_func = "relu",
@@ -95,12 +95,10 @@ def train_evaluate(parameterization):
 # Initialize client
 ax_client = AxClient()
 try:
-    run_mode = "frozen_convolution_pretrained_relu"
     with open(f"hyperparameters_{run_mode}.pl", "rb") as handle:
         hyper = pickle.load(handle)
     v = hyper["axclient"].copy()
     ax_client = ax_client.from_json_snapshot(v)
-    hyper["best_params"]
 except:
     ax_client.create_experiment(
         parameters=[

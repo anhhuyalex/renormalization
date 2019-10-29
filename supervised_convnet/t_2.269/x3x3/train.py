@@ -14,8 +14,10 @@ import sys
 from sklearn.model_selection import train_test_split
 
 
-uncorrelated_data = np.load("ising81x81_temp2.269_uncorrelated9x9.npy")
-correlated_data = np.load("../ising81x81_temp2.269.npy")[:10000,:9,:9]
+uncorrelated_data = np.load("../x81x81/ising_temp2.269_uncorrelated81x81.npz")['arr_0'][:10000,:9,:9]
+correlated_data = np.load("../../../ising81x81.npz")["array1"][:10000,:9,:9]
+uncorrelated_data = 2*uncorrelated_data - 1 # convert from [0, 1] to [-1, 1]
+correlated_data = 2*correlated_data - 1 # convert from [0, 1] to [-1, 1]
 print("Uncorrelated", uncorrelated_data[10])
 print("Correlated", correlated_data[0])
 

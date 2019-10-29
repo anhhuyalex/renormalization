@@ -50,7 +50,6 @@ if mode == "run":
         except:
             results = []
         results = []
-        first_epoch_validate_accuracy_list = []
         for _ in range(500):
             model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3, \
                     hidden_size = hidden_size, out_channels = out_channels,
