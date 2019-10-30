@@ -303,7 +303,7 @@ Tc = 2. / scipy.log(1. + scipy.sqrt(2.))
 print("Tc={}".format(Tc))
 N = 2187 # size of lattice edge
 
-thermalizeSweeps = 10 # number of sweeps to wait for thermalization before calculating correlation averages
+thermalizeSweeps = 0 # number of sweeps to wait for thermalization before calculating correlation averages
 nSweeps = 10000 + thermalizeSweeps # number of roughly independent configurations to generate (plus the thermalize sweeps to throw away)
 
 chains = 4 # 4 independent chains running at once, for efficiency
@@ -316,7 +316,7 @@ fname_template = folder+'/lattice_{:05d}_chain_{}'
 ray.init()
 
 @ray.remote
-def mainrun(nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps, fname_template = fname_template):
+def mainrun(chain, nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps, fname_template = fname_template):
     ising = IsingModel(N, T=Tc)
     m = []
 
@@ -336,8 +336,8 @@ def mainrun(nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps, fname_templa
     return ising, corr
 
 result_ids = []
-for t in range(chains):
-    result_ids.append(mainrun.remote())
+for chain in range(chains):
+    result_ids.append(mainrun.remote(chain))
 
 results = ray.get(result_ids)
 
