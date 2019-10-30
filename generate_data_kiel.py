@@ -311,7 +311,7 @@ chains = 4 # 4 independent chains running at once, for efficiency
 folder = 'ising_dat/data_{}_{}'.format(N,int(time.time()))
 os.mkdir(folder)
 print('saving to folder {}'.format(folder))
-fname_template = folder+'/lattice_{:05d}'
+fname_template = folder+'/lattice_{:05d}_chain_{}'
 
 ray.init()
 
@@ -328,7 +328,7 @@ def mainrun(nSweeps = nSweeps, thermalizeSweeps = thermalizeSweeps, fname_templa
         # m.append(np.mean(ising.lattice))
         # corr.append([ising.calculate_correlation(r) for r in corr_range])
         if t > thermalizeSweeps:
-            np.savez_compressed(fname_template.format(t),ising.lattice)
+            np.savez_compressed(fname_template.format(t, chain),ising.lattice)
 
         ising.SweepMetropolis() # run both a Metropolis
         ising.SweepWolff() # and a Wolf sweep to randomize effectively at large and shorter scales
