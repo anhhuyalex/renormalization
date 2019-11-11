@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import pickle
+from collections import defaultdict
 
 
 from ax import RangeParameter, ParameterType
@@ -8,7 +9,7 @@ from ax.service.ax_client import AxClient
 from ax.plot.contour import plot_contour
 from ax.plot.trace import optimization_trace_single_method
 from ax.service.managed_loop import optimize
-from ax.utils.notebook.plotting import render, init_notebook_plotting
+# from ax.utils.notebook.plotting import render, init_notebook_plotting
 
 import sys
 import time
@@ -19,11 +20,12 @@ import train, frozen
 # Parameters
 num_hidden_layers = 1
 out_channels = 1
-num_workers = 1
+num_workers = 4
 run_mode =  sys.argv[1]
 n_loops = 3000
 save_loop = min(n_loops, 10)
 
+@ray.remote
 def init_model_and_train(hidden_size, batch_size, train_size, n_epochs, lr, weight_decay,
             betas0, betas1, seed):
     # Parameters
@@ -64,7 +66,7 @@ def init_model_and_train(hidden_size, batch_size, train_size, n_epochs, lr, weig
         results = train.trainer(model = model, batch_size = batch_size, train_size = train_size, n_epochs = n_epochs, lr = lr,
                     weight_decay = weight_decay,
                     betas0 = 1-betas0, betas1 = 1-betas1)
-    return (results[0])
+    return results
 
 
 
@@ -81,16 +83,19 @@ def train_evaluate(parameterization):
 
     results = []
     for seed in range(num_workers):
-        results.append(init_model_and_train(hidden_size, batch_size, train_size,
+        results.append(init_model_and_train.remote(hidden_size, batch_size, train_size,
         n_epochs, lr, weight_decay, betas0, betas1,
         time.time() + seed))
+        
+    results = ray.get(results)  # [0, 1, 2, 3]
 
+    accuracy_list, state_dict = list(zip(*results))  
     print ("results", results)
-    mean = np.mean(results)
-    SEM = np.std(results)/np.sqrt(num_workers)
+    mean = np.mean(accuracy_list)
+    SEM = np.std(accuracy_list)/np.sqrt(num_workers)
     # pool.close() # no more tasks
     # pool.join()  # wrap up current tasks
-    return {"objective": (mean, SEM)}
+    return {"objective": (mean, SEM), "accuracy_list": accuracy_list, "state_dict" : state_dict}
 
 # Initialize client
 ax_client = AxClient()
@@ -156,6 +161,9 @@ except:
         name="Test"
     )
 
+accuracy_list = []  
+conv_params = defaultdict(list)
+
 # print ("axclient",ax_client.experiment.trials )
 # for loop in range(n_loops):
 for loop in range(n_loops):
@@ -165,7 +173,18 @@ for loop in range(n_loops):
     time.sleep(2)
     # parameters["n_epochs"] = 5
      # Local evaluation here can be replaced with deployment to external system.
-    ax_client.complete_trial(trial_index=trial_index, raw_data=train_evaluate(parameters))
+    evaluated = train_evaluate(parameters)
+    ax_client.complete_trial(trial_index=trial_index, raw_data=evaluated["objective"])
+    best_val_accs = evaluated["accuracy_list"]
+    param_dicts = evaluated["state_dict"]
+    accuracy_list.extend(best_val_accs)
+    for param_dict in param_dicts:
+        conv_params["weight"].append(param_dict["conv1.weight"])
+        conv_params["bias"].append(param_dict["conv1.bias"])
+        
+    print("accuracy_list", accuracy_list)
+    print("param_dicts", param_dicts)
+    
     print("Best params", ax_client.get_best_parameters())
     # periodic save
     if loop % save_loop == (save_loop - 1):
@@ -175,6 +194,8 @@ for loop in range(n_loops):
         hyper = {}
         hyper["best_params"] = optim_result
         hyper["axclient"] = ax_client.to_json_snapshot()
+        hyper["best_val_acc_hist"] = accuracy_list
+        hyper["conv_params"] = conv_params
         # print("optim_result", optim_result)
         with open(f"hyperparameters_{run_mode}.pl", "wb") as handle:
             pickle.dump(hyper, handle, protocol = pickle.HIGHEST_PROTOCOL)
