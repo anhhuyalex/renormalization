@@ -61,10 +61,10 @@ use_cuda = True
 criterion = nn.BCELoss()
 
 # tensorboard for tracking
-writer = SummaryWriter(comment="--batch size {}, training set {}, epoch {}, lr {}, \
-                        weight decay {}, hidden_size {}, out_channels {}, num_hidden_layers {}".format(
-                        batch_size, train_size, n_epochs, lr, weight_decay, hidden_size, out_channels, num_hidden_layers
-))
+# writer = SummaryWriter(comment="--batch size {}, training set {}, epoch {}, lr {}, \
+#                         weight decay {}, hidden_size {}, out_channels {}, num_hidden_layers {}".format(
+#                         batch_size, train_size, n_epochs, lr, weight_decay, hidden_size, out_channels, num_hidden_layers
+# ))
 model = supervised_convnet.SupervisedConvNet(filter_size = 3, square_size = 3, \
         hidden_size = hidden_size, out_channels = out_channels, num_hidden_layers = num_hidden_layers)
 
