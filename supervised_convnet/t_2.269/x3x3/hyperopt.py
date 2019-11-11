@@ -2,7 +2,7 @@ import torch
 import numpy as np
 import pickle
 from collections import defaultdict
-
+import ray
 
 from ax import RangeParameter, ParameterType
 from ax.service.ax_client import AxClient
@@ -22,8 +22,10 @@ num_hidden_layers = 1
 out_channels = 1
 num_workers = 4
 run_mode =  sys.argv[1]
-n_loops = 3000
+n_loops = 200
 save_loop = min(n_loops, 10)
+
+ray.init()
 
 @ray.remote
 def init_model_and_train(hidden_size, batch_size, train_size, n_epochs, lr, weight_decay,
@@ -86,11 +88,11 @@ def train_evaluate(parameterization):
         results.append(init_model_and_train.remote(hidden_size, batch_size, train_size,
         n_epochs, lr, weight_decay, betas0, betas1,
         time.time() + seed))
-        
+
     results = ray.get(results)  # [0, 1, 2, 3]
 
-    accuracy_list, state_dict = list(zip(*results))  
-    print ("results", results)
+    accuracy_list, state_dict = list(zip(*results))
+    # print ("results", results)
     mean = np.mean(accuracy_list)
     SEM = np.std(accuracy_list)/np.sqrt(num_workers)
     # pool.close() # no more tasks
@@ -161,7 +163,7 @@ except:
         name="Test"
     )
 
-accuracy_list = []  
+accuracy_list = []
 conv_params = defaultdict(list)
 
 # print ("axclient",ax_client.experiment.trials )
@@ -181,10 +183,10 @@ for loop in range(n_loops):
     for param_dict in param_dicts:
         conv_params["weight"].append(param_dict["conv1.weight"])
         conv_params["bias"].append(param_dict["conv1.bias"])
-        
-    print("accuracy_list", accuracy_list)
-    print("param_dicts", param_dicts)
-    
+
+    # print("accuracy_list", accuracy_list)
+    # print("param_dicts", conv_params)
+
     print("Best params", ax_client.get_best_parameters())
     # periodic save
     if loop % save_loop == (save_loop - 1):
@@ -199,3 +201,5 @@ for loop in range(n_loops):
         # print("optim_result", optim_result)
         with open(f"hyperparameters_{run_mode}.pl", "wb") as handle:
             pickle.dump(hyper, handle, protocol = pickle.HIGHEST_PROTOCOL)
+
+ray.shutdown()

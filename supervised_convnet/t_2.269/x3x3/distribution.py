@@ -133,8 +133,8 @@ if mode == "run":
                     seed = time.time() + _)
             # best_val_acc, param_dict = train.trainer(model = model, batch_size = 968, betas0= 1-0.13209249743733834, betas1= 1-9.581886527012395e-05,
             #                                         lr= 0.0070890201458810925, n_epochs= 250, train_size= 5000, weight_decay= 0.00019488234448160615, use_cuda = use_cuda)
-            best_val_acc, param_dict = train.trainer(model = model, batch_size = 968, betas0= 1-0.13209249743733834, betas1=1- 9.581886527012395e-5,
-                                                    lr= 0.0070890201458810925, n_epochs= 250, train_size= 5000, weight_decay= 0.00019488234448160615, use_cuda = use_cuda)
+            best_val_acc, param_dict = train.trainer(model = model, batch_size = 100, betas0= 1-0.005829686181449713, betas1=1- 1e-5,
+                                                    lr= 0.0006367937647143487, n_epochs= 187, train_size= 5000, weight_decay= 1e-5, use_cuda = use_cuda)
 
             results.append(best_val_acc)
             conv_params["weight"].append(param_dict["conv1.weight"])
@@ -162,8 +162,8 @@ if mode == "run":
                     seed = time.time() + _)
             # best_val_acc, param_dict = train.trainer(model = model, batch_size = 100, betas0= 1-0.03575422958529493, betas1= 1-0.20000000000000004,
             #                                         lr= 0.008603286258853008, n_epochs= 250, train_size= 5000, weight_decay= 1e-05, use_cuda = use_cuda)
-            best_val_acc, param_dict = train.trainer(model = model, batch_size = 3521, betas0= 1-0.20000000000000004, betas1=1- 0.003211923010710316,
-                                                    lr= 0.008499899017388025, n_epochs= 193, train_size= 5000, weight_decay= 0, use_cuda = use_cuda)
+            best_val_acc, param_dict = train.trainer(model = model, batch_size = 1201, betas0= 1-0.12120113670923091, betas1=1- 0.0009899539942182557,
+                                                    lr= 0.0022365183343861653, n_epochs= 198, train_size= 5000, weight_decay= 0.0002855682760021863, use_cuda = use_cuda)
 
             results.append(best_val_acc)
             conv_params["weight"].append(param_dict["conv1.weight"])
