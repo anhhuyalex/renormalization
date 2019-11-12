@@ -4,12 +4,11 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import torch.nn.functional as F
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 import sys;
 sys.path.insert(0, "../../")
 import supervised_convnet
 import numpy as np
-from torch.utils.tensorboard import SummaryWriter
 import sys
 from sklearn.model_selection import train_test_split
 
