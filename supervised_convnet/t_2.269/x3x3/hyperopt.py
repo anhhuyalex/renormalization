@@ -22,8 +22,11 @@ num_hidden_layers = 1
 out_channels = 1
 num_workers = 4
 run_mode =  sys.argv[1]
+lattice_size =  sys.argv[2]
+filename = f"hyperparameters_{run_mode}_for_{lattice_size}.pl"
+print("Saving to", filename)
 n_loops = 200
-save_loop = min(n_loops, 10)
+save_loop = min(n_loops, 2)
 
 ray.init()
 
@@ -102,10 +105,12 @@ def train_evaluate(parameterization):
 # Initialize client
 ax_client = AxClient()
 try:
-    with open(f"hyperparameters_{run_mode}.pl", "rb") as handle:
+    with open(filename, "rb") as handle:
         hyper = pickle.load(handle)
     v = hyper["axclient"].copy()
     ax_client = ax_client.from_json_snapshot(v)
+    accuracy_list = hyper["best_val_acc_hist"]
+    conv_params = hyper["conv_params"]
 except:
     ax_client.create_experiment(
         parameters=[
@@ -162,9 +167,8 @@ except:
         outcome_constraints=None,
         name="Test"
     )
-
-accuracy_list = []
-conv_params = defaultdict(list)
+    accuracy_list = []
+    conv_params = defaultdict(list)
 
 # print ("axclient",ax_client.experiment.trials )
 # for loop in range(n_loops):
@@ -184,7 +188,7 @@ for loop in range(n_loops):
         conv_params["weight"].append(param_dict["conv1.weight"])
         conv_params["bias"].append(param_dict["conv1.bias"])
 
-    # print("accuracy_list", accuracy_list)
+    print("accuracy_list", accuracy_list)
     # print("param_dicts", conv_params)
 
     print("Best params", ax_client.get_best_parameters())
@@ -199,7 +203,7 @@ for loop in range(n_loops):
         hyper["best_val_acc_hist"] = accuracy_list
         hyper["conv_params"] = conv_params
         # print("optim_result", optim_result)
-        with open(f"hyperparameters_{run_mode}.pl", "wb") as handle:
+        with open(filename, "wb") as handle:
             pickle.dump(hyper, handle, protocol = pickle.HIGHEST_PROTOCOL)
 
 ray.shutdown()

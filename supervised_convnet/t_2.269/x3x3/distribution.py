@@ -102,7 +102,7 @@ if mode == "run":
         for _ in range(500):
             model = frozen.SupervisedConvNet(filter_size = 3, square_size = 3, \
                     hidden_size = hidden_size, out_channels = out_channels,
-                    center = "omit", first_activation = "tanh",
+                    center = "pre_trained", first_activation = "tanh",
                     activation_func = "relu", num_hidden_layers = num_hidden_layers)
             model = model_to_cuda(model)
             best_val_acc, param_dict = train.trainer(model = model, batch_size = 5000, betas0=1- 0.10000000000000004, betas1=1-1.0081196321129792e-5,
