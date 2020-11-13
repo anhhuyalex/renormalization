@@ -8,3 +8,4 @@ events.out.tf*
 runs/
 *.pl
 mnist/MNIST/*
+*.pt
