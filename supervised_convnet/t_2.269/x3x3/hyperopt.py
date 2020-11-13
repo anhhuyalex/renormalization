@@ -23,7 +23,7 @@ out_channels = 1
 num_workers = 4
 run_mode =  sys.argv[1]
 lattice_size =  sys.argv[2]
-filename = f"hyperparameters_{run_mode}_for_{lattice_size}.pl"
+filename = f"hyperparameters_{run_mode}_for_{lattice_size}_onelayer.pl"
 print("Saving to", filename)
 n_loops = 200
 save_loop = min(n_loops, 2)
