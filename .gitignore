@@ -9,3 +9,5 @@ runs/
 *.pl
 mnist/MNIST/*
 *.pt
+*.txt
+*.png
