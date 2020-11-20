@@ -11,6 +11,7 @@
 #SBATCH --mem-per-cpu=5G
 #SBATCH --gres=gpu:4
 
+
 # get tunneling info
 XDG_RUNTIME_DIR=""
 port=$(shuf -i8000-9999 -n1)
@@ -38,8 +39,9 @@ localhost:${port}  (prefix w/ https:// if using password)
 # load modules or conda environments here
 # uncomment the following two lines to use your conda environment called notebook_env
 # module load miniconda
-source activate rtsynth
+source activate pytorch_resnet
 
 # DON'T USE ADDRESS BELOW.
 # DO USE TOKEN BELOW
 jupyter-notebook --no-browser --port=${port} --ip=${node}
+
