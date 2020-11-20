@@ -2,7 +2,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --time=4:00:00
+#SBATCH --time=12:00:00
+#SBATCH --partition=gpu
 #SBATCH --job-name=jupyter-notebook
 #SBATCH --output=jupyter-notebook-%J.log
 #SBATCH --mail-type=ALL
