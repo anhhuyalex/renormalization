@@ -8,7 +8,7 @@
 #SBATCH --output=jupyter-notebook-%J.log
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=alexn@minerva.kgi.edu
-#SBATCH --mem-per-cpu=20G
+#SBATCH --mem-per-gpu=20G
 #SBATCH --gres=gpu:4
 
 /usr/bin/time python -u scaling_mi.py
