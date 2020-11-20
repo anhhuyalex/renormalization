@@ -11,3 +11,4 @@ mnist/MNIST/*
 *.pt
 *.txt
 *.png
+jupyter-notebook*
