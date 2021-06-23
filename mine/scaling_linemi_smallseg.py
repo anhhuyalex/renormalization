@@ -9,12 +9,14 @@ from tqdm import tqdm
 from mine.models.layers import ConcatLayer, CustomSequential
 from mine.models.mine import EMALoss, ema, ema_loss
 import dill
+import os
 import gc
+import sys
+from collections import defaultdict
 
-    
-import ray
+# import ray
 
-ray.init()
+# ray.init()
 class Mine(nn.Module):
     def __init__(self, T, loss='mine', alpha=0.01, method=None):
         super().__init__()
@@ -60,8 +62,22 @@ class Mine(nn.Module):
             mi = -self.forward(x, z, z_marg)
         return mi
 
-    def optimize(self, X, Y, iters, batch_size, lr=1e-4, opt=None, 
-                 train_loader = None, schedule = None, iter_mi = 30):
+    def mi_on_eval_set(self, eval_loader):
+        """
+        return MI on evaluation set dataloader
+        """
+        num_batches = 0
+        current_mi = 0
+        for batch, (x, y) in enumerate(eval_loader):
+            current_mi += self.mi(x.float().cuda(), y.float().cuda())
+            num_batches += 1
+        current_mi /= num_batches
+        return current_mi
+    
+    def optimize(self, iters, batch_size, lr=1e-4, opt=None, 
+                 train_loader = None, 
+                 eval_loader = None,
+                 schedule = None, iter_mi = 30):
         best_mi = -1
         if opt is None:
             opt = torch.optim.Adam(self.parameters(), lr=lr)
@@ -78,22 +94,20 @@ class Mine(nn.Module):
             for batch, (x, y) in enumerate(train_loader):
                 opt.zero_grad()
                 loss = self.forward(x.float().cuda(), y.float().cuda())
-                loss.backward()
+                loss.backward(retain_graph=True)
                 opt.step()
 
                 mu_mi -= loss.item()
             #iter_print = iter //  3
             iter_print = 3
-            if iter % (iter_print) == 0:
-                # pass
-                print(f"It {iter} - MI: {mu_mi / batch_size} ")
             
             if iter % (iter_mi) == 0:
-                current_mi = self.mi(torch.Tensor(X).cuda(), torch.Tensor(Y).cuda())
+                current_mi = self.mi_on_eval_set(eval_loader)
                 print(f"It {iter} - Current MI: {current_mi} ")
+                
                 if best_mi < current_mi:
                     best_mi = current_mi
-        final_mi = self.mi(torch.Tensor(X).cuda(), torch.Tensor(Y).cuda())
+        final_mi = self.mi_on_eval_set(eval_loader)
         print(f"Final MI: {final_mi}")
         if best_mi < final_mi:
             best_mi = final_mi
@@ -123,75 +137,85 @@ class AltNet(nn.Module):
         return h2    
 
 class DatasetVar(Dataset):
-    def __init__(self, varX, varY):
-        self.varX = varX
-        self.varY = varY
+    def __init__(self, k, dat, num_batches = 256):
+        self.k = k
+        self.dat = dat
+        self.banksize, self.width = self.dat.shape 
+        self.num_batches = num_batches
         
-        assert len(varX) == len(varY), "X and Y must have equal length"
     def __len__(self):
-        return len(self.varX)
+        return self.banksize
     def __getitem__(self, idx):
-        return self.varX[idx], self.varY[idx]
+        
+        i = np.random.randint(3, self.width - self.k) # avoid left and right boundary for easy slicing
+        X = self.dat[idx,i:(i+self.k)]
+        Y = self.dat[idx,(i-3):i]
+        return X, Y
     
-def get_borders(start, size, boundary):
-    assert 0 < boundary - size, "Size of square must be less than size of lattice"
-    start_x, start_y = start
-    indices = [[], []]
-    for k in range(size):
-        indices[0].append(start_x + k )
-        indices[1].append(start_y)
-    for k in range(1, size):
-        indices[0].append(start_x + size - 1 )
-        indices[1].append(start_y + k )
-    for k in range(size-2, 0, -1):
-        indices[0].append(start_x + k )
-        indices[1].append(start_y + size - 1 )
-    for k in range(size-1, 0, -1):
-        indices[0].append(start_x  )
-        indices[1].append(start_y + k )
-    return indices
-
-
-@ray.remote(num_gpus=1)
-def get_mi_block_size(k):
-    dat = np.load("ising200x200from2187x2187.npy")
-
-    Xlist = []
-    Ylist = []
-    while len(Xlist) < 50000:
-        num = np.random.randint(dat.shape[0])
-        i, j = np.random.randint(1, dat.shape[1] - k, size = 2)
-        inside = dat[num][tuple(get_borders([i, j], k, dat.shape[1]))]
-        outside = dat[num][tuple(get_borders([i-1, j-1], k+2, dat.shape[1]))]
-        Xlist.append(inside)
-        Ylist.append(outside)
-    X = np.array(Xlist).astype(float) 
-    Y = np.array(Ylist).astype(float) 
     
+    
+def get_line_dataset():
+    lattice2187 = glob("../data_2187_1571810501/lattice_*")
+    dataset = []
+    for _ in range(1000):
+        dat = np.load(np.random.choice(lattice2187))['arr_0']
+        i = np.random.choice(dat.shape[0], size=np.random.randint(1, 20), replace=False)
+        dataset.append(dat[i])
+        if _ % 100 == 0:
+            print(_)
+            del dat
+            gc.collect()
+    dataset = np.vstack(dataset)
+    print(dataset.shape)
+    return dataset
+
+    
+def compute_linemi(k, random_loc = True, line_dataset_fpath = "isinglinefrom2187x2187.npy"):
+    dat = np.load(line_dataset_fpath)
+    # compute MI
     mine = Mine(
-        T = AltNet(x_dim =  X.shape[1], y_dim = Y.shape[1]),
+        T = AltNet(x_dim = k, y_dim = 3),
         loss = 'mine' #mine_biased, fdiv
     ).cuda()
     
-    print(X[:5], Y[:5])
-    train_loader = DataLoader(DatasetVar(X, Y), batch_size=512)
-    final_mi, best_mi = mine.optimize(X, Y, iters = 30+k, batch_size = 512,  iter_mi = 2,
-                       train_loader = train_loader, lr = 0.003, 
-                       schedule = {'step_size': int((30+k*1.5)/2), 'gamma': 0.5})
+    
+    train_loader = DataLoader(DatasetVar(k=k, dat=dat, num_batches = 256), batch_size=512)
+    eval_loader = DataLoader(DatasetVar(k=k, dat=dat, num_batches = 20), batch_size=512)
+    final_mi, best_mi = mine.optimize(iters = 150, batch_size = 512,  iter_mi = 2,
+                       train_loader = train_loader,
+                                      eval_loader = eval_loader,
+                                      lr = 0.003, 
+                       schedule = {'step_size': (30+k*2)/2, 'gamma': 0.5})
     return best_mi
-from collections import defaultdict
 
-with open('saved_MI_best_dictionary_4_to_100.pkl', 'rb') as file:
-    mis = dill.load(file)
-for k in range(18, 100):
-    jobs = []
-    for _ in range(4):
-         jobs.append(get_mi_block_size.remote(k))
-    best_mi = ray.get(jobs)
-    
-    print(k, best_mi)
-    mis[k].append(best_mi)
-    with open('saved_MI_best_dictionary_18_to_100.pkl', 'wb') as file:
-        dill.dump(mis, file)
-    
-                                                                  
+if __name__ == "__main__":
+    # if os.path.exists("isinglinefrom2187x2187.npy") == False:
+    #     for i in range(10):
+    #         dataset = get_line_dataset()
+    #         np.save(f"isinglinefrom2187x2187_batch{i}.npy", dataset)
+    #     dat = np.vstack([np.load(path) for path in glob("isingline*")])
+    #     np.save("isinglinefrom2187x2187.npy", dat)
+    # else:
+    #     dat = np.load("isinglinefrom2187x2187.npy")
+    job_num = sys.argv[1]
+    best_mi_dict_savepath = f"smallseg_saved_lineMI_dictionary_randomloc_150iters_job{job_num}.pkl"
+    if os.path.exists(best_mi_dict_savepath) == False:
+        print(f"{best_mi_dict_savepath} does NOT exist!")
+        mis = defaultdict(list)
+    else:
+        print(f"{best_mi_dict_savepath} exists!")
+        with open(best_mi_dict_savepath, 'rb') as file:
+            mis = dill.load(file)
+
+    for _ in range(10):
+        for k in range(100, 200):      
+            print("k", k)
+            jobs = []
+            for _ in range(1):
+                 best_mi = compute_linemi(k, random_loc = True)
+    #         best_mi = ray.get(jobs)
+
+            print(k, best_mi)
+            mis[k].append(best_mi)
+            with open(best_mi_dict_savepath, 'wb') as file:
+                dill.dump(mis, file)

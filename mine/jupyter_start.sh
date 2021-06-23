@@ -1,15 +1,15 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=2
 #SBATCH --time=12:00:00
 #SBATCH --partition=gpu
 #SBATCH --job-name=jupyter-notebook
 #SBATCH --output=jupyter-notebook-%J.log
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=alexn@minerva.kgi.edu
-#SBATCH --mem-per-cpu=5G
-#SBATCH --gres=gpu:4
+#SBATCH --mem-per-cpu=20G
+#SBATCH --gres=gpu:1
 
 
 # get tunneling info
@@ -38,7 +38,7 @@ localhost:${port}  (prefix w/ https:// if using password)
 
 # load modules or conda environments here
 # uncomment the following two lines to use your conda environment called notebook_env
-# module load miniconda
+module load miniconda
 source activate pytorch_resnet
 
 # DON'T USE ADDRESS BELOW.
