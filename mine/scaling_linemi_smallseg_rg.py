@@ -98,15 +98,18 @@ class Mine(nn.Module):
                 opt.step()
 
                 mu_mi -= loss.item()
+                
             #iter_print = iter //  3
             iter_print = 3
-            
+            print("x, y", x.shape, y.shape)
             if iter % (iter_mi) == 0:
                 current_mi = self.mi_on_eval_set(eval_loader)
                 print(f"It {iter} - Current MI: {current_mi} ")
                 
                 if best_mi < current_mi:
                     best_mi = current_mi
+#             print("conv_4", self.T.state_dict()['conv_4.bias'])
+#             print("conv_1", self.T.state_dict()['conv_1.bias'])
         final_mi = self.mi_on_eval_set(eval_loader)
         print(f"Final MI: {final_mi}")
         if best_mi < final_mi:
@@ -121,66 +124,81 @@ class AltNet(nn.Module):
     """
     def __init__(self, x_dim, y_dim, H = 100):
         super(AltNet, self).__init__()
+#         self.x_fc1 = nn.Linear(x_dim + y_dim, H)
+#         self.x_fc2 = nn.Linear(H, H)
+#         self.x_fc3 = nn.Linear(H, H)
+        self.x_fc_conv = nn.Linear(30, 1)
+        self.conv_1 = nn.Conv1d(in_channels=1, out_channels=1, kernel_size=3, stride=2)
+        self.conv_2, self.conv_3, self.conv_4 = [nn.Conv1d(in_channels=1, out_channels=1, kernel_size=3, stride=2) \
+                                        for _ in range(3)]
         self.x_fc1 = nn.Linear(x_dim + y_dim, H)
         self.x_fc2 = nn.Linear(H, H)
         self.x_fc3 = nn.Linear(H, H)
         self.x_fc4 = nn.Linear(H, 1)
         
-        
     def forward(self, x, y):
-        xy = torch.cat([x, y], 1).sq # dim [batch, 2]
-        # inter_xy = F.relu(self.x_fc1(xy)) # dim [batch, 100]
-        # inter_xy = inter_xy + F.relu(self.x_fc2(inter_xy)) # dim [batch, 100]
-        # inter_xy = inter_xy + F.relu(self.x_fc3(inter_xy)) # dim [batch, 100]
+#         xy = torch.cat([x, y], 1).unsqueeze(1) # dim [batch, 1, 2187]
+#         xy = F.relu(self.conv_1(xy))
+#         xy = F.relu(self.conv_2(xy))
+#         xy = F.relu(self.conv_3(xy))
+#         xy = F.relu(self.conv_4(xy))
+#         # inter_xy = F.relu(self.x_fc1(xy)) # dim [batch, 100]
+#         # inter_xy = inter_xy + F.relu(self.x_fc2(inter_xy)) # dim [batch, 100]
+#         # inter_xy = inter_xy + F.relu(self.x_fc3(inter_xy)) # dim [batch, 100]
+#         h2 = self.x_fc_conv(xy.view(xy.size(0), -1))
+        xy = torch.cat([x, y], 1) # dim [batch, 2]
+        inter_xy = F.relu(self.x_fc1(xy)) # dim [batch, 100]
+        inter_xy = inter_xy + F.relu(self.x_fc2(inter_xy)) # dim [batch, 100]
+        inter_xy = inter_xy + F.relu(self.x_fc3(inter_xy)) # dim [batch, 100]
         
-#         h2 = (self.x_fc4(inter_xy))
+        h2 = (self.x_fc4(inter_xy))
         return h2    
 
+
 class DatasetVar(Dataset):
-    def __init__(self, k, dat, num_batches = 256):
+    def __init__(self, k, dat, left_start = 5, 
+                 right_end = 1, num_batches = 256):
         self.k = k
         self.dat = dat
         self.banksize, self.width = self.dat.shape 
         self.num_batches = num_batches
+        self.left_start = left_start
+        self.right_end = right_end
         
     def __len__(self):
         return self.banksize
+    
     def __getitem__(self, idx):
+        i = np.random.randint(self.width) # avoid right boundary for easy slicing
         
-        i = np.random.randint(3, self.width - self.k) # avoid left and right boundary for easy slicing
-        X = self.dat[idx,i:(i+self.k)]
-        Y = self.dat[idx,(i-3):i]
+        X = np.take(self.dat[idx], range(i, i+self.k), mode='wrap') 
+        Yleft = np.take(self.dat[idx], range(i-self.left_start, i), mode='wrap') 
+        Yright = np.take(self.dat[idx], range(i+self.k, i+self.k+self.right_end), mode='wrap') 
+#         Y = np.concatenate([self.dat[idx, :i], self.dat[idx, (i + k):]])
+        Y = np.concatenate([Yleft, Yright])
+#         print(Y.shape)
         return X, Y
     
     
     
-def get_line_dataset():
-    lattice2187 = glob("../data_2187_1571810501/lattice_*")
-    dataset = []
-    for _ in range(1000):
-        dat = np.load(np.random.choice(lattice2187))['arr_0']
-        i = np.random.choice(dat.shape[0], size=np.random.randint(1, 20), replace=False)
-        dataset.append(dat[i])
-        if _ % 100 == 0:
-            print(_)
-            del dat
-            gc.collect()
-    dataset = np.vstack(dataset)
-    print(dataset.shape)
-    return dataset
+
 
     
-def compute_linemi(k, random_loc = True, line_dataset_fpath = "isinglinefrom2187x2187.npy"):
+def compute_linemi(k, left_start, right_end, random_loc = True, line_dataset_fpath = "isinglinefrom2187x2187.npy"):
     dat = np.load(line_dataset_fpath)
     # compute MI
     mine = Mine(
-        T = AltNet(x_dim = k, y_dim = 3),
+        T = AltNet(x_dim = k, y_dim = left_start+right_end),
         loss = 'mine' #mine_biased, fdiv
     ).cuda()
     
     
-    train_loader = DataLoader(DatasetVar(k=k, dat=dat, num_batches = 256), batch_size=512)
-    eval_loader = DataLoader(DatasetVar(k=k, dat=dat, num_batches = 20), batch_size=512)
+    train_loader = DataLoader(DatasetVar(k=k, dat=dat, left_start = left_start, 
+                                         right_end = right_end,
+                                         num_batches = 256), batch_size=512)
+    eval_loader = DataLoader(DatasetVar(k=k, dat=dat, left_start = left_start, 
+                                        right_end = right_end,
+                                        num_batches = 20), batch_size=512)
     final_mi, best_mi = mine.optimize(iters = 150, batch_size = 512,  iter_mi = 2,
                        train_loader = train_loader,
                                       eval_loader = eval_loader,
@@ -198,7 +216,7 @@ if __name__ == "__main__":
     # else:
     #     dat = np.load("isinglinefrom2187x2187.npy")
     job_num = sys.argv[1]
-    best_mi_dict_savepath = f"smallseg_saved_lineMI_dictionary_randomloc_150iters_job{job_num}.pkl"
+    best_mi_dict_savepath = f"k=5_rightend_rg_smallseg_saved_lineMI_dictionary_randomloc_150iters_job{job_num}.pkl"
     if os.path.exists(best_mi_dict_savepath) == False:
         print(f"{best_mi_dict_savepath} does NOT exist!")
         mis = defaultdict(list)
@@ -207,15 +225,16 @@ if __name__ == "__main__":
         with open(best_mi_dict_savepath, 'rb') as file:
             mis = dill.load(file)
 
-    for _ in range(10):
-        for k in range(100, 200):      
-            print("k", k)
-            jobs = []
-            for _ in range(1):
-                 best_mi = compute_linemi(k, random_loc = True)
-    #         best_mi = ray.get(jobs)
+    for _ in range(100):
+        for k in range(5, 6):      
+            for right_end in range(20, 100):
+                print("k", k, "right_end", right_end)
+                jobs = []
+                for _ in range(1):
+                     best_mi = compute_linemi(k, left_start = 2000, right_end = right_end, random_loc = True)
+        #         best_mi = ray.get(jobs)
 
-            print(k, best_mi)
-            mis[k].append(best_mi)
-            with open(best_mi_dict_savepath, 'wb') as file:
-                dill.dump(mis, file)
+                print(k, best_mi)
+                mis[k].append(best_mi)
+                with open(best_mi_dict_savepath, 'wb') as file:
+                    dill.dump(mis, file)

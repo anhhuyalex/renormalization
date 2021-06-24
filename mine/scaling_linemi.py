@@ -107,6 +107,7 @@ class Mine(nn.Module):
                 
                 if best_mi < current_mi:
                     best_mi = current_mi
+            print("params", list(self.parameters())
         final_mi = self.mi_on_eval_set(eval_loader)
         print(f"Final MI: {final_mi}")
         if best_mi < final_mi:
@@ -128,12 +129,12 @@ class AltNet(nn.Module):
         
         
     def forward(self, x, y):
-        xy = torch.cat([x, y], 1).sq # dim [batch, 2]
-        # inter_xy = F.relu(self.x_fc1(xy)) # dim [batch, 100]
-        # inter_xy = inter_xy + F.relu(self.x_fc2(inter_xy)) # dim [batch, 100]
-        # inter_xy = inter_xy + F.relu(self.x_fc3(inter_xy)) # dim [batch, 100]
+        xy = torch.cat([x, y], 1) # dim [batch, 2]
+        inter_xy = F.relu(self.x_fc1(xy)) # dim [batch, 100]
+        inter_xy = inter_xy + F.relu(self.x_fc2(inter_xy)) # dim [batch, 100]
+        inter_xy = inter_xy + F.relu(self.x_fc3(inter_xy)) # dim [batch, 100]
         
-#         h2 = (self.x_fc4(inter_xy))
+        h2 = (self.x_fc4(inter_xy))
         return h2    
 
 class DatasetVar(Dataset):
@@ -145,11 +146,28 @@ class DatasetVar(Dataset):
         
     def __len__(self):
         return self.banksize
+    
     def __getitem__(self, idx):
-        
-        i = np.random.randint(3, self.width - self.k) # avoid left and right boundary for easy slicing
+        i = np.random.randint(self.width - self.k) # avoid right boundary for easy slicing
         X = self.dat[idx,i:(i+self.k)]
-        Y = self.dat[idx,(i-3):i]
+        Y = np.concatenate([self.dat[idx, :i], self.dat[idx, (i + k):]])
+        return X, Y
+    
+class DatasetVar(Dataset):
+    def __init__(self, k, dat, num_batches = 256):
+        self.k = k
+        self.dat = dat
+        self.banksize, self.width = self.dat.shape 
+        self.num_batches = num_batches
+        
+    def __len__(self):
+        return self.banksize
+    
+    def __getitem__(self, idx):
+        i = np.random.randint(5, self.width - self.k) # avoid right boundary for easy slicing
+        X = self.dat[idx,i:(i+self.k)]
+#         Y = np.concatenate([self.dat[idx, :i], self.dat[idx, (i + k):]])
+        Y = self.dat[idx,i-5:i]
         return X, Y
     
     
@@ -174,7 +192,7 @@ def compute_linemi(k, random_loc = True, line_dataset_fpath = "isinglinefrom2187
     dat = np.load(line_dataset_fpath)
     # compute MI
     mine = Mine(
-        T = AltNet(x_dim = k, y_dim = 3),
+        T = AltNet(x_dim = k, y_dim = dat.shape[1]-k),
         loss = 'mine' #mine_biased, fdiv
     ).cuda()
     
@@ -198,7 +216,7 @@ if __name__ == "__main__":
     # else:
     #     dat = np.load("isinglinefrom2187x2187.npy")
     job_num = sys.argv[1]
-    best_mi_dict_savepath = f"smallseg_saved_lineMI_dictionary_randomloc_150iters_job{job_num}.pkl"
+    best_mi_dict_savepath = f"saved_lineMI_dictionary_randomloc_150iters_job{job_num}.pkl"
     if os.path.exists(best_mi_dict_savepath) == False:
         print(f"{best_mi_dict_savepath} does NOT exist!")
         mis = defaultdict(list)
@@ -208,7 +226,7 @@ if __name__ == "__main__":
             mis = dill.load(file)
 
     for _ in range(10):
-        for k in range(100, 200):      
+        for k in range(300,450,3):      
             print("k", k)
             jobs = []
             for _ in range(1):
