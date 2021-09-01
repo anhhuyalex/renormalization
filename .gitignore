@@ -12,3 +12,6 @@ mnist/MNIST/*
 *.txt
 *.png
 jupyter-notebook*
+*.pkl
+*.out
+
