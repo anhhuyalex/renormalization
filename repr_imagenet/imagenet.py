@@ -11,8 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-This example is largely adapted from https://github.com/pytorch/examples/blob/master/imagenet/main.py
+"""This example is largely adapted from https://github.com/pytorch/examples/blob/master/imagenet/main.py.
 
 Before you can run this example, you will need to download the ImageNet dataset manually from the
 `official website <http://image-net.org/download>`_ and place it into a folder `path/to/imagenet`.
@@ -28,12 +27,12 @@ or show all options you can change:
 .. code-block: bash
 
     python imagenet.py --help
-
 """
 import os
 from argparse import ArgumentParser, Namespace
 
 import torch
+print(torch.__version__)
 import torch.nn.functional as F
 import torch.nn.parallel
 import torch.optim as optim
@@ -45,9 +44,9 @@ import torchvision.models as models
 import torchvision.transforms as transforms
 
 import pytorch_lightning as pl
-from pl_examples import cli_lightning_logo
 from pytorch_lightning.core import LightningModule
 
+from repr_datasets import patches
 
 class ImageNetLightningModel(LightningModule):
     """
@@ -87,32 +86,60 @@ class ImageNetLightningModel(LightningModule):
         self.batch_size = batch_size
         self.workers = workers
         self.model = models.__dict__[self.arch](pretrained=self.pretrained)
+        self.temperature = 1.0
 
     def forward(self, x):
-        return self.model(x)
+        x = self.model.conv1(x)
+#         x = self.model.bn1(x)
+#         x = self.model.relu(x)
+#         x = self.model.maxpool(x)
+
+#         x = self.model.layer1(x)
+#         x = self.model.layer2(x)
+#         x = self.model.layer3(x)
+#         x = self.model.layer4(x)
+
+#         x = self.model.avgpool(x)
+#         x = torch.flatten(x, 1)
+#         x = self.model.fc(x)
+
+        return x
 
     def training_step(self, batch, batch_idx):
-        images, target = batch
-        output = self(images)
-        loss_train = F.cross_entropy(output, target)
-        acc1, acc5 = self.__accuracy(output, target, topk=(1, 5))
+        # images, target = batch
+        patch_1_embds = self(batch["patch_1"])
+        patch_1_embds = patch_1_embds.view(patch_1_embds.shape[0], -1)
+        patch_2_embds = self(batch["patch_2"])
+        patch_2_embds = patch_2_embds.view(patch_2_embds.shape[0], -1)
+        
+        #print("patch_1_embds", patch_1_embds, patch_1_embds.shape)
+        #print("patch_2_embds", patch_2_embds, patch_2_embds.shape)
+        dot_prods = torch.einsum("bi, bi -> b", patch_1_embds, patch_2_embds) / torch.linalg.vector_norm(patch_1_embds, dim=1) / torch.linalg.vector_norm(patch_2_embds, dim=1) / self.temperature
+        target = batch["target"].float() * 2 - 1
+        if torch.rand(1) < 0.05:
+            print("dot_prods", dot_prods, target)
+        loss_train = -torch.mean(dot_prods * target)
         self.log("train_loss", loss_train, on_step=True, on_epoch=True, logger=True)
-        self.log("train_acc1", acc1, on_step=True, prog_bar=True, on_epoch=True, logger=True)
-        self.log("train_acc5", acc5, on_step=True, on_epoch=True, logger=True)
+        # acc1, acc5 = self.__accuracy(output, target, topk=(1, 5))
+        # self.log("train_acc1", acc1, on_step=True, prog_bar=True, on_epoch=True, logger=True)
+        # self.log("train_acc5", acc5, on_step=True, on_epoch=True, logger=True)
         return loss_train
 
-    def validation_step(self, batch, batch_idx):
+    def eval_step(self, batch, batch_idx, prefix: str):
         images, target = batch
         output = self(images)
         loss_val = F.cross_entropy(output, target)
         acc1, acc5 = self.__accuracy(output, target, topk=(1, 5))
-        self.log("val_loss", loss_val, on_step=True, on_epoch=True)
-        self.log("val_acc1", acc1, on_step=True, prog_bar=True, on_epoch=True)
-        self.log("val_acc5", acc5, on_step=True, on_epoch=True)
+        self.log(f"{prefix}_loss", loss_val, on_step=True, on_epoch=True)
+        self.log(f"{prefix}_acc1", acc1, on_step=True, prog_bar=True, on_epoch=True)
+        self.log(f"{prefix}_acc5", acc5, on_step=True, on_epoch=True)
+
+    def validation_step(self, batch, batch_idx):
+        return self.eval_step(batch, batch_idx, "val")
 
     @staticmethod
     def __accuracy(output, target, topk=(1,)):
-        """Computes the accuracy over the k top predictions for the specified values of k"""
+        """Computes the accuracy over the k top predictions for the specified values of k."""
         with torch.no_grad():
             maxk = max(topk)
             batch_size = target.size(0)
@@ -127,9 +154,12 @@ class ImageNetLightningModel(LightningModule):
                 res.append(correct_k.mul_(100.0 / batch_size))
             return res
 
+    def lambda_schedule(self, epoch):
+        return 0.1 ** (epoch // 30)
+    
     def configure_optimizers(self):
         optimizer = optim.SGD(self.parameters(), lr=self.lr, momentum=self.momentum, weight_decay=self.weight_decay)
-        scheduler = lr_scheduler.LambdaLR(optimizer, lambda epoch: 0.1 ** (epoch // 30))
+        scheduler = lr_scheduler.LambdaLR(optimizer, self.lambda_schedule)
         return [optimizer], [scheduler]
 
     def train_dataloader(self):
@@ -143,45 +173,34 @@ class ImageNetLightningModel(LightningModule):
             ),
         )
 
+        patches_dataset = patches.Patches_ImageNet(train_dataset, patch_size = 7, neighbors_prob = 0.5)
+        
         train_loader = torch.utils.data.DataLoader(
-            dataset=train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.workers
+            dataset=patches_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.workers
         )
         return train_loader
 
-    def val_dataloader(self):
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        val_dir = os.path.join(self.data_path, "val")
-        val_loader = torch.utils.data.DataLoader(
-            datasets.ImageFolder(
-                val_dir,
-                transforms.Compose(
-                    [transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize]
-                ),
-            ),
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.workers,
-        )
-        return val_loader
+#     def val_dataloader(self):
+#         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+#         val_dir = os.path.join(self.data_path, "val")
+#         val_loader = torch.utils.data.DataLoader(
+#             datasets.ImageFolder(
+#                 val_dir,
+#                 transforms.Compose(
+#                     [transforms.Resize(256), transforms.CenterCrop(224), transforms.ToTensor(), normalize]
+#                 ),
+#             ),
+#             batch_size=self.batch_size,
+#             shuffle=False,
+#             num_workers=self.workers,
+#         )
+#         return val_loader
 
-    def test_dataloader(self):
-        return self.val_dataloader()
+#     def test_dataloader(self):
+#         return self.val_dataloader()
 
-    def test_step(self, *args, **kwargs):
-        return self.validation_step(*args, **kwargs)
-
-    def test_epoch_end(self, *args, **kwargs):
-        outputs = self.validation_epoch_end(*args, **kwargs)
-
-        def substitute_val_keys(out):
-            return {k.replace("val", "test"): v for k, v in out.items()}
-
-        outputs = {
-            "test_loss": outputs["val_loss"],
-            "progress_bar": substitute_val_keys(outputs["progress_bar"]),
-            "log": substitute_val_keys(outputs["log"]),
-        }
-        return outputs
+    def test_step(self, batch, batch_idx):
+        return self.eval_step(batch, batch_idx, "test")
 
     @staticmethod
     def add_model_specific_args(parent_parser):  # pragma: no-cover
@@ -246,7 +265,9 @@ def main(args: Namespace) -> None:
 def run_cli():
     parent_parser = ArgumentParser(add_help=False)
     parent_parser = pl.Trainer.add_argparse_args(parent_parser)
-    parent_parser.add_argument("--data-path", metavar="DIR", type=str, help="path to dataset")
+    parent_parser.add_argument("--data-path", metavar="DIR", type=str,
+                               default="/home/an633/project/imagenet/ILSVRC/Data/CLS-LOC",
+                               help="path to dataset")
     parent_parser.add_argument(
         "-e", "--evaluate", dest="evaluate", action="store_true", help="evaluate model on validation set"
     )
@@ -258,5 +279,4 @@ def run_cli():
 
 
 if __name__ == "__main__":
-    cli_lightning_logo()
     run_cli()
