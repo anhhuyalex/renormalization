@@ -15,4 +15,5 @@ jupyter-notebook*
 *.pkl
 *.out
 *.log
+tensornetworks/data
 
