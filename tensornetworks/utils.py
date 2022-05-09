@@ -11,6 +11,7 @@ import pickle
 
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
+
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10):
         super(MLP, self).__init__()
@@ -48,12 +49,12 @@ class MLP(nn.Module):
         return (self.out(x))
     
 class CNN(nn.Module):
-    def __init__(self):
+    def __init__(self, conv1_chans = 6, conv2_chans = 16):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 6, 5)
+        self.conv1 = nn.Conv2d(3, conv1_chans, 5)
         self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        self.conv2 = nn.Conv2d(conv1_chans, conv2_chans, 5)
+        self.fc1 = nn.Linear(conv2_chans * 5 * 5, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
 
@@ -86,6 +87,7 @@ class ShuffledCIFAR10:
             inputs = inputs[:, self.perm].view(IMAGE_CHANNELS, IMAGE_WIDTH, IMAGE_WIDTH)
         return inputs, labels
             
+
 class CIFAR_trainer:
     def __init__(self, data_params = dict(),
                        train_params = dict(batch_size = 4,
@@ -125,7 +127,12 @@ class CIFAR_trainer:
     def initialize_record(self):
         self.record = dict(
             train_loss_prog = [],
-            test_loss = 0.0
+            test_loss = 0.0,
+            print_interval = 5000 // self.train_params['batch_size'],
+            data_params = self.data_params,
+            train_params = self.train_params,
+            model_optim_params = self.model_optim_params,
+            save_params = self.save_params
         )
     def after_iter(self, running_loss):
         self.loss.backward()
@@ -133,19 +140,19 @@ class CIFAR_trainer:
 
         # print statistics
         running_loss += self.loss.item()
-        if self.iter % 2000 == 1999:    # print every 2000 mini-batches
-            self.record["train_loss_prog"].append(running_loss / 2000)
-            print(f'[{self.epoch + 1}, {self.iter + 1:5d}] loss: {running_loss / 2000:.3f}')
+        if self.iter % self.record["print_interval"] == self.record["print_interval"] - 1:    # print every self.record["print_interval"] mini-batches
+            self.record["train_loss_prog"].append(running_loss / self.record["print_interval"])
+            print(f'[{self.epoch + 1}, {self.iter + 1:5d}] loss: {running_loss / self.record["print_interval"]:.3f}', flush=True)
             running_loss = 0.0
         return running_loss
     
     def train(self):
         num_epochs = self.train_params['num_epochs']
-        self.loss_prog = []
         for self.epoch in range(num_epochs):  # loop over the dataset multiple times
 
             running_loss = 0.0
             for self.iter, data in enumerate(self.trainloader, 0):
+
                 # get the inputs; data is a list of [inputs, labels]
                 inputs, labels = data
                 inputs = inputs.cuda()
@@ -185,12 +192,12 @@ class CIFAR_trainer:
     def after_run(self):
         test_loss = self.test()
         self.record["test_loss"] = test_loss
-        fname = f"{self.save_params['save_dir']}/{{self.save_params['exp_name']}}"
+        fname = f"{self.save_params['save_dir']}/{self.save_params['exp_name']}"
         save_file_pickle(fname, self.record)
         
     
 def save_file_pickle(fname, file):
-    with open(fname, 'wb') as f:
+    with open(f"{fname}.pkl", 'wb') as f:
         pickle.dump(file, f)
         
 def load_file_pickle(fname):
