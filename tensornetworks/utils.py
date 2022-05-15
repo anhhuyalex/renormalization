@@ -4,7 +4,7 @@ import torch.optim as optim
 
 import torch
 import torchvision
-import torchvision.transforms as transforms
+import torchvision.models as models
 
 import numpy as np
 import pickle
@@ -67,24 +67,51 @@ class CNN(nn.Module):
         x = self.fc3(x)
         return x
     
+class AlexNet(nn.Module):
+    def __init__(self, n_classes):
+        """ Alexnet Classifier
+        Borrowed from https://github.com/ayshrv/cs7641-img-classification/blob/master/models/alexnet.py
+        Arguments:
+            n_classes (int): Number of classes to score
+        """
+        super(AlexNet, self).__init__()
+
+        self.alexnet = models.alexnet(pretrained=False, num_classes=n_classes)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, images):
+        """
+        Arguments:
+            images (Variable): A tensor of size (N, C, H, W) where
+                N is the batch size
+                C is the number of channels
+                H is the image height
+                W is the image width
+        Returns:
+            A torch Variable of size (N, n_classes) specifying the score
+            for each example and category.
+        """
+        unnormalised_scores = self.alexnet(images)
+        #logits = self.softmax(unnormalised_scores)
+        return unnormalised_scores
+
 class ShuffledCIFAR10:
-    def __init__(self, pixel_shuffled = None, train = True, download=False):
-        transform = transforms.Compose(
-            [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    def __init__(self, *, 
+                 pixel_shuffled = None, image_width = IMAGE_WIDTH, train = True, download=False, transform = None):
         self.dataset = torchvision.datasets.CIFAR10(root='./data', train=train,
                                             download=download, transform=transform)
         self.pixel_shuffled = pixel_shuffled
         if pixel_shuffled == True:
-            self.perm = torch.randperm(IMAGE_WIDTH * IMAGE_WIDTH)
+            self.image_width = image_width
+            self.perm = torch.randperm(image_width * image_width)
     def __len__(self):
         return len(self.dataset)
     
     def __getitem__(self, idx):
         inputs, labels = self.dataset[idx]
         if self.pixel_shuffled == True:
-            inputs = inputs.view(IMAGE_CHANNELS, IMAGE_WIDTH * IMAGE_WIDTH)
-            inputs = inputs[:, self.perm].view(IMAGE_CHANNELS, IMAGE_WIDTH, IMAGE_WIDTH)
+            inputs = inputs.view(IMAGE_CHANNELS, self.image_width * self.image_width)
+            inputs = inputs[:, self.perm].view(IMAGE_CHANNELS, self.image_width, self.image_width)
         return inputs, labels
             
 
@@ -126,31 +153,55 @@ class CIFAR_trainer:
         
     def initialize_record(self):
         self.record = dict(
-            train_loss_prog = [],
-            test_loss = 0.0,
+            metrics = dict(
+                train_loss_prog = [],
+                train_acc_prog = [],
+                test_loss_prog = [],
+                test_acc_prog = [],
+                test_loss = 0.0,
+                test_accuracy = 0.0
+            ),    
             print_interval = 5000 // self.train_params['batch_size'],
             data_params = self.data_params,
             train_params = self.train_params,
             model_optim_params = self.model_optim_params,
-            save_params = self.save_params
+            save_params = self.save_params,
+            model = None
         )
-    def after_iter(self, running_loss):
+    def after_train_iter(self, running_loss, running_accuracy, outputs, labels):
         self.loss.backward()
         self.optimizer.step()
+        
+        # get top-1 accuracy
+        pred_class = torch.argmax(outputs, dim=1)
+        running_accuracy += torch.mean((pred_class == labels).float()).item()
 
         # print statistics
         running_loss += self.loss.item()
         if self.iter % self.record["print_interval"] == self.record["print_interval"] - 1:    # print every self.record["print_interval"] mini-batches
-            self.record["train_loss_prog"].append(running_loss / self.record["print_interval"])
-            print(f'[{self.epoch + 1}, {self.iter + 1:5d}] loss: {running_loss / self.record["print_interval"]:.3f}', flush=True)
+            running_loss /= self.record["print_interval"]
+            running_accuracy /= self.record["print_interval"]
+            self.record["metrics"]["train_loss_prog"].append(running_loss)
+            self.record["metrics"]["train_acc_prog"].append(running_accuracy)
+            print(f'[{self.epoch + 1}, {self.iter + 1:5d}] loss: {running_loss:.3f}, accuracy:  {running_accuracy:.3f}')
             running_loss = 0.0
-        return running_loss
+            running_accuracy = 0.0
+        return running_loss, running_accuracy
     
+    def after_train_epoch(self):
+        # get test loss and accuracy
+        test_loss, test_accuracy = self.test()
+        self.record["metrics"]["test_loss_prog"].append(test_loss)
+        self.record["metrics"]["test_acc_prog"].append(test_accuracy)
+        
+        # put model back into train mode
+        self.model.train()
+        
     def train(self):
         num_epochs = self.train_params['num_epochs']
         for self.epoch in range(num_epochs):  # loop over the dataset multiple times
 
-            running_loss = 0.0
+            running_loss, running_accuracy = 0.0, 0.0
             for self.iter, data in enumerate(self.trainloader, 0):
 
                 # get the inputs; data is a list of [inputs, labels]
@@ -165,14 +216,15 @@ class CIFAR_trainer:
                 outputs = self.model(inputs)
                 self.loss = self.criterion(outputs, labels)
                 
-                running_loss = self.after_iter(running_loss)
-                
+                running_loss, running_accuracy = self.after_train_iter(running_loss, running_accuracy, outputs, labels)
+
+            self.after_train_epoch()
 
         print('Finished Training')
         self.after_run()
         
     def test(self):
-        running_loss = 0.0
+        running_loss, running_accuracy = 0.0, 0.0
         self.model.eval()
         for i, data in enumerate(self.testloader, 0):
             # get the inputs; data is a list of [inputs, labels]
@@ -184,14 +236,27 @@ class CIFAR_trainer:
             outputs = self.model(inputs)
             loss = self.criterion(outputs, labels)
             running_loss += loss.item()
+            
+            # get top-1 accuracy
+            pred_class = torch.argmax(outputs, dim=1)
+            running_accuracy += torch.mean((pred_class == labels).float()).item()
 
         # print loss
-        print(f'Test loss: {running_loss / len(self.testloader):.3f}')
-        return running_loss / len(self.testloader)
+        running_loss /= len(self.testloader)
+        running_accuracy /= len(self.testloader)
+        print(f'Test loss: {running_loss:.3f}, accuracy: {running_accuracy:.3f}')
+        return running_loss, running_accuracy
     
     def after_run(self):
-        test_loss = self.test()
-        self.record["test_loss"] = test_loss
+        # Get final test loss and accuracy
+        test_loss, test_accuracy = self.test()
+        self.record["metrics"]["test_loss"] = test_loss
+        self.record["metrics"]["test_accuracy"] = test_accuracy
+        
+        # Save model
+        self.record["model"] = list(self.model.named_parameters())
+        
+        # Save record
         fname = f"{self.save_params['save_dir']}/{self.save_params['exp_name']}"
         save_file_pickle(fname, self.record)
         

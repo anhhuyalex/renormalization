@@ -16,7 +16,7 @@ import datetime
 import utils
 import configs
 
-from ax.service.managed_loop import optimize
+
 
 def get_parser():
     """
@@ -41,12 +41,16 @@ def get_parser():
     parser.add_argument(
             '--pixel_shuffled', 
             action='store_true')
+    parser.add_argument('-d', '--debug', help="in debug mode or not", 
+                        action='store_true')
+
     return parser
 
 def get_runner(args):
     
     def runner(parameter):
         print("parameters", parameter)
+        args.pixel_shuffled = parameter["pixel_shuffled"]
         cfg = configs.get_configs(args)
         
         # set params
@@ -64,7 +68,7 @@ def get_runner(args):
         
         trainer = utils.CIFAR_trainer(**cfg)
         trainer.train()
-        test_loss = trainer.record["test_loss"]
+        test_loss = trainer.record["metrics"]["test_loss"]
         if np.isnan(test_loss):
             return 1e100
         else:
@@ -76,19 +80,26 @@ def main():
     parser = get_parser()
     args = parser.parse_args()
     
+    for _ in range(30):
+        # shuffled run
+        runner = get_runner(args = args)
+        runner(dict(batch_size = 64, lr = 1e-3, pixel_shuffled = True))
 
-        
-        
-    hyperparameters = [
-                    {"name": "batch_size", "type": "range", "bounds": [1, 256], "value_type": "int"},
-                    {"name": "lr", "type": "range", "bounds": [1e-5, 1e-1], "value_type": "float", "log_scale": True}
-                ]
-    best_parameters, values, experiment, model = optimize(
-            parameters=hyperparameters,
-            evaluation_function=get_runner(args = args),
-            minimize = True,
-            total_trials=100
-        )
+        # unshuffled run
+        runner = get_runner(args = args)
+        runner(dict(batch_size = 64, lr = 1e-3, pixel_shuffled = False))
+#     from ax.service.managed_loop import optimize
+#     hyperparameters = [
+#                     #{"name": "batch_size", "type": "range", "bounds": [256, 257], "value_type": "int"},
+#                     {"name": "lr", "type": "choice", "values": [1e-2], "value_type": "float"},
+#                     {"name": "batch_size", "type": "choice", "values": [64], "value_type": "int"}
+#                 ]
+#     best_parameters, values, experiment, model = optimize(
+#             parameters=hyperparameters,
+#             evaluation_function=get_runner(args = args),
+#             minimize = True,
+#             total_trials=100
+#         )
     
 if __name__ == '__main__':
     main()
