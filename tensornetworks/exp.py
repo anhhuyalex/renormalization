@@ -44,6 +44,9 @@ def get_parser():
     parser.add_argument(
             '--fix_permutation', 
             action='store_true')
+    parser.add_argument(
+            '--freeze_conv', 
+            action='store_true')
     parser.add_argument('-d', '--debug', help="in debug mode or not", 
                         action='store_true')
 

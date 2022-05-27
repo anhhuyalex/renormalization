@@ -13,7 +13,8 @@ def get_configs(args):
         
     elif args.model_name == "cnn":
         net = utils.CNN().cuda()
-        
+        if args.freeze_conv == True:
+            print("conv1", net.conv1.parameters)
     elif args.model_name == "cnn_chan_1-16":
         net = utils.CNN(conv1_chans = 1, conv2_chans = 16).cuda()
     elif args.model_name == "cnn_chan_1-1":
