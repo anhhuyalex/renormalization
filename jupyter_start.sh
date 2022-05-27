@@ -7,8 +7,8 @@
 #SBATCH --output=jupyter-notebook-%J.log
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=alexn@minerva.kgi.edu
-#SBATCH --partition=day
-# SBATCH --gres=gpu:1
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:1
 
 # get tunneling info
 XDG_RUNTIME_DIR=""
@@ -36,7 +36,7 @@ localhost:${port}  (prefix w/ https:// if using password)
 
 # load modules or conda environments here
 # uncomment the following two lines to use your conda environment called notebook_env
-source activate pytorch_resnet 
+source activate renormalization 
 
 # DON'T USE ADDRESS BELOW.
 # DO USE TOKEN BELOW

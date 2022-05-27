@@ -20,6 +20,8 @@ def get_configs(args):
         net = utils.CNN(conv1_chans = 1, conv2_chans = 1).cuda()
     elif args.model_name == "alexnet":
         net = utils.AlexNet(n_classes = 10).cuda()
+    elif args.model_name == "vgg11":
+        net = utils.VGG(model_name = "vgg11", n_classes = 10).cuda()
     elif args.model_name == "attn":
         import attention
         net = attention.SimpleViT(image_size = 32,

@@ -94,6 +94,31 @@ class AlexNet(nn.Module):
         unnormalised_scores = self.alexnet(images)
         #logits = self.softmax(unnormalised_scores)
         return unnormalised_scores
+    
+class VGG(nn.Module):
+    def __init__(self, model_name, n_classes):
+        """ VGG11 Classifier
+        Arguments:
+            n_classes (int): Number of classes to score
+        """
+        super(VGG, self).__init__()
+        if model_name == "vgg11":
+            self.VGG = models.vgg11(pretrained=False, num_classes=n_classes)
+
+    def forward(self, images):
+        """
+        Arguments:
+            images (Variable): A tensor of size (N, C, H, W) where
+                N is the batch size
+                C is the number of channels
+                H is the image height
+                W is the image width
+        Returns:
+            A torch Variable of size (N, n_classes) specifying the score
+            for each example and category.
+        """
+        unnormalised_scores = self.VGG(images)
+        return unnormalised_scores
 
 class ShuffledCIFAR10:
     def __init__(self, *, 
@@ -232,7 +257,7 @@ class CIFAR_trainer:
             inputs = inputs.cuda()
             labels = labels.cuda()
 
-            # forward + backward + optimize
+            # forward and evaluate
             outputs = self.model(inputs)
             loss = self.criterion(outputs, labels)
             running_loss += loss.item()
