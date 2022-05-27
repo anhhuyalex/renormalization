@@ -47,7 +47,7 @@ def get_configs(args):
     # Get model and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9)
-    model_optim_params = dict(model = net, criterion = criterion, optimizer = optimizer)
+    model_optim_params = dict(model = net, criterion = criterion, optimizer = optimizer, model_name = args.model_name)
     
     # Get data params
     if args.model_name == "alexnet":
@@ -62,7 +62,9 @@ def get_configs(args):
             [transforms.ToTensor(),
              transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         image_width = 32
-    data_params = dict(pixel_shuffled = args.pixel_shuffled, image_width = image_width, transform = transform)
+        
+    # Create a fixed permutation if fix_permutation=True else None
+    data_params = dict(pixel_shuffled = args.pixel_shuffled, fix_permutation = args.fix_permutation, image_width = image_width, transform = transform)
     
     # Get train parameters
     train_params = dict(batch_size = 4, 
@@ -73,7 +75,7 @@ def get_configs(args):
     
     # shorter run in debug mode
     if args.debug:
-        train_params["num_epochs"] = 2
+        train_params["num_epochs"] = 1
         
     cfg = dict(
         model_optim_params = model_optim_params,
