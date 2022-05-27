@@ -122,7 +122,8 @@ class VGG(nn.Module):
 
 class ShuffledCIFAR10:
     def __init__(self, *, 
-                 pixel_shuffled = None, image_width = IMAGE_WIDTH, train = True, download=False, transform = None):
+                 pixel_shuffled = None, image_width = IMAGE_WIDTH, train = True, download=False, transform = None,
+                    fix_permutation = None):
         self.dataset = torchvision.datasets.CIFAR10(root='./data', train=train,
                                             download=download, transform=transform)
         self.pixel_shuffled = pixel_shuffled
@@ -166,8 +167,16 @@ class CIFAR_trainer:
                                               shuffle=True, num_workers=2)
 
         testset = ShuffledCIFAR10(train=False, **self.data_params) 
+        
         if self.data_params["pixel_shuffled"] == True:
+            if self.data_params["fix_permutation"] == True:
+                try:
+                    trainset.perm = torch.load(f"{self.save_params['save_dir']}/{self.model_optim_params['model_name']}_quenched_permutation.pt")
+                except:
+                    torch.save(trainset.perm, f"{self.save_params['save_dir']}/{self.model_optim_params['model_name']}_quenched_permutation.pt")
             testset.perm = trainset.perm
+
+        print("trainset.perm", trainset.perm[:100])
         self.testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                               shuffle=True, num_workers=2)
 
