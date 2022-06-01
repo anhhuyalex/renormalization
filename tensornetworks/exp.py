@@ -44,6 +44,10 @@ def get_parser():
     parser.add_argument(
             '--fix_permutation', 
             action='store_true')
+    parser.add_argument(
+            '--freeze_epoch', 
+            default=-1, type=int, 
+            action='store')
     parser.add_argument('-d', '--debug', help="in debug mode or not", 
                         action='store_true')
 
@@ -89,8 +93,8 @@ def main():
         runner(dict(batch_size = 64, lr = 1e-3, pixel_shuffled = True))
 
         # unshuffled run
-        #runner = get_runner(args = args)
-        #runner(dict(batch_size = 64, lr = 1e-3, pixel_shuffled = False))
+        runner = get_runner(args = args)
+        runner(dict(batch_size = 64, lr = 1e-3, pixel_shuffled = False))
 #     from ax.service.managed_loop import optimize
 #     hyperparameters = [
 #                     #{"name": "batch_size", "type": "range", "bounds": [256, 257], "value_type": "int"},

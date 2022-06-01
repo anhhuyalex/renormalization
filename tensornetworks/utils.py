@@ -8,10 +8,22 @@ import torchvision.models as models
 
 import numpy as np
 import pickle
+import functools
 
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
 
+def rgetattr(obj, attr, *args):
+    def _getattr(obj, attr):
+        return getattr(obj, attr, *args)
+    return functools.reduce(_getattr, [obj] + attr.split('.'))
+
+def freeze_layer(net, *layers):
+    for layer_name in layers:
+        layer = rgetattr(net, layer_name)
+        for param in layer.parameters():
+            param.requires_grad = False
+            
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10):
         super(MLP, self).__init__()
@@ -176,7 +188,6 @@ class CIFAR_trainer:
                     torch.save(trainset.perm, f"{self.save_params['save_dir']}/{self.model_optim_params['model_name']}_quenched_permutation.pt")
             testset.perm = trainset.perm
 
-        print("trainset.perm", trainset.perm[:100])
         self.testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
                                               shuffle=True, num_workers=2)
 
@@ -202,6 +213,13 @@ class CIFAR_trainer:
             save_params = self.save_params,
             model = None
         )
+        
+    def before_train_epoch(self):
+        # after a certain epoch, freeze convolutional layers if desired
+        if self.epoch > self.train_params["freeze_params"]["epoch"]:
+            freeze_layer(self.model, *self.train_params["freeze_params"]["epoch"])
+            for n, param in self.model.named_parameters():         
+                print(n, param.requires_grad)
     def after_train_iter(self, running_loss, running_accuracy, outputs, labels):
         self.loss.backward()
         self.optimizer.step()
@@ -231,10 +249,11 @@ class CIFAR_trainer:
         # put model back into train mode
         self.model.train()
         
+        
     def train(self):
         num_epochs = self.train_params['num_epochs']
         for self.epoch in range(num_epochs):  # loop over the dataset multiple times
-
+            self.before_train_epoch()
             running_loss, running_accuracy = 0.0, 0.0
             for self.iter, data in enumerate(self.trainloader, 0):
 

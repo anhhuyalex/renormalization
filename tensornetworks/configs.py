@@ -13,15 +13,23 @@ def get_configs(args):
         
     elif args.model_name == "cnn":
         net = utils.CNN().cuda()
-        
+        freeze_layer = ["conv1", "conv2"]
+
     elif args.model_name == "cnn_chan_1-16":
         net = utils.CNN(conv1_chans = 1, conv2_chans = 16).cuda()
+        freeze_layer = ["conv1", "conv2"]
+        
     elif args.model_name == "cnn_chan_1-1":
         net = utils.CNN(conv1_chans = 1, conv2_chans = 1).cuda()
+        freeze_layer = ["conv1", "conv2"]
+        
     elif args.model_name == "alexnet":
         net = utils.AlexNet(n_classes = 10).cuda()
+        freeze_layer = ["alexnet.features"]
     elif args.model_name == "vgg11":
         net = utils.VGG(model_name = "vgg11", n_classes = 10).cuda()
+        freeze_layer = ["VGG.features"]
+
     elif args.model_name == "attn":
         import attention
         net = attention.SimpleViT(image_size = 32,
@@ -45,7 +53,8 @@ def get_configs(args):
             pe_weight = 0
         ).cuda()
         
-    
+    for n, param in net.named_parameters(): 
+        print(n, param.requires_grad)
     # Get model and optimizer
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9)
@@ -70,7 +79,11 @@ def get_configs(args):
     
     # Get train parameters
     train_params = dict(batch_size = 4, 
-                        num_epochs = 100)
+                        num_epochs = 100, 
+                        freeze_params = dict(
+                            epoch = args.freeze_epoch,
+                            freeze_layers = args.freeze_epoch
+                        ))
     
     
     save_params = dict(save_dir = args.save_dir)
