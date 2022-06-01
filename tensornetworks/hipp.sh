@@ -19,5 +19,6 @@ source activate renormalization
 # python -u oneshot_cls.py --config_path definitions.aha_config_theremintest.aha_theremintest_cfg --model_name CLS --numtestitems $1 --ca3_num_units 2400 --end_training_threshold 0.34
 
 # python -u exp.py --save_dir /scratch/gpfs/qanguyen/renorm --model_name attn --pixel_shuffled
-# python -u exp.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/renorm_freezeconv --model_name cnn --freeze_conv
 python -u exp.py --save_dir /scratch/gpfs/qanguyen/renorm_freezeconv --freeze_epoch 0 --model_name vgg11
+# python -u exp.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/renorm_freezeconv --model_name cnn --freeze_conv
+#python -u exp.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/renorm_quench --fix_permutation --model_name vgg11
