@@ -1,10 +1,12 @@
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import Dataset
 
 import torch
 import torchvision
 import torchvision.models as models
+
 
 import numpy as np
 import pickle
@@ -151,12 +153,10 @@ class ShuffledCIFAR10:
             inputs = inputs.view(IMAGE_CHANNELS, self.image_width * self.image_width)
             inputs = inputs[:, self.perm].view(IMAGE_CHANNELS, self.image_width, self.image_width)
         return inputs, labels
-            
-
-class CIFAR_trainer:
+    
+class BaseTrainer:
     def __init__(self, data_params = dict(),
-                       train_params = dict(batch_size = 4,
-                                          num_epochs = 20),
+                       train_params = dict(),
                        model_optim_params = dict(),
                        save_params = dict()):
         
@@ -171,6 +171,12 @@ class CIFAR_trainer:
         self.build_model_optimizer()
         self.initialize_record()
         
+    def save_record(self):
+        # Save record
+        fname = f"{self.save_params['save_dir']}/{self.save_params['exp_name']}"
+        save_file_pickle(fname, self.record)
+        
+class CIFAR_trainer(BaseTrainer):
     def build_data_loader(self):
         batch_size = self.train_params['batch_size']
         
@@ -310,8 +316,7 @@ class CIFAR_trainer:
         self.record["model"] = list(self.model.named_parameters())
         
         # Save record
-        fname = f"{self.save_params['save_dir']}/{self.save_params['exp_name']}"
-        save_file_pickle(fname, self.record)
+        self.save_record()
         
     
 def save_file_pickle(fname, file):
