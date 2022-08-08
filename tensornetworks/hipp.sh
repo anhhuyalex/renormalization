@@ -18,11 +18,17 @@ source activate renormalization
 # python -u exp.py --save_dir /scratch/gpfs/qanguyen/renorm_freezeconv --freeze_epoch 0 --model_name vgg11
 # python -u exp.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/renorm_freezeconv --model_name cnn --freeze_conv
 #python -u exp.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/renorm_quench --fix_permutation --model_name vgg11
-python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 1 --model_name mlp 
-python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 1 --model_name mlp --random_coefs
+# python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 1 --model_name mlp 
+# python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 1 --model_name mlp --random_coefs
 
-python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 5 --model_name mlp 
-python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 5 --model_name mlp --random_coefs
+# python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 5 --model_name mlp 
+# python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 5 --model_name mlp --random_coefs
 
-python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 10 --model_name mlp 
-python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 10 --model_name mlp --random_coefs
+# python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 10 --model_name mlp 
+# python -u polynomial.py --save_dir /gpfs/milgram/scratch60/turk-browne/an633/poly --num_inputs 80 --order 10 --model_name mlp --random_coefs
+python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly1 --num_inputs 80 --order 10 --num_examples 50000 --model_name mlp_small --random_coefs --random_inputs 
+# python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly1 --num_inputs 80 --order 10 --num_examples 50000 --model_name mlp_small --random_coefs --random_inputs 
+
+# python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly --num_inputs 9 --order 10 --model_name mlp --random_coefs --random_inputs 
+# python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly --num_inputs 10 --order 10 --model_name mlp --random_coefs --random_inputs 
+# python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly --num_inputs 80 --order 10 --model_name mlp --random_coefs --random_inputs 
