@@ -27,7 +27,7 @@ def freeze_layer(net, *layers):
             param.requires_grad = False
             
 class MLP(nn.Module):
-    def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10):
+    def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10, batch_norm = False):
         super(MLP, self).__init__()
         self.input_size = input_size
         self.hidden_sizes = hidden_sizes
@@ -38,14 +38,59 @@ class MLP(nn.Module):
         # Set up perceptron layers and add dropout
         self.fc1 = torch.nn.Linear(self.input_size,
                                    self.hidden_sizes[0])
+
         self.dropout = torch.nn.Dropout(1 - keep_rate)
         self.hidden = nn.ModuleList()
         for k in range(len(self.hidden_sizes) - 1):
             self.hidden.append(nn.Linear(self.hidden_sizes[k], self.hidden_sizes[k+1]))
             
+        # Batch norm
+        self.batch_norm_layers = nn.ModuleList()
+        self.batch_norm = batch_norm
+        if batch_norm == True:
+            for k in range(len(self.hidden_sizes)):
+                self.batch_norm_layers.append(nn.BatchNorm1d(self.hidden_sizes[k]))
             
+        # Output layer
         self.out = torch.nn.Linear(self.hidden_sizes[-1], N_CLASSES)
-
+        
+    def silence_fc1_weights(self, num_inputs_kept):
+        _, num_inputs = self.fc1.weight.shape
+        num_inputs = num_inputs // 2
+        if num_inputs_kept > num_inputs:
+            return
+        print("num_inputs_kept", num_inputs_kept, "num_inputs", num_inputs)
+        self.fc1.weight[:,num_inputs_kept:num_inputs].data.fill_(0.0)
+        self.fc1.weight[:,(num_inputs+num_inputs_kept):].data.fill_(0.0)
+        print(self.fc1.weight[:5, :])
+    def forward(self, x):
+        x = x.view(-1, self.input_size)
+        if self.activation == "sigmoid":
+            x = self.fc1(x)
+            sigmoid = torch.nn.Sigmoid()
+            if self.batch_norm == True:
+                x = self.batch_norm_layers[0](x)
+            x = sigmoid(x)
+        elif self.activation == "relu":
+            x = self.fc1(x)
+            if self.batch_norm == True:
+                x = self.batch_norm_layers[0](x)
+            x = torch.nn.functional.relu(x)
+        
+        x = self.dropout(x)
+        for k, lay in enumerate(self.hidden):
+            x = lay(x)
+            if self.batch_norm == True:
+                x = self.batch_norm_layers[k+1](x)
+            if self.activation == "sigmoid":
+                x = sigmoid(x)
+            elif self.activation == "relu":
+                x = torch.nn.functional.relu(x)
+            x = self.dropout(x)
+            
+        return (self.out(x))
+    
+class ResNet(MLP):
     def forward(self, x):
         x = x.view(-1, self.input_size)
         if self.activation == "sigmoid":
@@ -56,9 +101,9 @@ class MLP(nn.Module):
         x = self.dropout(x)
         for lay in self.hidden:
             if self.activation == "sigmoid":
-                x = sigmoid(lay(x))
+                x = x + sigmoid(lay(x))
             elif self.activation == "relu":
-                x = torch.nn.functional.relu(lay(x))
+                x = x + torch.nn.functional.relu(lay(x))
             x = self.dropout(x)
         return (self.out(x))
     

@@ -79,7 +79,8 @@ class Transformer(nn.Module):
         return x
     
 class SimpleViT(nn.Module):
-    def __init__(self, *, image_size, patch_size, num_classes, dim, depth, heads, mlp_dim, channels = 3, dim_head = 64,
+    def __init__(self, *, image_size, patch_size, num_classes, 
+                 dim, depth, heads, mlp_dim, channels = 3, dim_head = 64,
                 pe_weight = 1):
         super().__init__()
         image_height, image_width = pair(image_size)
@@ -105,10 +106,13 @@ class SimpleViT(nn.Module):
         )
 
     def forward(self, img):
+        if len(img.shape) == 2: # img: batch x width
+            img = img.unsqueeze(1).unsqueeze(2)
         *_, h, w, dtype = *img.shape, img.dtype
-        #print(img.shape)
+        # print(img.shape, h, w)
+        
         x = self.to_patch_embedding(img)
-        #print(x.shape)
+
         pe = posemb_sincos_2d(x)
         x = rearrange(x, 'b ... d -> b (...) d') + self.pe_weight * pe
         #print("after pe", x.shape)
