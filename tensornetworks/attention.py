@@ -90,7 +90,7 @@ class SimpleViT(nn.Module):
 
         num_patches = (image_height // patch_height) * (image_width // patch_width)
         patch_dim = channels * patch_height * patch_width
-
+        print("patch_dim", patch_dim)
         self.pe_weight = pe_weight
         self.to_patch_embedding = nn.Sequential(
             Rearrange('b c (h p1) (w p2) -> b h w (p1 p2 c)', p1 = patch_height, p2 = patch_width),
@@ -110,9 +110,11 @@ class SimpleViT(nn.Module):
             img = img.unsqueeze(1).unsqueeze(2)
         *_, h, w, dtype = *img.shape, img.dtype
         # print(img.shape, h, w)
-        
+        #print(img.shape)
         x = self.to_patch_embedding(img)
-
+        #print("x0", torch.nn.functional .normalize(x[0],dim=-1))
+        #print("x1", x[1].shape)
+        #print(wa)
         pe = posemb_sincos_2d(x)
         x = rearrange(x, 'b ... d -> b (...) d') + self.pe_weight * pe
         #print("after pe", x.shape)

@@ -85,6 +85,10 @@ def get_parser():
             default=1e-3, type=float, 
             action='store')
     parser.add_argument(
+            '--num_pretrain_epochs', 
+            default=1000, type=int, 
+            action='store')
+    parser.add_argument(
             '--num_train_epochs', 
             default=1000, type=int, 
             action='store')
@@ -212,7 +216,7 @@ class PolynomialTrainer(utils.BaseTrainer):
         
         return running_loss
     
-    def after_train_epoch(self, train_running_loss):
+    def after_train_epoch(self, train_running_loss, num_inputs_kept):
         self.record["metrics"]["train_loss_prog"].append(train_running_loss  / (self.iter + 1))
         
         # validate
@@ -221,12 +225,17 @@ class PolynomialTrainer(utils.BaseTrainer):
             for self.val_iter, data in enumerate(self.testloader, 0):
                 # get the inputs; data is a list of [inputs, labels]
                 inputs, labels = data
+                if num_inputs_kept is not None:
+                    num_inputs = inputs.shape[1] // 2
+                    inputs = torch.cat([inputs[:, :num_inputs_kept], inputs[:, (num_inputs):(num_inputs + num_inputs_kept)]], dim=-1) 
+                    
                 inputs = inputs.cuda()
                 labels = labels.cuda()
+                
                 outputs = self.model(inputs).squeeze(1)
                 val_running_loss += self.criterion(outputs, labels).item()
             self.record["metrics"]["test_loss_prog"].append(val_running_loss  / (self.val_iter + 1))
-            print("val", inputs[:5, :], labels[:5])
+
         return train_running_loss, val_running_loss
     def after_run(self):
         # Save model
@@ -235,8 +244,8 @@ class PolynomialTrainer(utils.BaseTrainer):
         # Save record
         self.save_record()
         
-    def train(self):
-        num_epochs = self.train_params['num_train_epochs']
+    def train_loop(self, num_epochs, num_inputs_kept):
+        
         for self.epoch in range(num_epochs):  # loop over the dataset multiple times
             #self.before_train_epoch()
             train_running_loss = 0.0
@@ -244,7 +253,9 @@ class PolynomialTrainer(utils.BaseTrainer):
                 
                 # get the inputs; data is a list of [inputs, labels]
                 inputs, labels = data
-                
+                if num_inputs_kept is not None:
+                    num_inputs = inputs.shape[1] // 2
+                    inputs = torch.cat([inputs[:, :num_inputs_kept], inputs[:, (num_inputs):(num_inputs + num_inputs_kept)]], dim=-1) 
                 inputs = inputs.cuda()
                 labels = labels.cuda()
                 
@@ -257,10 +268,36 @@ class PolynomialTrainer(utils.BaseTrainer):
                 
                 train_running_loss = self.after_train_iter(train_running_loss, inputs, labels)
 
-            train_running_loss, val_running_loss = self.after_train_epoch(train_running_loss)
+            train_running_loss, val_running_loss = self.after_train_epoch(train_running_loss, num_inputs_kept)
+            
             print(self.epoch, "train_running_loss", train_running_loss / (self.iter + 1), "val_running_loss", val_running_loss / (self.val_iter + 1))
             
         print('Finished Training')
+        
+    def lift_weights(self, num_inputs_kept):
+        # make new, wider first layer
+        fc1_w, fc1_b = [p.detach().clone() for p in self.model.fc1.parameters()]
+        self.model.fc1 = torch.nn.Linear(self.data_params["num_inputs"] * 2, fc1_w.shape[0]).cuda()
+         
+        # write old weight, bias parameters into first layer
+        num_inputs = self.data_params["num_inputs"]
+        self.model.fc1.weight.data[:, :num_inputs_kept] = fc1_w[:, :num_inputs_kept]
+        self.model.fc1.weight.data[:, num_inputs_kept:num_inputs] = 0.0
+        self.model.fc1.weight.data[:, (num_inputs):(num_inputs + num_inputs_kept)] = fc1_w[:, num_inputs_kept:]
+        self.model.fc1.weight.data[:, (num_inputs + num_inputs_kept):] = 0.0
+        self.model.fc1.bias.data = fc1_b
+        
+        # reinitialize optimizer
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.model_optim_params["lr"], weight_decay = self.model_optim_params["weight_decay"]) 
+        
+        
+    def train(self):
+        # pre-train
+        num_inputs_kept = self.train_params['num_inputs_kept']
+        self.train_loop(num_epochs = self.train_params['num_pretrain_epochs'], num_inputs_kept = num_inputs_kept)
+        self.lift_weights(num_inputs_kept)
+
+        self.train_loop(num_epochs = self.train_params['num_train_epochs'], num_inputs_kept = None)
         self.after_run()
         
 def get_polynomial_configs(args):
@@ -281,9 +318,9 @@ def get_polynomial_configs(args):
         net = utils.MLP(input_size=args.num_inputs * 2, hidden_sizes=[1000,1000,1000,1000,1000],
                    activation = "relu", N_CLASSES = 1, batch_norm = True).cuda()
     elif args.model_name == "mlp_small_silence":
-        net = utils.MLP(input_size=args.num_inputs * 2, hidden_sizes=[100,100,100],
+        net = utils.MLP(input_size=args.num_inputs_kept * 2, hidden_sizes=[100,100,100],
                    activation = "relu", N_CLASSES = 1).cuda()
-        net.silence_fc1_weights(num_inputs_kept = args.num_inputs_kept)
+        
     elif args.model_name == "attention_small":
         net = attention.SimpleViT(image_size=(args.num_inputs * 2, 1), patch_size = (1, 1),
                                   num_classes = 1,
@@ -298,13 +335,17 @@ def get_polynomial_configs(args):
         
     criterion = nn.MSELoss()
     optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay = args.weight_decay)#, momentum=0.9)
-    model_optim_params = dict(model = net, criterion = criterion, optimizer = optimizer, model_name = args.model_name)
+    model_optim_params = dict(model = net, criterion = criterion, 
+                              optimizer = optimizer, model_name = args.model_name,
+                             lr = args.lr, weight_decay = args.weight_decay)
     
     # Get data params
     data_params = dict(num_examples = args.num_examples, num_inputs = args.num_inputs, order = args.order, random_coefs = args.random_coefs, input_strategy = args.input_strategy, is_online = args.is_online, noise=args.noise, output_strategy=args.output_strategy)
 
     # Get train parameters
     train_params = dict(batch_size = 256, 
+                        num_pretrain_epochs = args.num_pretrain_epochs,
+                        num_inputs_kept = args.num_inputs_kept,
                         num_train_epochs = args.num_train_epochs,
                         )
 

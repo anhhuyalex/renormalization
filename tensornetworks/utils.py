@@ -54,17 +54,7 @@ class MLP(nn.Module):
         # Output layer
         self.out = torch.nn.Linear(self.hidden_sizes[-1], N_CLASSES)
         
-    def silence_fc1_weights(self, num_inputs_kept):
-        _, num_inputs = self.fc1.weight.shape
-        num_inputs = num_inputs // 2
-        if num_inputs_kept > num_inputs:
-            return
-        print("num_inputs_kept", num_inputs_kept, "num_inputs", num_inputs)
-        self.fc1.weight[:,num_inputs_kept:num_inputs].data.fill_(0.0)
-        self.fc1.weight[:,(num_inputs+num_inputs_kept):].data.fill_(0.0)
-        print(self.fc1.weight[:5, :])
     def forward(self, x):
-        x = x.view(-1, self.input_size)
         if self.activation == "sigmoid":
             x = self.fc1(x)
             sigmoid = torch.nn.Sigmoid()

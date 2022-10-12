@@ -82,13 +82,9 @@ def get_parser():
             action='store')
     parser.add_argument(
             '--lr', 
-            default=1e-3, type=float, 
+            default=0.5e-3, type=float, 
             action='store')
-    parser.add_argument(
-            '--num_train_epochs', 
-            default=1000, type=int, 
-            action='store')
-    
+
     parser.add_argument('-d', '--debug', help="in debug mode or not", 
                         action='store_true')
 
@@ -118,7 +114,8 @@ class PolynomialData(Dataset):
             raise ValueError(f"input_strategy {input_strategy} not supported")
         if self.is_online == False:
             self.data = [self.sample_point() for _ in range(self.num_examples)]
-            
+            utils.save_file_pickle("random_sorted_data", self.data)
+            print(wa)
     def __len__(self):
         return self.num_examples 
     
@@ -144,10 +141,8 @@ class PolynomialData(Dataset):
             target = torch.sum(torch.stack(target), dim=0)
             target += self.noise * torch.randn_like(target) # add noise
             target = target.squeeze(0)
-        elif self.output_strategy == "evaluate_at_0":
-            target = coefs[0]
         else:
-            raise ValueError(f"output_strategy {self.output_strategy} not supported")
+            target = coefs[0] 
         return points, target
     
     def __getitem__(self, idx):
@@ -228,6 +223,7 @@ class PolynomialTrainer(utils.BaseTrainer):
             self.record["metrics"]["test_loss_prog"].append(val_running_loss  / (self.val_iter + 1))
             print("val", inputs[:5, :], labels[:5])
         return train_running_loss, val_running_loss
+    
     def after_run(self):
         # Save model
         self.record["model"] = self.model
@@ -236,7 +232,7 @@ class PolynomialTrainer(utils.BaseTrainer):
         self.save_record()
         
     def train(self):
-        num_epochs = self.train_params['num_train_epochs']
+        num_epochs = self.train_params['num_epochs']
         for self.epoch in range(num_epochs):  # loop over the dataset multiple times
             #self.before_train_epoch()
             train_running_loss = 0.0
@@ -247,7 +243,13 @@ class PolynomialTrainer(utils.BaseTrainer):
                 
                 inputs = inputs.cuda()
                 labels = labels.cuda()
-                
+                #print("inputs", inputs.shape)
+                #plt.plot(inputs[0,:40].detach().cpu().numpy(), inputs[0,40:].detach().cpu().numpy(), marker="+" , linestyle='None')
+                #plt.plot(inputs[1,:40].detach().cpu().numpy(), inputs[1,40:].detach().cpu().numpy(), marker="+" , linestyle='None')
+                #plt.plot(inputs[2,:40].detach().cpu().numpy(), inputs[2,40:].detach().cpu().numpy(), marker="+",  linestyle='None')
+                #plt.savefig('myfig')
+                #print(labels[:3])
+                #print(wa)
                 # zero the parameter gradients
                 self.optimizer.zero_grad()
 
@@ -259,6 +261,7 @@ class PolynomialTrainer(utils.BaseTrainer):
 
             train_running_loss, val_running_loss = self.after_train_epoch(train_running_loss)
             print(self.epoch, "train_running_loss", train_running_loss / (self.iter + 1), "val_running_loss", val_running_loss / (self.val_iter + 1))
+            print(inputs[:5, :], labels[:5])
             
         print('Finished Training')
         self.after_run()
@@ -305,8 +308,7 @@ def get_polynomial_configs(args):
 
     # Get train parameters
     train_params = dict(batch_size = 256, 
-                        num_train_epochs = args.num_train_epochs,
-                        )
+                        num_epochs = 5000)
 
     # Get save params
     save_params = dict(save_dir = args.save_dir)
@@ -322,6 +324,7 @@ def get_polynomial_configs(args):
 def get_runner(args):
     
     def runner(parameter):
+        print("parameters", parameter)
         cfg = get_polynomial_configs(args)
         
         
