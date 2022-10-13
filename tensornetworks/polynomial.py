@@ -13,6 +13,11 @@ import numpy as np
 import importlib
 import argparse
 import datetime
+import os
+import wandb
+
+os.environ["WANDB_API_KEY"] = "74369089a72bb385ac20560974425f1e30fd2f94"
+os.environ["WANDB_MODE"] = "offline"
 
 import utils
 import attention
@@ -69,10 +74,6 @@ def get_parser():
             default=0.0, type=float, 
             action='store')
     parser.add_argument(
-            '--weight_decay', 
-            default=0.0, type=float, 
-            action='store')
-    parser.add_argument(
             '--num_inputs_kept', 
             default=0, type=int, 
             action='store')
@@ -85,8 +86,20 @@ def get_parser():
             default=1e-3, type=float, 
             action='store')
     parser.add_argument(
+            '--weight_decay', 
+            default=0.0, type=float, 
+            action='store')
+    parser.add_argument(
+            '--first_layer_l1_regularize', 
+            default=0.0, type=float, 
+            action='store')
+    parser.add_argument(
             '--num_train_epochs', 
             default=1000, type=int, 
+            action='store')
+    parser.add_argument(
+            '--tags', 
+            default="debug", type=str, 
             action='store')
     
     parser.add_argument('-d', '--debug', help="in debug mode or not", 
@@ -178,8 +191,25 @@ class PolynomialTrainer(utils.BaseTrainer):
         
     def build_model_optimizer(self):
         self.model = self.model_optim_params["model"]
-        self.criterion = self.model_optim_params["criterion"]
         self.optimizer = self.model_optim_params["optimizer"]
+        
+        if self.model_optim_params["criterion"] == "mse_loss":
+            self.criterion = self.mse_loss
+        elif self.model_optim_params["criterion"] == "mse_loss_l1_first_layer":
+            self.criterion = self.mse_loss_l1_first_layer
+        
+    def mse_loss(self, outputs, labels):
+        return torch.nn.functional.mse_loss(outputs, labels)
+    
+    def mse_loss_l1_first_layer(self, outputs, labels):
+        """
+        Compute loss + weight * l1_of_first_layer
+        """
+        loss = torch.nn.functional.mse_loss(outputs, labels)
+        l1 = self.model_optim_params["first_layer_l1_regularize"] * sum([torch.linalg.norm(p, 1) for p in self.model.fc1.parameters()])
+        
+        return loss + l1
+        
         
     def initialize_record(self):
         self.record = dict(
@@ -226,7 +256,12 @@ class PolynomialTrainer(utils.BaseTrainer):
                 outputs = self.model(inputs).squeeze(1)
                 val_running_loss += self.criterion(outputs, labels).item()
             self.record["metrics"]["test_loss_prog"].append(val_running_loss  / (self.val_iter + 1))
-            print("val", inputs[:5, :], labels[:5])
+            #print("val", inputs[:5, :], labels[:5])
+            
+        # Log to wandb
+        wandb.log({"train_running_loss": train_running_loss, 
+                  "val_running_loss": val_running_loss})
+
         return train_running_loss, val_running_loss
     def after_run(self):
         # Save model
@@ -234,6 +269,9 @@ class PolynomialTrainer(utils.BaseTrainer):
         
         # Save record
         self.save_record()
+        
+        # Send to wandb
+        wandb.config = self.record
         
     def train(self):
         num_epochs = self.train_params['num_train_epochs']
@@ -296,9 +334,10 @@ def get_polynomial_configs(args):
     else:
         raise ValueError("network not supported")
         
-    criterion = nn.MSELoss()
+    criterion = "mse_loss_l1_first_layer"
     optimizer = optim.Adam(net.parameters(), lr=args.lr, weight_decay = args.weight_decay)#, momentum=0.9)
-    model_optim_params = dict(model = net, criterion = criterion, optimizer = optimizer, model_name = args.model_name)
+    model_optim_params = dict(model = net, criterion = criterion, optimizer = optimizer, model_name = args.model_name,
+                              lr = args.lr, first_layer_l1_regularize = args.first_layer_l1_regularize)
     
     # Get data params
     data_params = dict(num_examples = args.num_examples, num_inputs = args.num_inputs, order = args.order, random_coefs = args.random_coefs, input_strategy = args.input_strategy, is_online = args.is_online, noise=args.noise, output_strategy=args.output_strategy)
@@ -344,7 +383,7 @@ def get_runner(args):
 def main():
     parser = get_parser()
     args = parser.parse_args()
-    
+    wandb.init(project="polynomial", entity="anhhuyalex", tags = [args.tags])
     for _ in range(3):
         runner = get_runner(args = args)
         runner(dict())
