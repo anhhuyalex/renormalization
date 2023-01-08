@@ -15,6 +15,23 @@ import functools
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
 
+class dotdict(dict):
+    """dot.notation access to dictionary attributes"""
+    def __getattr__(self, key):
+        if key.startswith('__') and key.endswith('__'):
+            return super(DictionaryLike, self).__getattr__(key)
+        return self.__getitem__(key)
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+    def __getstate__(self): return self.__dict__
+    def __setstate__(self, d): self.__dict__.update(d)
+
+def try_or(expr, default=None, expected_exc=(Exception,)):
+    try:
+        return expr
+    except expected_exc:
+        return default
+    
 def rgetattr(obj, attr, *args):
     def _getattr(obj, attr):
         return getattr(obj, attr, *args)
@@ -361,3 +378,13 @@ def save_file_pickle(fname, file):
 def load_file_pickle(fname):
     with open(fname, 'rb') as f:
         return pickle.load(f)
+                               
+def find_free_port():
+    """ https://stackoverflow.com/questions/1365265/on-localhost-how-do-i-pick-a-free-port-number """
+    import socket
+    from contextlib import closing
+
+    with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as s:
+        s.bind(('', 0))
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return str(s.getsockname()[1])
