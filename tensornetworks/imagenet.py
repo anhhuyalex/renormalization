@@ -37,7 +37,9 @@ def get_parser():
             description='Pytorch training framework for general dist training')
     parser.add_argument(
             '--save_dir', 
-            default="/gpfs/milgram/scratch60/turk-browne/an633/renorm", type=str, 
+            #default="/gpfs/milgram/scratch60/turk-browne/an633/renorm",
+            default="/scratch/gpfs/qanguyen/renorm",
+            type=str, 
             action='store')
     parser.add_argument(
             '--model_name', 
@@ -71,7 +73,7 @@ def get_parser():
             action='store')
     parser.add_argument(
             '--num_train_epochs', 
-            default=2000, type=int, 
+            default=90, type=int, 
             action='store')
     parser.add_argument(
             '--tags', 
@@ -87,21 +89,24 @@ def get_imagenet_configs(args):
     # Get model optim params
     
         
-    criterion = "mse_loss_l1_first_layer"
+    #criterion = "mse_loss_l1_first_layer"
     model_optim_params = utils.dotdict(model_name = args.model_name, 
-                                       criterion = criterion, 
+                                       #criterion = criterion, 
                                        lr = args.lr, 
                                        weight_decay = args.weight_decay,
                                        momentum = args.momentum
                                        )
     
     # Get data params
-    data_params = utils.dotdict()
+    data_params = utils.dotdict(
+        data_dir = args.data_dir
+    )
 
     # Get train parameters
     train_params = utils.dotdict(
                         batch_size = 256, 
                         num_train_epochs = args.num_train_epochs,
+                        num_workers = 2,
                         seed = None,
                         gpu = None,
                         multiprocessing_distributed = True,
@@ -124,11 +129,32 @@ def get_imagenet_configs(args):
 
 
 class ImagenetTrainer(utils.BaseTrainer):
-    
+    def initialize_record(self):
+        self.record = utils.dotdict(
+            current_epoch = -1,
+            metrics = utils.dotdict(
+                train_losses = utils.dotdict(default=[]),
+                train_top1 = utils.dotdict(default=[]),
+                train_top5 = utils.dotdict(default=[]),
+                test_losses = utils.dotdict(default=[]),
+                test_top1 = utils.dotdict(default=[]),
+                test_top5 = utils.dotdict(default=[]),
+            ),
+            success = False,
+            model_state = utils.dotdict(
+                curr_model_state = None,
+                best_model_state = None,
+                best_model_acc = None
+            ),
+            data_params = self.data_params,
+            train_params = self.train_params,
+            model_optim_params = self.model_optim_params,
+            save_params = self.save_params,
+        )
     def setup(self):
         #self.build_data_loader()
         #self.build_model_optimizer()
-        #self.initialize_record()
+        self.initialize_record()
         if self.train_params.seed is not None:
             random.seed(self.train_params.seed)
             torch.manual_seed(self.train_params.seed)
@@ -145,39 +171,41 @@ class ImagenetTrainer(utils.BaseTrainer):
                           'disable data parallelism.')
             
         if torch.cuda.is_available():
-            ngpus_per_node = torch.cuda.device_count()
+            self.train_params.ngpus_per_node = torch.cuda.device_count()
         else:
-            ngpus_per_node = 1
-
-        if self.train_params.multiprocessing_distributed:
-            # Since we have ngpus_per_node processes per node, the total world_size
-            # needs to be adjusted accordingly
-            self.train_params.world_size = ngpus_per_node * self.train_params.world_size
-            # Use torch.multiprocessing.spawn to launch distributed processes: the
-            # main_worker process function
-            mp.spawn(self.setup_worker, nprocs=ngpus_per_node, args=(ngpus_per_node,))
-        else:
-            # Simply call main_worker function
-            self.setup_worker(args.gpu, ngpus_per_node, args)
-
-        print(wa)
+            self.train_params.ngpus_per_node = 1
+#         if self.train_params.multiprocessing_distributed:
+#             # Since we have ngpus_per_node processes per node, the total world_size
+#             # needs to be adjusted accordingly
+#             self.train_params.world_size = self.train_params.ngpus_per_node * self.train_params.world_size
+#             # Use torch.multiprocessing.spawn to launch distributed processes: the
+#             # main_worker process function
+#             mp.spawn(self.setup_worker, nprocs=self.train_params.ngpus_per_node, args=(self.train_params.ngpus_per_node,))
+#             print(self.train_sampler)
+#             print(wa)
+#         else:
+#             # Simply call main_worker function
+#             self.setup_worker(args.gpu, self.train_params.ngpus_per_node, args)
         
-    def setup_worker(self, gpu, ngpus_per_node):
-        if self.train_params.multiprocessing_distributed:
-            # For multiprocessing distributed training, rank needs to be the
-            # global rank among all the processes
-            self.train_params.rank = self.train_params.rank * ngpus_per_node + gpu
-        torch.distributed.init_process_group(backend=self.train_params.dist_backend, init_method=self.train_params.dist_url,
-                                world_size=self.train_params.world_size, rank=self.train_params.rank)
-
-        self.build_model_optimizer()
-        self.build_data_loader()
-        torch.distributed.destroy_process_group()
         
-    def build_model_optimizer(self):
+#     def setup_worker(self, gpu, ngpus_per_node):
+#         if self.train_params.multiprocessing_distributed:
+#             # For multiprocessing distributed training, rank needs to be the
+#             # global rank among all the processes
+#             rank = self.train_params.rank * ngpus_per_node + gpu
+#             print("My rank is", rank)
+#         torch.distributed.init_process_group(backend=self.train_params.dist_backend, init_method=self.train_params.dist_url,
+#                                 world_size=self.train_params.world_size, rank=rank)
+
+#         self.build_model_optimizer(rank)
+#         self.build_data_loader()
+        
+        
+    def build_model_optimizer(self, rank):
+        
         self.model = torchvision.models.__dict__[self.model_optim_params.model_name]()
         if torch.cuda.is_available():
-            self.model.cuda()
+            self.model.to(rank)
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
             self.model = torch.nn.parallel.DistributedDataParallel(self.model)
@@ -219,12 +247,12 @@ class ImagenetTrainer(utils.BaseTrainer):
 #             else:
 #                 print("=> no checkpoint found at '{}'".format(args.resume))
     def build_data_loader(self):
-        traindir = os.path.join(args.data, 'train')
-        valdir = os.path.join(args.data, 'val')
+        traindir = os.path.join(self.data_params.data_dir, 'train')
+        valdir = os.path.join(self.data_params.data_dir, 'val')
         normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225])
 
-        train_dataset = datasets.ImageFolder(
+        train_dataset = torchvision.datasets.ImageFolder(
             traindir,
             transforms.Compose([
                 transforms.RandomResizedCrop(224),
@@ -233,7 +261,7 @@ class ImagenetTrainer(utils.BaseTrainer):
                 normalize,
             ]))
 
-        val_dataset = datasets.ImageFolder(
+        val_dataset = torchvision.datasets.ImageFolder(
             valdir,
             transforms.Compose([
                 transforms.Resize(256),
@@ -241,25 +269,133 @@ class ImagenetTrainer(utils.BaseTrainer):
                 transforms.ToTensor(),
                 normalize,
             ]))
+        #print("data loading")
         
-        print(wa)
+        if self.train_params.multiprocessing_distributed:
+            self.train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+            self.val_sampler = torch.utils.data.distributed.DistributedSampler(val_dataset, shuffle=False, drop_last=True)
+        else:
+            self.train_sampler = None
+            self.val_sampler = None
+        
+        self.train_loader = torch.utils.data.DataLoader(
+            train_dataset, batch_size=self.train_params.batch_size, shuffle=(self.train_sampler is None),
+            num_workers=self.train_params.num_workers, pin_memory=True, sampler=self.train_sampler)
 
-        batch_size = self.train_params['batch_size']
-        
-        trainset = PolynomialData(**self.data_params) 
-        testset = PolynomialData(**self.data_params) 
-        # if input_strategy is quenched, train and test must have the same inputs
-        if self.data_params["input_strategy"] == "quenched":
-            testset.inputs = trainset.inputs
-            testset.data = [testset.sample_point() for _ in range(testset.num_examples)]
-            print(testset.inputs, trainset.inputs)
-        
-        self.trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                              shuffle=True, num_workers=1)
-        
-        self.testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                              shuffle=True, num_workers=1)
+        self.val_loader = torch.utils.data.DataLoader(
+            val_dataset, batch_size=self.train_params.batch_size, shuffle=False,
+            num_workers=self.train_params.num_workers, pin_memory=True, sampler=self.val_sampler)
      
+    def train(self):
+        mp.spawn(self.train_worker, nprocs=self.train_params.ngpus_per_node, args=(self.train_params.ngpus_per_node,))
+        
+    def after_iter(self, output, target, loss, epoch, train_batch_id):
+        if train_batch_id % 30:
+            print("Epoch", epoch, "Loss", loss)
+        # measure accuracy and record loss
+        acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+        self.record.metrics.train_losses[epoch].append(loss.item())
+        self.record.metrics.train_top1[epoch].append(acc1.item())
+        self.record.metrics.train_top5[epoch].append(acc5.item())
+        
+        # compute gradient and do SGD step
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+    def after_epoch(self, epoch, train_batch_id):
+        # compute train metric avgs
+        self.record.metrics.train_losses[epoch] = np.mean(self.record.metrics.train_losses[epoch])
+        self.record.metrics.train_top1[epoch] = np.mean(self.record.metrics.train_top1[epoch])
+        self.record.metrics.train_top5[epoch] = np.mean(self.record.metrics.train_top5[epoch])
+        
+        # evaluate on validation set
+        val_losses, val_top1, val_top5 = 0.0, 0.0, 0.0
+        
+        self.model.eval() # switch to evaluate mode
+        with torch.no_grad():
+            for i, (images, target) in enumerate(self.val_loader):
+                # move data to the same device as model
+                images = images.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True)
+                
+
+                # compute output
+                output = self.model(images)
+                loss = self.criterion(output, target)
+                
+                # measure accuracy and record loss
+                acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+                self.record.metrics.test_losses[epoch].append(loss.item())
+                self.record.metrics.test_top1[epoch].append(acc1.item())
+                self.record.metrics.test_top5[epoch].append(acc5.item())
+
+                #print("val", i)
+                #if i > 5:
+                    #break
+                
+        # compute test metric avgs
+        #print("self.record.metrics.test_losses.get(epoch, [])", self.record.metrics.test_losses.get(epoch, []))
+        #print("self.record.metrics.test_losses.get(epoch, [])", self.record.metrics.test_losses[].get(epoch, []))
+        self.record.metrics.test_losses[epoch] = np.mean(self.record.metrics.test_losses[epoch])
+        self.record.metrics.test_top1[epoch] = np.mean(self.record.metrics.test_top1[epoch])
+        self.record.metrics.test_top5[epoch] = np.mean(self.record.metrics.test_top5[epoch])
+        print("Epoch", epoch, "Average train loss", self.record.metrics.train_losses[epoch], "Top 1 train acc", self.record.metrics.train_top1[epoch], "Top 5 train acc", self.record.metrics.train_top5[epoch])
+        print("Epoch", epoch, "Average val loss", self.record.metrics.test_losses[epoch], "Top 1 val acc", self.record.metrics.test_top1[epoch], "Top 5 val acc", self.record.metrics.test_top5[epoch])
+        
+        # step scheduler
+        self.scheduler.step()
+        
+        # save state_dicts
+        self.record.model_state.curr_model_state
+        # save run
+        self.record.current_epoch = epoch
+        self.save_record()
+        
+    def train_worker(self, gpu, ngpus_per_node):
+        if self.train_params.multiprocessing_distributed:
+            # For multiprocessing distributed training, rank needs to be the
+            # global rank among all the processes
+            rank = self.train_params.rank * ngpus_per_node + gpu
+            print("My train rank is", rank)
+            
+        torch.distributed.init_process_group(backend=self.train_params.dist_backend, init_method=self.train_params.dist_url,
+                              world_size=self.train_params.world_size,rank=rank)
+        self.build_model_optimizer(rank)
+        self.build_data_loader()
+        
+        for epoch in range(self.train_params.num_train_epochs):
+            if self.train_params.multiprocessing_distributed:
+                self.train_sampler.set_epoch(epoch)
+
+            # train for one epoch
+            self.model.train() # switch to train mode
+            for train_batch_id, (images, target) in enumerate(self.train_loader):
+                # move data to the same device as model
+                
+                images = images.to(self.device, non_blocking=True)
+                target = target.to(self.device, non_blocking=True)
+                
+                # compute output
+                output = self.model(images)
+                loss = self.criterion(output, target)
+                
+                self.after_iter(output, target, loss, epoch, train_batch_id)
+                #print("val", i)
+                if i > 5:
+                    break
+                
+                    
+            # validation, scheduler, and other ops
+            self.after_epoch(epoch)        
+            
+        self.after_run()
+        
+    def after_run(self):
+        # Save record
+        self.record.success = True
+        self.save_record()
+        
 def get_runner(args):
     
     def runner(parameter = None):

@@ -17,6 +17,29 @@ IMAGE_CHANNELS = 3
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
+    """default dict"""
+    def __init__(self, *args, **kwargs):
+        if 'default' in kwargs:
+            self.default = kwargs['default']
+            del kwargs['default']
+        else:
+            self.default = None
+        dict.__init__(self, *args, **kwargs)
+        
+    def __repr__(self):
+        return 'defaultdict(%s, %s)' % (self.default,
+                                        dict.__repr__(self))
+
+    def __missing__(self, key):
+        if self.default is not None:
+            return self.default
+        else:
+            raise KeyError(key)
+    def __getitem__(self, key):
+        try:
+            return dict.__getitem__(self, key)
+        except KeyError:
+            return self.__missing__(key)
     def __getattr__(self, key):
         if key.startswith('__') and key.endswith('__'):
             return super(DictionaryLike, self).__getattr__(key)
@@ -43,6 +66,24 @@ def freeze_layer(net, *layers):
         for param in layer.parameters():
             param.requires_grad = False
             
+################# METRICS ########################
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
+    
+################# MODELS ########################
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10, batch_norm = False):
         super(MLP, self).__init__()
@@ -371,6 +412,7 @@ class CIFAR_trainer(BaseTrainer):
         self.save_record()
         
     
+################# SAVING FILES ########################
 def save_file_pickle(fname, file):
     with open(f"{fname}.pkl", 'wb') as f:
         pickle.dump(file, f)
