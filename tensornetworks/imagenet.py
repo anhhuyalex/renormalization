@@ -19,6 +19,7 @@ import datetime
 import os
 import warnings
 import wandb
+import copy
 
 os.environ["WANDB_API_KEY"] = "74369089a72bb385ac20560974425f1e30fd2f94"
 os.environ["WANDB_MODE"] = "offline"
@@ -38,7 +39,7 @@ def get_parser():
     parser.add_argument(
             '--save_dir', 
             #default="/gpfs/milgram/scratch60/turk-browne/an633/renorm",
-            default="/scratch/gpfs/qanguyen/renorm",
+            default="/scratch/gpfs/qanguyen/imagenet_info",
             type=str, 
             action='store')
     parser.add_argument(
@@ -48,6 +49,10 @@ def get_parser():
     parser.add_argument(
             '--data_dir', 
             default="/scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization", type=str, 
+            action='store')
+    parser.add_argument(
+            '--data_rescale', 
+            default=1.0, type=float, 
             action='store')
     
     parser.add_argument(
@@ -79,6 +84,10 @@ def get_parser():
             '--tags', 
             default="debug", type=str, 
             action='store')
+    parser.add_argument(
+            '--resume', 
+            default=None, type=str, 
+            action='store')
     
     parser.add_argument('-d', '--debug', help="in debug mode or not", 
                         action='store_true')
@@ -94,12 +103,14 @@ def get_imagenet_configs(args):
                                        #criterion = criterion, 
                                        lr = args.lr, 
                                        weight_decay = args.weight_decay,
-                                       momentum = args.momentum
+                                       momentum = args.momentum,
+                                       resume = args.resume
                                        )
     
     # Get data params
     data_params = utils.dotdict(
-        data_dir = args.data_dir
+        data_dir = args.data_dir,
+        data_rescale = args.data_rescale
     )
 
     # Get train parameters
@@ -117,7 +128,7 @@ def get_imagenet_configs(args):
                         )
 
     # Get save params
-    save_params = dict(save_dir = args.save_dir)
+    save_params = utils.dotdict(save_dir = args.save_dir)
     
     cfg = dict(
         model_optim_params = model_optim_params,
@@ -142,9 +153,14 @@ class ImagenetTrainer(utils.BaseTrainer):
             ),
             success = False,
             model_state = utils.dotdict(
+                epoch = None,
                 curr_model_state = None,
+                curr_optimizer_state = None,
+                curr_scheduler_state = None,
                 best_model_state = None,
-                best_model_acc = None
+                best_optimizer_state = None,
+                best_scheduler_state = None,
+                best_model_acc = -1e10
             ),
             data_params = self.data_params,
             train_params = self.train_params,
@@ -172,6 +188,7 @@ class ImagenetTrainer(utils.BaseTrainer):
             
         if torch.cuda.is_available():
             self.train_params.ngpus_per_node = torch.cuda.device_count()
+            print(f"Training on {self.train_params.ngpus_per_node} GPUs")
         else:
             self.train_params.ngpus_per_node = 1
 #         if self.train_params.multiprocessing_distributed:
@@ -202,10 +219,11 @@ class ImagenetTrainer(utils.BaseTrainer):
         
         
     def build_model_optimizer(self, rank):
-        
+        print("setting model")
         self.model = torchvision.models.__dict__[self.model_optim_params.model_name]()
         if torch.cuda.is_available():
-            self.model.to(rank)
+            #self.model.to(rank)
+            self.model.cuda()
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
             self.model = torch.nn.parallel.DistributedDataParallel(self.model)
@@ -225,27 +243,34 @@ class ImagenetTrainer(utils.BaseTrainer):
         """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=30, gamma=0.1)
         
-#         if args.resume:
-#             if os.path.isfile(args.resume):
-#                 print("=> loading checkpoint '{}'".format(args.resume))
-#                 if args.gpu is None:
-#                     checkpoint = torch.load(args.resume)
-#                 elif torch.cuda.is_available():
-#                     # Map model to be loaded to specified single gpu.
-#                     loc = 'cuda:{}'.format(args.gpu)
-#                     checkpoint = torch.load(args.resume, map_location=loc)
-#                 args.start_epoch = checkpoint['epoch']
-#                 best_acc1 = checkpoint['best_acc1']
-#                 if args.gpu is not None:
-#                     # best_acc1 may be from a checkpoint from a different GPU
-#                     best_acc1 = best_acc1.to(args.gpu)
-#                 model.load_state_dict(checkpoint['state_dict'])
-#                 optimizer.load_state_dict(checkpoint['optimizer'])
-#                 scheduler.load_state_dict(checkpoint['scheduler'])
-#                 print("=> loaded checkpoint '{}' (epoch {})"
-#                       .format(args.resume, checkpoint['epoch']))
-#             else:
-#                 print("=> no checkpoint found at '{}'".format(args.resume))
+        # Resume model from checkpoint if directed
+        if self.model_optim_params.resume:
+            ckpt_path = f"{self.save_params.save_dir}/{self.model_optim_params.resume}"
+            print(ckpt_path)
+            if os.path.isfile(ckpt_path):
+                print("=> loading checkpoint '{}'".format(ckpt_path))
+                #if args.gpu is None:
+                #    checkpoint = torch.load(args.resume)
+                #elif torch.cuda.is_available():
+                #    # Map model to be loaded to specified single gpu.
+                #   loc = 'cuda:{}'.format(args.gpu)
+                #    checkpoint = torch.load(args.resume, map_location=loc)
+                checkpoint = utils.load_file_pickle(ckpt_path)
+                #self.start_epoch = checkpoint.
+                best_acc1 = checkpoint
+                if args.gpu is not None:
+                    # best_acc1 may be from a checkpoint from a different GPU
+                    best_acc1 = best_acc1.to(args.gpu)
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                scheduler.load_state_dict(checkpoint['scheduler'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                      .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
+        else:
+            self.start_epoch = 0
+                
     def build_data_loader(self):
         traindir = os.path.join(self.data_params.data_dir, 'train')
         valdir = os.path.join(self.data_params.data_dir, 'val')
@@ -255,7 +280,7 @@ class ImagenetTrainer(utils.BaseTrainer):
         train_dataset = torchvision.datasets.ImageFolder(
             traindir,
             transforms.Compose([
-                transforms.RandomResizedCrop(224),
+                transforms.RandomResizedCrop(int(224*self.data_params.data_rescale)),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 normalize,
@@ -269,7 +294,7 @@ class ImagenetTrainer(utils.BaseTrainer):
                 transforms.ToTensor(),
                 normalize,
             ]))
-        #print("data loading")
+        print("loading train_sampler and val_sampler")
         
         if self.train_params.multiprocessing_distributed:
             self.train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
@@ -278,6 +303,7 @@ class ImagenetTrainer(utils.BaseTrainer):
             self.train_sampler = None
             self.val_sampler = None
         
+        print("loading train_loader and val_loader")
         self.train_loader = torch.utils.data.DataLoader(
             train_dataset, batch_size=self.train_params.batch_size, shuffle=(self.train_sampler is None),
             num_workers=self.train_params.num_workers, pin_memory=True, sampler=self.train_sampler)
@@ -285,13 +311,14 @@ class ImagenetTrainer(utils.BaseTrainer):
         self.val_loader = torch.utils.data.DataLoader(
             val_dataset, batch_size=self.train_params.batch_size, shuffle=False,
             num_workers=self.train_params.num_workers, pin_memory=True, sampler=self.val_sampler)
-     
+        print("finished train_loader and val_loader")
+        
     def train(self):
         mp.spawn(self.train_worker, nprocs=self.train_params.ngpus_per_node, args=(self.train_params.ngpus_per_node,))
         
     def after_iter(self, output, target, loss, epoch, train_batch_id):
-        if train_batch_id % 30:
-            print("Epoch", epoch, "Loss", loss)
+        #if train_batch_id % 30 == 1:
+        print("Epoch", epoch, "Loss", loss, flush=True)
         # measure accuracy and record loss
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         self.record.metrics.train_losses[epoch].append(loss.item())
@@ -303,7 +330,7 @@ class ImagenetTrainer(utils.BaseTrainer):
         loss.backward()
         self.optimizer.step()
 
-    def after_epoch(self, epoch, train_batch_id):
+    def after_epoch(self, epoch):
         # compute train metric avgs
         self.record.metrics.train_losses[epoch] = np.mean(self.record.metrics.train_losses[epoch])
         self.record.metrics.train_top1[epoch] = np.mean(self.record.metrics.train_top1[epoch])
@@ -332,7 +359,7 @@ class ImagenetTrainer(utils.BaseTrainer):
 
                 #print("val", i)
                 #if i > 5:
-                    #break
+                #    break
                 
         # compute test metric avgs
         #print("self.record.metrics.test_losses.get(epoch, [])", self.record.metrics.test_losses.get(epoch, []))
@@ -347,7 +374,16 @@ class ImagenetTrainer(utils.BaseTrainer):
         self.scheduler.step()
         
         # save state_dicts
-        self.record.model_state.curr_model_state
+        self.record.model_state.curr_model_state = copy.deepcopy(self.model.state_dict())
+        self.record.model_state.curr_optimizer_state = copy.deepcopy(self.optimizer.state_dict())
+        self.record.model_state.curr_scheduler_state = copy.deepcopy(self.scheduler)
+        
+        if self.record.model_state.best_model_acc < self.record.metrics.test_top1[epoch]:
+            self.record.model_state.best_model_acc = self.record.metrics.test_top1[epoch]
+            self.record.model_state.best_model_state = copy.deepcopy(self.model.state_dict())
+            self.record.model_state.best_optimizer_state = copy.deepcopy(self.optimizer.state_dict())
+            self.record.model_state.best_scheduler_state = copy.deepcopy(self.scheduler)
+        
         # save run
         self.record.current_epoch = epoch
         self.save_record()
@@ -364,26 +400,29 @@ class ImagenetTrainer(utils.BaseTrainer):
         self.build_model_optimizer(rank)
         self.build_data_loader()
         
-        for epoch in range(self.train_params.num_train_epochs):
+        for epoch in range(self.start_epoch, self.train_params.num_train_epochs):
+            print("start epoch", epoch)
             if self.train_params.multiprocessing_distributed:
                 self.train_sampler.set_epoch(epoch)
-
+            print("finish train_sampler", epoch)
             # train for one epoch
             self.model.train() # switch to train mode
+            print("put model in train mode epoch", epoch, torch.cuda.get_device_name(0))
             for train_batch_id, (images, target) in enumerate(self.train_loader):
                 # move data to the same device as model
                 
-                images = images.to(self.device, non_blocking=True)
-                target = target.to(self.device, non_blocking=True)
+                images = images.cuda()#to(self.model.device, non_blocking=True)
+                target = target.cuda()#.to(self.model.device, non_blocking=True)
+                print("cuda images target")
                 
                 # compute output
                 output = self.model(images)
+                print("output", output.shape)
                 loss = self.criterion(output, target)
                 
                 self.after_iter(output, target, loss, epoch, train_batch_id)
-                #print("val", i)
-                if i > 5:
-                    break
+                #if self.stopped_training:
+                #    break
                 
                     
             # validation, scheduler, and other ops
@@ -395,6 +434,7 @@ class ImagenetTrainer(utils.BaseTrainer):
         # Save record
         self.record.success = True
         self.save_record()
+        print("Finished training successfully!")
         
 def get_runner(args):
     

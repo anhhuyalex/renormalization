@@ -1,11 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=hipp_test
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=5
 #SBATCH --mem-per-cpu=5G
 #SBATCH --time=24:00:00
 #SBATCH --partition=della-gpu
-#SBATCH --gres=gpu:1
-#SBATCH --output polynomial-norm-%J.log
+#SBATCH --output imagenet-%J.log
+#SBATCH --gres=a100:1
+
 
 
 # SBATCH --mail-type=ALL
@@ -24,7 +25,7 @@ source activate renormalization
 # python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 5 --num_examples 50000 --model_name mlp_small --random_coefs True --input_strategy random  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --first_layer_l1_regularize $2 --tags vary_l1_regularizer_vary_num_inputs_vary_order 
 # python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 6 --num_examples 50000 --model_name mlp_small --random_coefs True --input_strategy random  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --first_layer_l1_regularize $2 --tags vary_l1_regularizer_vary_num_inputs_vary_order 
 # python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 4 --num_examples 50000 --model_name mlp_small_repeat --random_coefs True --input_strategy repeat  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --first_layer_l1_regularize $2 --tags vary_l1_regularizer_vary_num_inputs_vary_order 
-python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 7 --num_examples 50000 --model_name mlp_small_repeat --random_coefs True --input_strategy repeat  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --tags vary_l1_regularizer_vary_num_inputs_vary_order 
-python -u imagenet.py --model_name resnet18 --num_train_epochs 90
+# python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 7 --num_examples 50000 --model_name mlp_small_repeat --random_coefs True --input_strategy repeat  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --tags vary_l1_regularizer_vary_num_inputs_vary_order 
+python -u imagenet.py --model_name resnet18 --num_train_epochs 90 --resume resnet18_rep_1673537483.310051.pkl
 # python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 3 --num_examples 50000 --model_name mlp_small --input_strategy random  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --first_layer_l1_regularize 0 --tags vary_sample_strategy 
 # python -u polynomial_freeze.py --save_dir /scratch/gpfs/qanguyen/poly_freeze --num_inputs $1 --num_inputs_kept 10 --order 3 --num_examples 50000 --model_name mlp_small_silence --random_coefs True --input_strategy random --output_strategy evaluate_at_0 --noise 0.0 --weight_decay 0.0 --lr 1e-3 --is_online False --num_pretrain_epochs 500 --num_train_epochs 1500
