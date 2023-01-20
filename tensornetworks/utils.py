@@ -11,6 +11,7 @@ import torchvision.models as models
 import numpy as np
 import pickle
 import functools
+import shutil
 
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
@@ -66,6 +67,7 @@ def freeze_layer(net, *layers):
         for param in layer.parameters():
             param.requires_grad = False
             
+
 ################# METRICS ########################
 def accuracy(output, target, topk=(1,)):
     """Computes the accuracy over the k top predictions for the specified values of k"""
@@ -247,6 +249,7 @@ class ShuffledCIFAR10:
             inputs = inputs[:, self.perm].view(IMAGE_CHANNELS, self.image_width, self.image_width)
         return inputs, labels
     
+########### TRAINERS ##################################################
 class BaseTrainer:
     def __init__(self, data_params = dict(),
                        train_params = dict(),
@@ -411,12 +414,16 @@ class CIFAR_trainer(BaseTrainer):
         # Save record
         self.save_record()
         
-    
+
 ################# SAVING FILES ########################
 def save_file_pickle(fname, file):
     with open(f"{fname}.pkl", 'wb') as f:
         pickle.dump(file, f)
         
+def save_checkpoint(state, save_dir = "./", filename='checkpoint.pth.tar'):
+    torch.save(state, f"{save_dir}/{filename}")
+    
+                               
 def load_file_pickle(fname):
     with open(fname, 'rb') as f:
         return pickle.load(f)
@@ -430,3 +437,5 @@ def find_free_port():
         s.bind(('', 0))
         s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         return str(s.getsockname()[1])
+                               
+                               

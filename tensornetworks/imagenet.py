@@ -138,35 +138,92 @@ def get_imagenet_configs(args):
     ) 
     return cfg
 
-
+class RescaleImagenet(torchvision.datasets.ImageFolder):
+    def __init__(self, root = "./data", data_rescale = 1.0, 
+                 target_size = 224,
+                 phase = "train",
+                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])):
+        
+        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
+        self.target_size = target_size
+        self.actual_size = int(target_size*data_rescale)
+        if phase == "train":
+            transform = transforms.Compose([
+                    transforms.RandomResizedCrop(self.actual_size),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+        else:
+            transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(self.actual_size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        
+        super(RescaleImagenet, self).__init__(root, transform)
+        
+    def __getitem__(self, index: int):
+        sample, target = super(RescaleImagenet, self).__getitem__(index)
+        
+        tiles = self.target_size // self.actual_size        
+        # remainder part
+        rem_idx = self.target_size % self.actual_size
+        remainder = sample[:, :, :rem_idx]
+        
+        
+        # tile image horizontally
+        sample = torch.tile(sample, (1, tiles, tiles))
+        
+        # fill in horizontal pieces
+        sample = torch.cat((sample, torch.tile(remainder, (1, tiles, 1))), dim=2)
+        
+        # fill in vertical pieces
+        remainder = sample[:, :rem_idx, :]
+        sample = torch.cat((sample, remainder), dim=1)
+        
+        return sample, target
 class ImagenetTrainer(utils.BaseTrainer):
     def initialize_record(self):
-        self.record = utils.dotdict(
-            current_epoch = -1,
-            metrics = utils.dotdict(
-                train_losses = utils.dotdict(default=[]),
-                train_top1 = utils.dotdict(default=[]),
-                train_top5 = utils.dotdict(default=[]),
-                test_losses = utils.dotdict(default=[]),
-                test_top1 = utils.dotdict(default=[]),
-                test_top5 = utils.dotdict(default=[]),
-            ),
-            success = False,
-            model_state = utils.dotdict(
-                epoch = None,
-                curr_model_state = None,
-                curr_optimizer_state = None,
-                curr_scheduler_state = None,
-                best_model_state = None,
-                best_optimizer_state = None,
-                best_scheduler_state = None,
-                best_model_acc = -1e10
-            ),
-            data_params = self.data_params,
-            train_params = self.train_params,
-            model_optim_params = self.model_optim_params,
-            save_params = self.save_params,
-        )
+        if self.model_optim_params.resume:
+            ckpt_path = f"{self.save_params.save_dir}/{self.model_optim_params.resume}"
+            if os.path.isfile(ckpt_path):
+                self.record = utils.load_file_pickle(ckpt_path)
+            assert self.record.success == False, "success returns True, run has already completed !"
+        else:
+            self.record = utils.dotdict(
+                current_epoch = -1,
+                metrics = utils.dotdict(
+                    train_losses = utils.dotdict(default=[]),
+                    train_top1 = utils.dotdict(default=[]),
+                    train_top5 = utils.dotdict(default=[]),
+                    test_losses = utils.dotdict(default=[]),
+                    test_top1 = utils.dotdict(default=[]),
+                    test_top5 = utils.dotdict(default=[]),
+                ),
+                success = False,
+                model_state = utils.dotdict(
+                    epoch = None,
+                    curr_model_state = None,
+                    curr_optimizer_state = None,
+                    curr_scheduler_state = None,
+                    best_model_state = None,
+                    best_optimizer_state = None,
+                    best_scheduler_state = None,
+                    best_model_acc = -1e10
+                ),
+                data_params = self.data_params,
+                train_params = self.train_params,
+                model_optim_params = self.model_optim_params,
+                save_params = self.save_params,
+            )
+        print("data params",  self.data_params)
+        print("train params",  self.train_params)
+        print("model params",  self.model_optim_params)
+        print("save params",  self.save_params)
+            
     def setup(self):
         #self.build_data_loader()
         #self.build_model_optimizer()
@@ -222,8 +279,8 @@ class ImagenetTrainer(utils.BaseTrainer):
         print("setting model")
         self.model = torchvision.models.__dict__[self.model_optim_params.model_name]()
         if torch.cuda.is_available():
-            #self.model.to(rank)
-            self.model.cuda()
+            self.model.to(rank)
+#             self.model.cuda()
             # DistributedDataParallel will divide and allocate batch_size to all
             # available GPUs if device_ids are not set
             self.model = torch.nn.parallel.DistributedDataParallel(self.model)
@@ -246,7 +303,7 @@ class ImagenetTrainer(utils.BaseTrainer):
         # Resume model from checkpoint if directed
         if self.model_optim_params.resume:
             ckpt_path = f"{self.save_params.save_dir}/{self.model_optim_params.resume}"
-            print(ckpt_path)
+            print(ckpt_path, "Record should have already been loaded")
             if os.path.isfile(ckpt_path):
                 print("=> loading checkpoint '{}'".format(ckpt_path))
                 #if args.gpu is None:
@@ -255,45 +312,31 @@ class ImagenetTrainer(utils.BaseTrainer):
                 #    # Map model to be loaded to specified single gpu.
                 #   loc = 'cuda:{}'.format(args.gpu)
                 #    checkpoint = torch.load(args.resume, map_location=loc)
-                checkpoint = utils.load_file_pickle(ckpt_path)
-                #self.start_epoch = checkpoint.
-                best_acc1 = checkpoint
-                if args.gpu is not None:
-                    # best_acc1 may be from a checkpoint from a different GPU
-                    best_acc1 = best_acc1.to(args.gpu)
-                model.load_state_dict(checkpoint['state_dict'])
-                optimizer.load_state_dict(checkpoint['optimizer'])
-                scheduler.load_state_dict(checkpoint['scheduler'])
-                print("=> loaded checkpoint '{}' (epoch {})"
-                      .format(args.resume, checkpoint['epoch']))
+                
+                # start_epoch is final epoch in checkpoint + 1
+                self.start_epoch = max([int(i) for i in self.record.metrics.test_top1.keys() if i != 'default']) + 1
+                
+                self.model.load_state_dict(self.record.model_state.curr_model_state)
+                self.optimizer.load_state_dict(self.record.model_state.curr_optimizer_state)
+                self.scheduler = self.record.model_state.curr_scheduler_state
+                print("=> loaded checkpoint '{}', starting at epoch {})"
+                      .format(ckpt_path, self.start_epoch))
             else:
-                print("=> no checkpoint found at '{}'".format(args.resume))
+                print("=> no checkpoint found at '{}'".format(ckpt_path))
         else:
             self.start_epoch = 0
                 
     def build_data_loader(self):
         traindir = os.path.join(self.data_params.data_dir, 'train')
         valdir = os.path.join(self.data_params.data_dir, 'val')
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+        
 
-        train_dataset = torchvision.datasets.ImageFolder(
-            traindir,
-            transforms.Compose([
-                transforms.RandomResizedCrop(int(224*self.data_params.data_rescale)),
-                transforms.RandomHorizontalFlip(),
-                transforms.ToTensor(),
-                normalize,
-            ]))
+        train_dataset = RescaleImagenet(
+            root = traindir, data_rescale = self.data_params.data_rescale, phase = "train"
+            )
 
-        val_dataset = torchvision.datasets.ImageFolder(
-            valdir,
-            transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                normalize,
-            ]))
+        val_dataset = RescaleImagenet(
+            root = valdir, data_rescale = self.data_params.data_rescale, phase = "test")
         print("loading train_sampler and val_sampler")
         
         if self.train_params.multiprocessing_distributed:
@@ -317,8 +360,8 @@ class ImagenetTrainer(utils.BaseTrainer):
         mp.spawn(self.train_worker, nprocs=self.train_params.ngpus_per_node, args=(self.train_params.ngpus_per_node,))
         
     def after_iter(self, output, target, loss, epoch, train_batch_id):
-        #if train_batch_id % 30 == 1:
-        print("Epoch", epoch, "Loss", loss, flush=True)
+        if train_batch_id % 10 == 1:
+            print("Epoch", epoch, "Loss", loss, flush=True)
         # measure accuracy and record loss
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         self.record.metrics.train_losses[epoch].append(loss.item())
