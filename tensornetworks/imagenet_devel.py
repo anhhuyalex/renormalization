@@ -121,8 +121,8 @@ class RescaleImagenet(datasets.ImageFolder):
         
         super(RescaleImagenet, self).__init__(root, transform)
         
-    def __len__(self):
-        return 100
+    #def __len__(self):
+    #    return 256*100
     
     def __getitem__(self, index: int):
         sample, target = super(RescaleImagenet, self).__getitem__(index)
@@ -176,13 +176,14 @@ def main():
     # Save parameters
     args.exp_name = f"{args.arch}" \
                 + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
-
+    print(f"saved to {args.save_dir}/{args.exp_name}", )
     if args.multiprocessing_distributed:
         # Since we have ngpus_per_node processes per node, the total world_size
         # needs to be adjusted accordingly
         args.world_size = ngpus_per_node * args.world_size
         # Use torch.multiprocessing.spawn to launch distributed processes: the
         # main_worker process function
+        print("ngpus_per_node * args.world_size", ngpus_per_node, args.world_size)
         mp.spawn(main_worker, nprocs=ngpus_per_node, args=(ngpus_per_node, args))
     else:
         # Simply call main_worker function
@@ -218,6 +219,7 @@ def main_worker(gpu, ngpus_per_node, args):
         # For multiprocessing distributed, DistributedDataParallel constructor
         # should always set the single device scope, otherwise,
         # DistributedDataParallel will use all available devices.
+        print('using distributed')
         if torch.cuda.is_available():
             if args.gpu is not None:
                 torch.cuda.set_device(args.gpu)
@@ -343,11 +345,11 @@ def main_worker(gpu, ngpus_per_node, args):
         return
     
     best_model = None
-    print(wa)
+    
     for epoch in range(record.curr_epoch, record.train_params.num_train_epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-
+        print("Here2")
         # train for one epoch
         train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, epoch, device, args)
 
@@ -392,7 +394,7 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
         len(train_loader),
         [batch_time, data_time, losses, top1, top5],
         prefix="Epoch: [{}]".format(epoch))
-
+    print(device, id(losses), id(top1), id(top5))
     # switch to train mode
     model.train()
 
