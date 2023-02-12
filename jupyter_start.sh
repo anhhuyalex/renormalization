@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=1
 #SBATCH --time=24:00:00
 #SBATCH --job-name=jupyter-notebook
 #SBATCH --output=jupyter-notebook-%J.log
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=alexn@minerva.kgi.edu
-# SBATCH --partition=della-gpu
-# SBATCH --gres=gpu:1
+#SBATCH --partition=mig
+#SBATCH --gres=gpu:1
 
 # get tunneling info
 XDG_RUNTIME_DIR=""

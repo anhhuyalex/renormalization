@@ -55,6 +55,25 @@ parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
 parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
+parser.add_argument('--scheduler_step_size', default=30, type=int,
+                    help='scheduler_step_size (default: 30)',
+                    dest='scheduler_step_size')
+
+parser.add_argument('--image_transform_loader',   
+                    default=  'TileImagenet',
+                     choices=['dummy', 'RescaleImagenet', 'TileImagenet'],
+                    help='type of image perturbation to run')
+parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
+                    help='whether to zero out center or do something else')
+parser.add_argument(
+            '--tiling_orientation_ablation', 
+            default=False, type=lambda x: (str(x).lower() == 'true')
+)
+parser.add_argument('--zero_out', default=None, type=str,  
+                    help='whether to zero out center or do something else')
+parser.add_argument('--growth_factor', default=1.0, type=float,
+                    help='growth factor for zero_out = grow_from_center, default=1.0 ',
+                    dest='growth_factor')
 parser.add_argument('-p', '--print-freq', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -98,11 +117,32 @@ class RescaleImagenet(datasets.ImageFolder):
                  target_size = 224,
                  phase = "train",
                  normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])):
+                                     std=[0.229, 0.224, 0.225]),
+                 zero_out = None,
+                 growth_factor = 1.0
+                ):
         
         assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
         self.target_size = target_size
         self.actual_size = int(target_size*data_rescale)
+        self.zero_out = zero_out
+       
+        # number of tilings of the reduced sample
+        self.tiles = self.target_size // self.actual_size        
+        # remainder part
+        self.rem_idx = self.target_size % self.actual_size
+        
+        if self.zero_out == "all_except_center":
+            middle_tile = self.tiles // 2
+            self.start_id = middle_tile * self.actual_size
+            self.end_id = self.start_id + self.actual_size
+        elif self.zero_out == "grow_from_center":
+            self.growth_size = int(self.actual_size * growth_factor)
+            assert self.growth_size <= self.target_size, f"Desired growth size {self.growth_size} exceeds target size {self.target_size}"
+
+            self.start_id = (self.target_size - self.growth_size) // 2
+            self.end_id = self.start_id + self.growth_size
+        
         if phase == "train":
             transform = transforms.Compose([
                     transforms.RandomResizedCrop(self.actual_size),
@@ -122,32 +162,103 @@ class RescaleImagenet(datasets.ImageFolder):
         super(RescaleImagenet, self).__init__(root, transform)
         
     #def __len__(self):
-    #    return 256*100
+    #    return 256*10
     
     def __getitem__(self, index: int):
         sample, target = super(RescaleImagenet, self).__getitem__(index)
         
-        tiles = self.target_size // self.actual_size        
-        # remainder part
-        rem_idx = self.target_size % self.actual_size
-        remainder = sample[:, :, :rem_idx]
+        
+        remainder = sample[:, :, :self.rem_idx]
         
         
         # tile image horizontally
-        sample = torch.tile(sample, (1, tiles, tiles))
+        sample = torch.tile(sample, (1, self.tiles, self.tiles))
         
         # fill in horizontal pieces
-        sample = torch.cat((sample, torch.tile(remainder, (1, tiles, 1))), dim=2)
+        sample = torch.cat((sample, torch.tile(remainder, (1, self.tiles, 1))), dim=2)
         
         # fill in vertical pieces
-        remainder = sample[:, :rem_idx, :]
+        remainder = sample[:, :self.rem_idx, :]
         sample = torch.cat((sample, remainder), dim=1)
         
-        return sample, target
+        # optionally zero out 
+        if self.zero_out in ["all_except_center", "grow_from_center"]:
+            zeros = torch.zeros_like(sample)
+            zeros[:, self.start_id:self.end_id, self.start_id:self.end_id] = sample[:, self.start_id:self.end_id, self.start_id:self.end_id]
+            return zeros, target
+        else:
+            return sample, target
     
+class TileImagenet(datasets.ImageFolder):
+    def __init__(self, root = "./data",  
+                 target_size = 224,
+                 tile = [1, 1],
+                 tiling_orientation_ablation = False,
+                 phase = "train",
+                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225]),
+                ):
+        
+        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
+        self.target_size = target_size
+        assert isinstance(tile, list) and len(tile) == 2, "tile must be a list of 2 numbers, default is [1, 1] to return original image"
+        self.nrow, self.ncol = tile
+        self.tile = tile
+        self.tiling_orientation_ablation = tiling_orientation_ablation
+        if phase == "train":
+            transform = transforms.Compose([
+                    transforms.RandomResizedCrop(self.target_size),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+        else:
+            transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(self.target_size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        
+        super(TileImagenet, self).__init__(root, transform)
+        
+    #def __len__(self):
+    #    return 256*10
+    
+    def __getitem__(self, index: int):
+        sample, target = super(TileImagenet, self).__getitem__(index)
+        
+        # tile image 
+        if self.tiling_orientation_ablation == True:
+            upside_down_flip = torch.flip(sample, dims=[1])
+            left_right_flip = torch.flip(sample, dims=[2])
+            
+            first_row = third_row = torch.tile(upside_down_flip, [1, 1] + [self.ncol])
+            central_column = torch.cat([upside_down_flip, sample, upside_down_flip], dim=1)
+            
+            if self.ncol == 1:
+                sample = central_column
+            elif self.ncol == 2:
+                upside_down_left_right_flip = torch.flip(sample, dims=[1,2])
+                side_column = torch.cat([upside_down_left_right_flip, left_right_flip, upside_down_left_right_flip], dim=1)
+                sample = torch.cat([side_column, central_column], dim=2)
+            elif self.ncol == 3:
+                upside_down_left_right_flip = torch.flip(sample, dims=[1,2])
+                side_column = torch.cat([upside_down_left_right_flip, left_right_flip, upside_down_left_right_flip], dim=1)
+                sample = torch.cat([side_column, central_column, side_column], dim=2)
+                    
+            # get nrow rows
+            sample = sample[:,:self.target_size*self.nrow,:]
+            
+                
+        elif self.tiling_orientation_ablation == False:
+            sample = torch.tile(sample, [1] + self.tile)
+            
+        return sample, target
 def main():
     args = parser.parse_args()
-
+    print("Args", args)
+    
     if args.seed is not None:
         random.seed(args.seed)
         torch.manual_seed(args.seed)
@@ -165,7 +276,10 @@ def main():
 
     if args.dist_url == "env://" and args.world_size == -1:
         args.world_size = int(os.environ["WORLD_SIZE"])
-
+    else:
+        args.dist_url = f"{args.dist_url}:{utils.find_free_port()}"
+        print("Freeport", args.dist_url, flush=True)
+        
     args.distributed = args.world_size > 1 or args.multiprocessing_distributed
 
     if torch.cuda.is_available():
@@ -203,6 +317,7 @@ def main_worker(gpu, ngpus_per_node, args):
             # For multiprocessing distributed training, rank needs to be the
             # global rank among all the processes
             args.rank = args.rank * ngpus_per_node + gpu
+        
         dist.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
                                 world_size=args.world_size, rank=args.rank)
     # create model
@@ -261,7 +376,7 @@ def main_worker(gpu, ngpus_per_node, args):
                                 weight_decay=args.weight_decay)
     
     """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    scheduler = StepLR(optimizer, step_size=30, gamma=0.1)
+    scheduler = StepLR(optimizer, step_size=args.scheduler_step_size, gamma=0.1)
     
     # optionally resume from a record
     if args.resume:
@@ -284,7 +399,7 @@ def main_worker(gpu, ngpus_per_node, args):
         # Initialize record
         record = utils.dotdict(
                 curr_epoch = 0,
-                arch = args.arch,
+                args = args,
                 state_dict = None,
                 best_val_acc1 = -1e10,
                 best_model = None,
@@ -304,24 +419,50 @@ def main_worker(gpu, ngpus_per_node, args):
                     val_losses = utils.dotdict(),
                     val_acc5 = utils.dotdict(),
                     val_acc1 = utils.dotdict(),
-                )
+                ),
+                gradient_stats = utils.dotdict(default=[])
         )  
     
     # Data loading code
-    if args.dummy:
+    if args.image_transform_loader == "dummy":
         print("=> Dummy data is used!")
-        train_dataset = datasets.FakeData(1281167, (3, 224, 224), 1000, transforms.ToTensor())
-        val_dataset = datasets.FakeData(50000, (3, 224, 224), 1000, transforms.ToTensor())
-    else:
+        train_dataset = datasets.FakeData(10, (3, 224, 224), 1000, transforms.ToTensor())
+        val_dataset = datasets.FakeData(50, (3, 224, 224), 1000, transforms.ToTensor())
+    elif args.image_transform_loader == "RescaleImagenet":
         traindir = os.path.join(args.data, 'train')
         valdir = os.path.join(args.data, 'val')
       
         train_dataset = RescaleImagenet(
-            root = traindir, data_rescale = record.data_rescale, phase = "train"
+            root = traindir, data_rescale = record.data_rescale, phase = "train", 
+            zero_out = args.zero_out,
+            growth_factor = args.growth_factor
             )
         
         val_dataset = RescaleImagenet(
-            root = valdir, data_rescale = record.data_rescale, phase = "test")
+            root = valdir, data_rescale = record.data_rescale, phase = "test", 
+            zero_out = args.zero_out,
+            growth_factor = args.growth_factor
+        )
+    elif args.image_transform_loader == "TileImagenet":
+        traindir = os.path.join(args.data, 'train')
+        valdir = os.path.join(args.data, 'val')
+        tile = [int(t) for t in args.tiling_imagenet.split(",")]
+        print("tile", tile)
+        train_dataset = TileImagenet(
+            root = traindir,  
+            phase = "train", 
+            tile = tile,
+            tiling_orientation_ablation = args.tiling_orientation_ablation
+            )
+        
+        val_dataset = TileImagenet(
+            root = valdir, 
+            phase = "test", 
+            tile = tile,
+            tiling_orientation_ablation = args.tiling_orientation_ablation
+        )
+    else:
+        raise ValueError(f"{args.image_transform_loader} not supported")
 
     if args.distributed:
         train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
@@ -351,7 +492,7 @@ def main_worker(gpu, ngpus_per_node, args):
             train_sampler.set_epoch(epoch)
         print("Here2")
         # train for one epoch
-        train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, epoch, device, args)
+        train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, epoch, device, args, record)
 
         # evaluate on validation set
         val_losses, val_acc5, val_acc1 = validate(val_loader, model, criterion, args)
@@ -384,7 +525,7 @@ def main_worker(gpu, ngpus_per_node, args):
             utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
 
 
-def train(train_loader, model, criterion, optimizer, epoch, device, args):
+def train(train_loader, model, criterion, optimizer, epoch, device, args, record):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -410,7 +551,7 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
         # compute output
         output = model(images)
         loss = criterion(output, target)
-
+        
         # measure accuracy and record loss
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         losses.update(loss.item(), images.size(0))
@@ -420,6 +561,7 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
+         
         optimizer.step()
 
         # measure elapsed time
@@ -428,6 +570,8 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args):
 
         if i % args.print_freq == 0:
             progress.display(i + 1)
+            for name, t in model.named_parameters():
+                record.gradient_stats[name].append(t.grad.mean())
             
     if args.distributed:
         losses.all_reduce()
@@ -564,7 +708,7 @@ class ProgressMeter(object):
     def display(self, batch):
         entries = [self.prefix + self.batch_fmtstr.format(batch)]
         entries += [str(meter) for meter in self.meters]
-        print('\t'.join(entries))
+        print('\t'.join(entries),flush=True)
         
     def display_summary(self):
         entries = [" *"]

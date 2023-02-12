@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=hipp_test
-#SBATCH --cpus-per-task=5
+#SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=5G
 #SBATCH --time=48:00:00
 #SBATCH --partition=della-gpu
@@ -26,4 +26,12 @@ source activate renormalization
 # python -u polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 7 --num_examples 50000 --model_name mlp_small_repeat --random_coefs True --input_strategy repeat  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --weight_decay 0.0 --lr 5e-3 --tags vary_l1_regularizer_vary_num_inputs_vary_order 
 # python -u imagenet.py --model_name resnet18 --num_train_epochs 90 --resume resnet18_rep_1673614260.528039.pkl
 # python -u imagenet_devel.py --model_name resnet18 --num_train_epochs 90 --data_rescale $1 #--resume resnet18_rep_1673625654.48548.pkl
-python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1:53331' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization --data_rescale $1
+# python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization --data_rescale $1 --epochs 36 --scheduler_step_size 12 --zero_out all_except_center
+# python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 36 --scheduler_step_size 12  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation True
+# for tiling in "1,1" "1,2" "1,3" "2,1" "2,2" "2,3" "3,1" "3,2" "3,3"; do sbatch hipp.sh $tiling; done
+
+python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 90 --scheduler_step_size 30  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation True
+
+
+# for growth_factor in 1.0 1.3 1.6 1.9 2.2 2.5 2.8 3.1;  do sbatch hipp.sh $growth_factor; done 
+# python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization --data_rescale 0.3 --epochs 36 --scheduler_step_size 12 --zero_out grow_from_center --growth_factor $1
