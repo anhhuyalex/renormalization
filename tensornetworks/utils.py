@@ -16,6 +16,7 @@ import shutil
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
 
+
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
     """default dict"""
@@ -86,6 +87,8 @@ def accuracy(output, target, topk=(1,)):
         return res
     
 ################# MODELS ########################
+
+
 class MLP(nn.Module):
     def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10, batch_norm = False):
         super(MLP, self).__init__()
@@ -229,6 +232,27 @@ class VGG(nn.Module):
         unnormalised_scores = self.VGG(images)
         return unnormalised_scores
 
+class Ensemble(nn.Module):
+    def __init__(self, num_models, model_func, model_kwargs = {}):
+        
+        super(Ensemble, self).__init__()
+        
+        self.models = nn.ModuleList([model_func(**model_kwargs) for _ in range(num_models)])
+        
+    def forward(self, x):
+        submodel_scores = [f(x) for f in self.models]
+        unnormalised_scores = torch.mean(torch.stack(submodel_scores), dim=0)
+        return unnormalised_scores, submodel_scores
+    
+models_registry = dict(
+    MLP = MLP,
+    ResNet = ResNet,
+    CNN = CNN,
+    AlexNet = AlexNet,
+    VGG = VGG,
+    Ensemble = Ensemble
+)
+########### DATASETS ##################################################
 class ShuffledCIFAR10:
     def __init__(self, *, 
                  pixel_shuffled = None, image_width = IMAGE_WIDTH, train = True, download=False, transform = None,

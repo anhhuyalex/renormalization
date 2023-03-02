@@ -7,8 +7,8 @@
 #SBATCH --output=jupyter-notebook-%J.log
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=alexn@minerva.kgi.edu
-#SBATCH --partition=mig
-#SBATCH --gres=gpu:1
+# SBATCH --partition=mig
+# SBATCH --gres=gpu:1
 
 # get tunneling info
 XDG_RUNTIME_DIR=""

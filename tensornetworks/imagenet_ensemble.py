@@ -63,17 +63,10 @@ parser.add_argument('--image_transform_loader',
                     default=  'TileImagenet',
                      choices=['dummy', 'RescaleImagenet', 'TileImagenet'],
                     help='type of image perturbation to run')
-parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
-                    help='whether to zero out center or do something else')
-parser.add_argument(
-            '--tiling_orientation_ablation', 
-            default=False, type=lambda x: (str(x).lower() == 'true')
-)
-parser.add_argument('--zero_out', default=None, type=str,  
-                    help='whether to zero out center or do something else')
-parser.add_argument('--growth_factor', default=1.0, type=float,
-                    help='growth factor for zero_out = grow_from_center, default=1.0 ',
-                    dest='growth_factor')
+ 
+parser.add_argument('--num_models_ensemble', default=2, type=int,
+                    help='number of models in ensemble (default: 2)',
+                    dest='num_models_ensemble')
 parser.add_argument('-p', '--print-freq', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -105,90 +98,8 @@ parser.add_argument(
             #default="/gpfs/milgram/scratch60/turk-browne/an633/renorm",
             default="/scratch/gpfs/qanguyen/imagenet_info",
             type=str, 
-            action='store')
-parser.add_argument(
-            '--data_rescale', 
-            default=1.0, type=float, 
-            action='store')
+            action='store') 
 
-
-class RescaleImagenet(datasets.ImageFolder):
-    def __init__(self, root = "./data", data_rescale = 1.0, 
-                 target_size = 224,
-                 phase = "train",
-                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                 zero_out = None,
-                 growth_factor = 1.0
-                ):
-        
-        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
-        self.target_size = target_size
-        self.actual_size = int(target_size*data_rescale)
-        self.zero_out = zero_out
-       
-        # number of tilings of the reduced sample
-        self.tiles = self.target_size // self.actual_size        
-        # remainder part
-        self.rem_idx = self.target_size % self.actual_size
-        
-        if self.zero_out == "all_except_center":
-            middle_tile = self.tiles // 2
-            self.start_id = middle_tile * self.actual_size
-            self.end_id = self.start_id + self.actual_size
-        elif self.zero_out == "grow_from_center":
-            self.growth_size = int(self.actual_size * growth_factor)
-            assert self.growth_size <= self.target_size, f"Desired growth size {self.growth_size} exceeds target size {self.target_size}"
-
-            self.start_id = (self.target_size - self.growth_size) // 2
-            self.end_id = self.start_id + self.growth_size
-        
-        if phase == "train":
-            transform = transforms.Compose([
-                    transforms.RandomResizedCrop(self.actual_size),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(self.target_size),
-                transforms.Resize(self.actual_size),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        
-        super(RescaleImagenet, self).__init__(root, transform)
-        
-    #def __len__(self):
-    #    return 256*10
-    
-    def __getitem__(self, index: int):
-        sample, target = super(RescaleImagenet, self).__getitem__(index)
-        
-        
-        remainder = sample[:, :, :self.rem_idx]
-        
-        
-        # tile image horizontally
-        sample = torch.tile(sample, (1, self.tiles, self.tiles))
-        
-        # fill in horizontal pieces
-        sample = torch.cat((sample, torch.tile(remainder, (1, self.tiles, 1))), dim=2)
-        
-        # fill in vertical pieces
-        remainder = sample[:, :self.rem_idx, :]
-        sample = torch.cat((sample, remainder), dim=1)
-        
-        # optionally zero out 
-        if self.zero_out in ["all_except_center", "grow_from_center"]:
-            zeros = torch.zeros_like(sample)
-            zeros[:, self.start_id:self.end_id, self.start_id:self.end_id] = sample[:, self.start_id:self.end_id, self.start_id:self.end_id]
-            return zeros, target
-        else:
-            return sample, target
-    
 class TileImagenet(datasets.ImageFolder):
     def __init__(self, root = "./data",  
                  target_size = 224,
@@ -197,6 +108,7 @@ class TileImagenet(datasets.ImageFolder):
                  phase = "train",
                  normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                      std=[0.229, 0.224, 0.225]),
+                 num_augs = 1
                 ):
         
         assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
@@ -205,6 +117,7 @@ class TileImagenet(datasets.ImageFolder):
         self.nrow, self.ncol = tile
         self.tile = tile
         self.tiling_orientation_ablation = tiling_orientation_ablation
+        self.num_augs = num_augs
         if phase == "train":
             transform = transforms.Compose([
                     transforms.RandomResizedCrop(self.target_size),
@@ -225,36 +138,10 @@ class TileImagenet(datasets.ImageFolder):
     #def __len__(self):
     #    return 256*10
     
-    def __getitem__(self, index: int):
-        sample, target = super(TileImagenet, self).__getitem__(index)
-        
-        # tile image 
-        if self.tiling_orientation_ablation == True:
-            upside_down_flip = torch.flip(sample, dims=[1])
-            left_right_flip = torch.flip(sample, dims=[2])
-            
-            first_row = third_row = torch.tile(upside_down_flip, [1, 1] + [self.ncol])
-            central_column = torch.cat([upside_down_flip, sample, upside_down_flip], dim=1)
-            
-            if self.ncol == 1:
-                sample = central_column
-            elif self.ncol == 2:
-                upside_down_left_right_flip = torch.flip(sample, dims=[1,2])
-                side_column = torch.cat([upside_down_left_right_flip, left_right_flip, upside_down_left_right_flip], dim=1)
-                sample = torch.cat([side_column, central_column], dim=2)
-            elif self.ncol == 3:
-                upside_down_left_right_flip = torch.flip(sample, dims=[1,2])
-                side_column = torch.cat([upside_down_left_right_flip, left_right_flip, upside_down_left_right_flip], dim=1)
-                sample = torch.cat([side_column, central_column, side_column], dim=2)
-                    
-            # get nrow rows
-            sample = sample[:,:self.target_size*self.nrow,:]
-            
-                
-        elif self.tiling_orientation_ablation == False:
-            sample = torch.tile(sample, [1] + self.tile)
-            
-        return sample, target
+    
+    #def __getitem__(self, index: int):
+    #    sample, target = super(TileImagenet, self).__getitem__(index)
+    #    return  sample , target
 def main():
     args = parser.parse_args()
     print("Args", args)
@@ -288,7 +175,8 @@ def main():
         ngpus_per_node = 1
         
     # Save parameters
-    args.exp_name = f"{args.arch}" \
+    args.exp_name = f"Ensemble36Epochs{args.arch}" \
+                + f"_num_ensemble_{args.num_models_ensemble}" \
                 + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
     print(f"saved to {args.save_dir}/{args.exp_name}", )
     if args.multiprocessing_distributed:
@@ -326,7 +214,11 @@ def main_worker(gpu, ngpus_per_node, args):
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
+        ensemble_kwargs = dict(
+            model_func = models.__dict__[args.arch],
+            num_models = args.num_models_ensemble
+        )
+        model = utils.models_registry["Ensemble"](**ensemble_kwargs)
 
     if not torch.cuda.is_available():
         print('using CPU, this will be slow')
@@ -405,7 +297,6 @@ def main_worker(gpu, ngpus_per_node, args):
                 best_model = None,
                 optimizer = None,
                 scheduler = None,
-                data_rescale = args.data_rescale,
                 train_params = utils.dotdict(
                     lr = args.lr,
                     momentum=args.momentum,
@@ -419,6 +310,14 @@ def main_worker(gpu, ngpus_per_node, args):
                     val_losses = utils.dotdict(),
                     val_acc5 = utils.dotdict(),
                     val_acc1 = utils.dotdict(),
+                    
+
+                    train_submodel_losses = utils.dotdict(),
+                    train_submodel_top5 = utils.dotdict(),
+                    train_submodel_top1 = utils.dotdict(),
+                    val_submodel_losses = utils.dotdict(),
+                    val_submodel_top5 = utils.dotdict(),
+                    val_submodel_top1 = utils.dotdict(),
                 ),
                 gradient_stats = utils.dotdict(default=[])
         )  
@@ -428,38 +327,21 @@ def main_worker(gpu, ngpus_per_node, args):
         print("=> Dummy data is used!")
         train_dataset = datasets.FakeData(10, (3, 224, 224), 1000, transforms.ToTensor())
         val_dataset = datasets.FakeData(50, (3, 224, 224), 1000, transforms.ToTensor())
-    elif args.image_transform_loader == "RescaleImagenet":
-        traindir = os.path.join(args.data, 'train')
-        valdir = os.path.join(args.data, 'val')
-      
-        train_dataset = RescaleImagenet(
-            root = traindir, data_rescale = record.data_rescale, phase = "train", 
-            zero_out = args.zero_out,
-            growth_factor = args.growth_factor
-            )
-        
-        val_dataset = RescaleImagenet(
-            root = valdir, data_rescale = record.data_rescale, phase = "test", 
-            zero_out = args.zero_out,
-            growth_factor = args.growth_factor
-        )
     elif args.image_transform_loader == "TileImagenet":
         traindir = os.path.join(args.data, 'train')
         valdir = os.path.join(args.data, 'val')
-        tile = [int(t) for t in args.tiling_imagenet.split(",")]
-        print("tile", tile)
         train_dataset = TileImagenet(
             root = traindir,  
             phase = "train", 
-            tile = tile,
-            tiling_orientation_ablation = args.tiling_orientation_ablation
+            tile = [1,1],
+            num_augs = args.num_models_ensemble
             )
         
         val_dataset = TileImagenet(
             root = valdir, 
             phase = "test", 
-            tile = tile,
-            tiling_orientation_ablation = args.tiling_orientation_ablation
+            tile = [1,1],
+            num_augs = args.num_models_ensemble
         )
     else:
         raise ValueError(f"{args.image_transform_loader} not supported")
@@ -490,12 +372,11 @@ def main_worker(gpu, ngpus_per_node, args):
     for epoch in range(record.curr_epoch, record.train_params.num_train_epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        print("Here2")
         # train for one epoch
-        train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, epoch, device, args, record)
+        train_losses, train_acc5, train_acc1, train_submodel_losses, train_submodel_top1, train_submodel_top5 = train(train_loader, model, criterion, optimizer, epoch, device, args, record)
 
         # evaluate on validation set
-        val_losses, val_acc5, val_acc1 = validate(val_loader, model, criterion, args)
+        val_losses, val_acc5, val_acc1, val_submodel_losses, val_submodel_top1, val_submodel_top5 = validate(val_loader, model, criterion, args)
         
         scheduler.step()
         
@@ -521,6 +402,12 @@ def main_worker(gpu, ngpus_per_node, args):
             record.metrics.val_acc5[epoch] = val_acc5
             record.metrics.val_acc1[epoch] = val_acc1
                 
+            record.metrics.train_submodel_losses[epoch] = train_submodel_losses
+            record.metrics.train_submodel_top5[epoch] = train_submodel_top5
+            record.metrics.train_submodel_top1[epoch] = train_submodel_top1
+            record.metrics.val_submodel_losses[epoch] = val_submodel_losses
+            record.metrics.val_submodel_top5[epoch] = val_submodel_top5
+            record.metrics.val_submodel_top1[epoch] = val_submodel_top1
                 
             utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
 
@@ -529,8 +416,11 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args, record
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
+    submodel_losses = [AverageMeter('Loss', ':.4e') for _ in range(args.num_models_ensemble)]
     top1 = AverageMeter('Acc@1', ':6.2f')
+    submodel_top1 = [AverageMeter('Acc@1', ':6.2f') for _ in range(args.num_models_ensemble)]
     top5 = AverageMeter('Acc@5', ':6.2f')
+    submodel_top5 = [AverageMeter('Acc@5', ':6.2f') for _ in range(args.num_models_ensemble)]
     progress = ProgressMeter(
         len(train_loader),
         [batch_time, data_time, losses, top1, top5],
@@ -545,19 +435,28 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args, record
         data_time.update(time.time() - end)
 
         # move data to the same device as model
-        images = images.to(device, non_blocking=True)
+        
+        images = images.to(device, non_blocking=True)  
         target = target.to(device, non_blocking=True)
 
         # compute output
-        output = model(images)
+        output, submodel_scores = model(images)
         loss = criterion(output, target)
+        
         
         # measure accuracy and record loss
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
+        
         losses.update(loss.item(), images.size(0))
         top1.update(acc1[0], images.size(0))
         top5.update(acc5[0], images.size(0))
-
+        for m in range(args.num_models_ensemble):
+            submodel_losses[m].update(criterion(submodel_scores[m], target).item(), images.size(0))
+            acc1, acc5 = utils.accuracy(submodel_scores[m], target, topk=(1, 5))
+            submodel_top1[m].update(acc1[0], images.size(0))
+            submodel_top5[m].update(acc5[0], images.size(0))
+            
+            
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
@@ -577,8 +476,13 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args, record
         losses.all_reduce()
         top1.all_reduce()
         top5.all_reduce()
+        for m in range(args.num_models_ensemble):
+            submodel_losses[m].all_reduce()
+            submodel_top1[m].all_reduce()
+            submodel_top5[m].all_reduce()
+            
         
-    return losses.avg, top5.avg, top1.avg
+    return losses.avg, top5.avg, top1.avg, submodel_losses, submodel_top1, submodel_top5
 
 
 def validate(val_loader, model, criterion, args):
@@ -589,12 +493,12 @@ def validate(val_loader, model, criterion, args):
             for i, (images, target) in enumerate(loader):
                 i = base_progress + i
                 if args.gpu is not None and torch.cuda.is_available():
-                    images = images.cuda(args.gpu, non_blocking=True)
+                    images = images.to(args.gpu, non_blocking=True)  
                 if torch.cuda.is_available():
                     target = target.cuda(args.gpu, non_blocking=True)
 
                 # compute output
-                output = model(images)
+                output, submodel_scores = model(images)
                 loss = criterion(output, target)
 
                 # measure accuracy and record loss
@@ -602,6 +506,12 @@ def validate(val_loader, model, criterion, args):
                 losses.update(loss.item(), images.size(0))
                 top1.update(acc1[0], images.size(0))
                 top5.update(acc5[0], images.size(0))
+                for m in range(args.num_models_ensemble):
+                    submodel_losses[m].update(criterion(submodel_scores[m], target).item(), images.size(0))
+                    acc1, acc5 = utils.accuracy(submodel_scores[m], target, topk=(1, 5))
+                    submodel_top1[m].update(acc1[0], images.size(0))
+                    submodel_top5[m].update(acc5[0], images.size(0))
+
 
                 # measure elapsed time
                 batch_time.update(time.time() - end)
@@ -614,6 +524,10 @@ def validate(val_loader, model, criterion, args):
     losses = AverageMeter('Loss', ':.4e', Summary.NONE)
     top1 = AverageMeter('Acc@1', ':6.2f', Summary.AVERAGE)
     top5 = AverageMeter('Acc@5', ':6.2f', Summary.AVERAGE)
+    submodel_losses = [AverageMeter('Loss', ':.4e', Summary.NONE) for _ in range(args.num_models_ensemble)]
+    submodel_top1 = [AverageMeter('Acc@1', ':6.2f', Summary.AVERAGE) for _ in range(args.num_models_ensemble)]
+    submodel_top5 = [AverageMeter('Acc@5', ':6.2f', Summary.AVERAGE) for _ in range(args.num_models_ensemble)]
+    
     progress = ProgressMeter(
         len(val_loader) + (args.distributed and (len(val_loader.sampler) * args.world_size < len(val_loader.dataset))),
         [batch_time, losses, top1, top5],
@@ -638,7 +552,7 @@ def validate(val_loader, model, criterion, args):
 
     progress.display_summary()
 
-    return losses.avg, top5.avg, top1.avg
+    return losses.avg, top5.avg, top1.avg, submodel_losses, submodel_top1, submodel_top5
 
 
 

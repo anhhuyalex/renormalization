@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=hipp_test
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=5G
-#SBATCH --time=48:00:00
+#SBATCH --time=96:00:00
 #SBATCH --partition=della-gpu
 #SBATCH --output imagenet-%J.log
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 
 
 
@@ -30,8 +30,8 @@ source activate renormalization
 # python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 36 --scheduler_step_size 12  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation True
 # for tiling in "1,1" "1,2" "1,3" "2,1" "2,2" "2,3" "3,1" "3,2" "3,3"; do sbatch hipp.sh $tiling; done
 
-python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 90 --scheduler_step_size 30  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation True
-
+python imagenet.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 36 --scheduler_step_size 12  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation False --gaussian_blur True --max_sigma 0.0
+# python imagenet_ensemble.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 36 --scheduler_step_size 12  --image_transform_loader TileImagenet --num_models_ensemble $1
 
 # for growth_factor in 1.0 1.3 1.6 1.9 2.2 2.5 2.8 3.1;  do sbatch hipp.sh $growth_factor; done 
 # python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization --data_rescale 0.3 --epochs 36 --scheduler_step_size 12 --zero_out grow_from_center --growth_factor $1
