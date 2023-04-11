@@ -233,16 +233,22 @@ class VGG(nn.Module):
         return unnormalised_scores
 
 class Ensemble(nn.Module):
-    def __init__(self, num_models, model_func, model_kwargs = {}):
+    def __init__(self, num_models, model_func, model_kwargs = {}, voting_strategy = "average_logits"):
         
         super(Ensemble, self).__init__()
         
         self.models = nn.ModuleList([model_func(**model_kwargs) for _ in range(num_models)])
-        
+        self.voting_strategy = voting_strategy 
     def forward(self, x):
         submodel_scores = [f(x) for f in self.models]
-        unnormalised_scores = torch.mean(torch.stack(submodel_scores), dim=0)
-        return unnormalised_scores, submodel_scores
+        if self.voting_strategy == "average_logits":
+            unnormalised_scores = torch.mean(torch.stack(submodel_scores), dim=0)
+            return unnormalised_scores, submodel_scores
+        elif self.voting_strategy == "average_softmax":
+            softmaxes = F.softmax(torch.stack(submodel_scores), dim=2)
+            average_softmax =  torch.mean(softmaxes, dim=0)
+            return average_softmax, submodel_scores
+        
     
 models_registry = dict(
     MLP = MLP,

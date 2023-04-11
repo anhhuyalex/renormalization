@@ -67,6 +67,9 @@ parser.add_argument('--image_transform_loader',
 parser.add_argument('--num_models_ensemble', default=2, type=int,
                     help='number of models in ensemble (default: 2)',
                     dest='num_models_ensemble')
+parser.add_argument('--voting_strategy', default="average_logits", type=str,
+                    help='voting strategy for ensemble',
+                    dest='voting_strategy')
 parser.add_argument('-p', '--print-freq', default=10, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -292,11 +295,11 @@ def main_worker(gpu, ngpus_per_node, args):
         record = utils.dotdict(
                 curr_epoch = 0,
                 args = args,
-                state_dict = None,
+                
                 best_val_acc1 = -1e10,
-                best_model = None,
-                optimizer = None,
-                scheduler = None,
+                
+                
+                
                 train_params = utils.dotdict(
                     lr = args.lr,
                     momentum=args.momentum,
@@ -319,8 +322,15 @@ def main_worker(gpu, ngpus_per_node, args):
                     val_submodel_top5 = utils.dotdict(),
                     val_submodel_top1 = utils.dotdict(),
                 ),
-                gradient_stats = utils.dotdict(default=[])
+                
         )  
+        record_weights = utils.dotdict(
+            state_dict = None,
+            best_model = None,
+            optimizer = None,
+            scheduler = None,
+            gradient_stats = utils.dotdict(default=[])
+        )
     
     # Data loading code
     if args.image_transform_loader == "dummy":
@@ -373,7 +383,7 @@ def main_worker(gpu, ngpus_per_node, args):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         # train for one epoch
-        train_losses, train_acc5, train_acc1, train_submodel_losses, train_submodel_top1, train_submodel_top5 = train(train_loader, model, criterion, optimizer, epoch, device, args, record)
+        train_losses, train_acc5, train_acc1, train_submodel_losses, train_submodel_top1, train_submodel_top5 = train(train_loader, model, criterion, optimizer, epoch, device, args, record, record_weights)
 
         # evaluate on validation set
         val_losses, val_acc5, val_acc1, val_submodel_losses, val_submodel_top1, val_submodel_top5 = validate(val_loader, model, criterion, args)
@@ -387,12 +397,14 @@ def main_worker(gpu, ngpus_per_node, args):
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             record.curr_epoch = epoch
-            record.state_dict = copy.deepcopy(model.state_dict())
-            record.optimizer = copy.deepcopy(optimizer.state_dict())
-            record.scheduler = copy.deepcopy(scheduler.state_dict())
+            
+            # Record weights
+            record_weights.state_dict = copy.deepcopy(model.state_dict())
+            record_weights.optimizer = copy.deepcopy(optimizer.state_dict())
+            record_weights.scheduler = copy.deepcopy(scheduler.state_dict())
 
             if val_acc1 > record.best_val_acc1:
-                record.best_model = copy.deepcopy(model.state_dict())
+                record_weights.best_model = copy.deepcopy(model.state_dict())
                 record.best_val_acc1 = max(val_acc1, record.best_val_acc1)
                 
             record.metrics.train_losses[epoch] = train_losses
@@ -410,9 +422,10 @@ def main_worker(gpu, ngpus_per_node, args):
             record.metrics.val_submodel_top1[epoch] = val_submodel_top1
                 
             utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
+            utils.save_checkpoint(record_weights, save_dir = args.save_dir, filename = f'weights_{args.exp_name}')
 
 
-def train(train_loader, model, criterion, optimizer, epoch, device, args, record):
+def train(train_loader, model, criterion, optimizer, epoch, device, args, record, record_weights):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -469,8 +482,8 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args, record
 
         if i % args.print_freq == 0:
             progress.display(i + 1)
-            for name, t in model.named_parameters():
-                record.gradient_stats[name].append(t.grad.mean())
+            #for name, t in model.named_parameters():
+            #    record_weights.gradient_stats[name].append(t.grad.mean())
             
     if args.distributed:
         losses.all_reduce()

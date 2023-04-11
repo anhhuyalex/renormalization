@@ -67,7 +67,7 @@ parser.add_argument('--tiling_imagenet', default='1,1', type=str,
                     help='whether to zero out center or do something else')
 parser.add_argument(
             '--tiling_orientation_ablation', 
-            default=False, type=lambda x: (str(x).lower() == 'true')
+            default="no_ablation", type=str
 )
 parser.add_argument(
             '--gaussian_blur', 
@@ -112,6 +112,11 @@ parser.add_argument(
             '--save_dir', 
             #default="/gpfs/milgram/scratch60/turk-browne/an633/renorm",
             default="/scratch/gpfs/qanguyen/imagenet_info",
+            type=str, 
+            action='store')
+parser.add_argument(
+            '--fileprefix', 
+            default="",
             type=str, 
             action='store')
 parser.add_argument(
@@ -259,7 +264,7 @@ class TileImagenet(datasets.ImageFolder):
         sample, target = super(TileImagenet, self).__getitem__(index)
         
         # tile image 
-        if self.tiling_orientation_ablation == True:
+        if self.tiling_orientation_ablation == "orientation":
             
             upside_down_flip = torch.flip(sample, dims=[1])
             left_right_flip = torch.flip(sample, dims=[2])
@@ -289,9 +294,10 @@ class TileImagenet(datasets.ImageFolder):
                 sample = sample[:,:self.target_size*self.nrow,:]
             
                 
-        elif self.tiling_orientation_ablation == False:
+        elif self.tiling_orientation_ablation == "no_ablation":
             sample = torch.tile(sample, [1] + self.tile)
-            
+        elif self.tiling_orientation_ablation == "no_ablation_center_1,2flip":
+            sample = torch.cat([sample, self.left_right_flip(sample)], dim= 2)
         return sample, target
 def main():
     args = parser.parse_args()
@@ -326,7 +332,7 @@ def main():
         ngpus_per_node = 1
         
     # Save parameters
-    args.exp_name = f"AUGSTILING{args.arch}" \
+    args.exp_name = f"{args.fileprefix}{args.arch}" \
                 + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
     print(f"saved to {args.save_dir}/{args.exp_name}", )
     if args.multiprocessing_distributed:
