@@ -24,10 +24,12 @@ from torch.utils.data import Subset
 
 import datetime
 import utils
+import attention
+from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name]))
+    and callable(models.__dict__[name])) + ['coarsegrain_mlp', 'coarsegrain_attention']
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR', nargs='?', default='imagenet',
@@ -61,13 +63,18 @@ parser.add_argument('--scheduler_step_size', default=30, type=int,
 
 parser.add_argument('--image_transform_loader',   
                     default=  'TileImagenet',
-                     choices=['dummy', 'RescaleImagenet', 'TileImagenet'],
+                     choices=['dummy', 'RescaleImagenet', 'TileImagenet', 'CoarseGrainImagenet'],
                     help='type of image perturbation to run')
 parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
                     help='whether to zero out center or do something else')
 parser.add_argument(
             '--tiling_orientation_ablation', 
             default="no_ablation", type=str
+)
+parser.add_argument(
+            '--coarsegrain_blocksize', 
+            default=1, type=int,
+            help = "if coarse graining, what is the block size of the coarse graining"
 )
 parser.add_argument(
             '--gaussian_blur', 
@@ -145,11 +152,12 @@ class RescaleImagenet(datasets.ImageFolder):
         # remainder part
         self.rem_idx = self.target_size % self.actual_size
         
+        # Image is only shown in the central block
         if self.zero_out == "all_except_center":
             middle_tile = self.tiles // 2
             self.start_id = middle_tile * self.actual_size
             self.end_id = self.start_id + self.actual_size
-        elif self.zero_out == "grow_from_center":
+        elif self.zero_out == "grow_from_center": # Image is grown progressively from center
             self.growth_size = int(self.actual_size * growth_factor)
             assert self.growth_size <= self.target_size, f"Desired growth size {self.growth_size} exceeds target size {self.target_size}"
 
@@ -201,6 +209,7 @@ class RescaleImagenet(datasets.ImageFolder):
             return zeros, target
         else:
             return sample, target
+        
     
 class TileImagenet(datasets.ImageFolder):
     def __init__(self, root = "./data",  
@@ -299,6 +308,61 @@ class TileImagenet(datasets.ImageFolder):
         elif self.tiling_orientation_ablation == "no_ablation_center_1,2flip":
             sample = torch.cat([sample, self.left_right_flip(sample)], dim= 2)
         return sample, target
+    
+class CoarseGrainImagenet(datasets.ImageFolder):
+    def __init__(self, root = "./data", block_size = 1, 
+                 target_size = 224,
+                 phase = "train",
+                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225]),
+                ):
+        
+        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
+        self.target_size = target_size
+        
+        self.block_size = block_size        
+        self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
+        self.rem_idx = target_size % block_size
+        
+        if phase == "train":
+            transform = transforms.Compose([
+                    transforms.RandomResizedCrop(self.target_size),
+                    transforms.RandomHorizontalFlip(),
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+        else:
+            transform = transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(self.target_size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+        
+        super(CoarseGrainImagenet, self).__init__(root, transform)
+        
+    #def __len__(self):
+    #    return 256*10
+    
+    def __getitem__(self, index: int):
+        sample, target = super(CoarseGrainImagenet, self).__getitem__(index)
+        
+        sample = self.avg_kernel(sample)
+#         print(x[:15,:], x.shape)
+        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=2)
+        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=1)
+        remainder = sample[:, :, :self.rem_idx]
+         
+        # fill in horizontal pieces
+        sample = torch.cat((sample,remainder), dim=2)
+        
+        # fill in vertical pieces
+        remainder = sample[:, :self.rem_idx, :]
+        sample = torch.cat((sample, remainder), dim=1)
+        
+       
+        return sample, target
+        
 def main():
     args = parser.parse_args()
     print("Args", args)
@@ -370,7 +434,23 @@ def main_worker(gpu, ngpus_per_node, args):
         model = models.__dict__[args.arch](pretrained=True)
     else:
         print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch]()
+        if args.arch == "coarsegrain_mlp":
+            model = utils.MLP(
+                input_size = 3*224*224, hidden_sizes = [100, 100, 100, 100, 100, 100, 100],
+                activation = "relu", keep_rate=1.0, N_CLASSES = 1000
+            )
+        elif args.arch == "coarsegrain_attention":
+            model = attention.SimpleViT(
+                image_size = 224,
+                patch_size = 16,
+                num_classes = 1000,
+                dim = 1024,
+                depth = 6,
+                heads = 16,
+                mlp_dim = 2048
+            )
+        else:
+            model = models.__dict__[args.arch]()
 
     if not torch.cuda.is_available():
         print('using CPU, this will be slow')
@@ -418,9 +498,17 @@ def main_worker(gpu, ngpus_per_node, args):
     optimizer = torch.optim.SGD(model.parameters(), args.lr,
                                 momentum=args.momentum,
                                 weight_decay=args.weight_decay)
-    
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    scheduler = StepLR(optimizer, step_size=args.scheduler_step_size, gamma=0.1)
+    if args.arch == "coarsegrain_attention":
+        """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+        scheduler = CosineAnnealingWarmupRestarts(optimizer, first_cycle_steps=100000,
+                                          cycle_mult=1.0,
+                                          max_lr=args.lr,
+                                          min_lr=0.0001,
+                                          warmup_steps=6000,
+                                          gamma=0.2)
+    else:
+        """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+        scheduler = StepLR(optimizer, step_size=args.scheduler_step_size, gamma=0.1)
     
     # optionally resume from a record
     if args.resume:
@@ -444,12 +532,7 @@ def main_worker(gpu, ngpus_per_node, args):
         record = utils.dotdict(
                 curr_epoch = 0,
                 args = args,
-                state_dict = None,
                 best_val_acc1 = -1e10,
-                best_model = None,
-                optimizer = None,
-                scheduler = None,
-                data_rescale = args.data_rescale,
                 train_params = utils.dotdict(
                     lr = args.lr,
                     momentum=args.momentum,
@@ -463,9 +546,17 @@ def main_worker(gpu, ngpus_per_node, args):
                     val_losses = utils.dotdict(),
                     val_acc5 = utils.dotdict(),
                     val_acc1 = utils.dotdict(),
-                ),
+                )
+                
+        )  
+        record_weights = utils.dotdict(
+                state_dict = None,
+                best_model = None,
+                optimizer = None,
+                scheduler = None,
                 gradient_stats = utils.dotdict(default=[])
         )  
+        
     
     # Data loading code
     if args.image_transform_loader == "dummy":
@@ -509,6 +600,22 @@ def main_worker(gpu, ngpus_per_node, args):
             gaussian_blur = args.gaussian_blur,
             max_sigma = args.max_sigma
         )
+    elif args.image_transform_loader == "CoarseGrainImagenet":
+        traindir = os.path.join(args.data, 'train')
+        valdir = os.path.join(args.data, 'val')
+        train_dataset = CoarseGrainImagenet(
+            root = traindir,  
+            phase = "train", 
+            block_size = args.coarsegrain_blocksize,
+            
+            )
+        
+        val_dataset = CoarseGrainImagenet(
+            root = valdir, 
+            phase = "test", 
+            block_size = args.coarsegrain_blocksize,
+          
+        )
     else:
         raise ValueError(f"{args.image_transform_loader} not supported")
 
@@ -540,12 +647,14 @@ def main_worker(gpu, ngpus_per_node, args):
             train_sampler.set_epoch(epoch)
         print("Here2")
         # train for one epoch
-        train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, epoch, device, args, record)
+        train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, scheduler,
+                                                     epoch, device, args, record, record_weights)
 
         # evaluate on validation set
         val_losses, val_acc5, val_acc1 = validate(val_loader, model, criterion, args)
         
-        scheduler.step()
+        if isinstance(scheduler, StepLR):
+            scheduler.step()
         
         
         
@@ -554,12 +663,12 @@ def main_worker(gpu, ngpus_per_node, args):
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             record.curr_epoch = epoch
-            record.state_dict = copy.deepcopy(model.state_dict())
-            record.optimizer = copy.deepcopy(optimizer.state_dict())
-            record.scheduler = copy.deepcopy(scheduler.state_dict())
+            record_weights.state_dict = copy.deepcopy(model.state_dict())
+            record_weights.optimizer = copy.deepcopy(optimizer.state_dict())
+            record_weights.scheduler = copy.deepcopy(scheduler.state_dict())
 
             if val_acc1 > record.best_val_acc1:
-                record.best_model = copy.deepcopy(model.state_dict())
+                record_weights.best_model = copy.deepcopy(model.state_dict())
                 record.best_val_acc1 = max(val_acc1, record.best_val_acc1)
                 
             record.metrics.train_losses[epoch] = train_losses
@@ -571,9 +680,10 @@ def main_worker(gpu, ngpus_per_node, args):
                 
                 
             utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
+            utils.save_checkpoint(record_weights, save_dir = args.save_dir, filename = f"weights_{args.exp_name}")
 
 
-def train(train_loader, model, criterion, optimizer, epoch, device, args, record):
+def train(train_loader, model, criterion, optimizer, scheduler, epoch, device, args, record, record_weights):
     batch_time = AverageMeter('Time', ':6.3f')
     data_time = AverageMeter('Data', ':6.3f')
     losses = AverageMeter('Loss', ':.4e')
@@ -611,15 +721,18 @@ def train(train_loader, model, criterion, optimizer, epoch, device, args, record
         loss.backward()
          
         optimizer.step()
-
+        
         # measure elapsed time
         batch_time.update(time.time() - end)
         end = time.time()
-
+        
+        if isinstance(scheduler, CosineAnnealingWarmupRestarts):
+            scheduler.step()
+            
         if i % args.print_freq == 0:
             progress.display(i + 1)
             for name, t in model.named_parameters():
-                record.gradient_stats[name].append(t.grad.mean())
+                record_weights.gradient_stats[name].append(t.grad.mean())
             
     if args.distributed:
         losses.all_reduce()

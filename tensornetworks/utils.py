@@ -118,6 +118,7 @@ class MLP(nn.Module):
         self.out = torch.nn.Linear(self.hidden_sizes[-1], N_CLASSES)
         
     def forward(self, x):
+        x = x.reshape(x.size(0), -1) # flatten if needed
         if self.activation == "sigmoid":
             x = self.fc1(x)
             sigmoid = torch.nn.Sigmoid()
