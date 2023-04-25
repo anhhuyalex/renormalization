@@ -30,10 +30,16 @@ source activate renormalization
 # python imagenet_devel.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 36 --scheduler_step_size 12  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation True
 # for tiling in "1,1" "1,2" "1,3" "2,1" "2,2" "2,3" "3,1" "3,2" "3,3"; do sbatch hipp.sh $tiling; done
 # for tiling in "3,4" "3,5" "3,6" "4,3" "4,4" "4,4" "5,3" "5,4" "5,5"; do sbatch hipp.sh $tiling; done
-# for tiling in 1 2 3 4 5 6 7 8 9; do sbatch hipp.sh $tiling; done
+# for tiling in 1 2 3 4 5 ; do sbatch hipp.sh $tiling; done
 # python imagenet.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation no_ablation --gaussian_blur True --max_sigma 4.0 --fileprefix AUGSTILINGmar23
 # python imagenet.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation orientation --gaussian_blur False --max_sigma 0.0 --fileprefix AUGSTILINGmar23 
-python imagenet.py -a coarsegrain_attention --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8 --lr 0.01  --image_transform_loader CoarseGrainImagenet --coarsegrain_blocksize  $1 --fileprefix coarsegraining_attentionAPR17_lr0.01
+#i_vals=(1 2 3 4 5 6 7 8 9)
+#i=${i_vals[$SLURM_ARRAY_TASK_ID % ${#i_vals[@]}]}
+#echo "i = $i"
+i=$1
+python -u tractable_polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 7 --num_examples 50000 --model_name ridge --random_coefs True --input_strategy random  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --tags ridge 
+
+# python imagenet.py -a coarsegrain_attention --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8 --lr 0.03  --image_transform_loader CoarseGrainImagenet --coarsegrain_blocksize  $i --fileprefix coarsegraining_attention_APR25_lr0.03
 
 # for i in 9 8 7 6 5 4 3 2 1; do sbatch hipp.sh $i; done
 # python imagenet_ensemble.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --num_models_ensemble $1
