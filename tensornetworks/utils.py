@@ -90,7 +90,8 @@ def accuracy(output, target, topk=(1,)):
 
 
 class MLP(nn.Module):
-    def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10, batch_norm = False):
+    def __init__(self, input_size, hidden_sizes, activation, keep_rate=1.0, N_CLASSES = 10, batch_norm = False,
+                randomfeatures = False):
         super(MLP, self).__init__()
         self.input_size = input_size
         self.hidden_sizes = hidden_sizes
@@ -98,50 +99,60 @@ class MLP(nn.Module):
         if not keep_rate:
             keep_rate = 0.5
         self.keep_rate = keep_rate
-        # Set up perceptron layers and add dropout
-        self.fc1 = torch.nn.Linear(self.input_size,
-                                   self.hidden_sizes[0])
-
-        self.dropout = torch.nn.Dropout(1 - keep_rate)
-        self.hidden = nn.ModuleList()
-        for k in range(len(self.hidden_sizes) - 1):
-            self.hidden.append(nn.Linear(self.hidden_sizes[k], self.hidden_sizes[k+1]))
-            
-        # Batch norm
-        self.batch_norm_layers = nn.ModuleList()
-        self.batch_norm = batch_norm
-        if batch_norm == True:
-            for k in range(len(self.hidden_sizes)):
-                self.batch_norm_layers.append(nn.BatchNorm1d(self.hidden_sizes[k]))
-            
+       
         # Output layer
-        self.out = torch.nn.Linear(self.hidden_sizes[-1], N_CLASSES)
-        
+        if self.hidden_sizes is not None:
+            self.out = torch.nn.Linear(self.hidden_sizes[-1], N_CLASSES)
+             # Set up perceptron layers and add dropout
+            self.fc1 = torch.nn.Linear(self.input_size,
+                                       self.hidden_sizes[0])
+            
+            if randomfeatures == True: 
+                assert len(hidden_sizes) == 1, f"Random features require a 2-layer network, get a {len(hidden_sizes) + 1}-layer network"
+                self.fc1.requires_grad_(False)
+              
+            self.dropout = torch.nn.Dropout(1 - keep_rate)
+            self.hidden = nn.ModuleList()
+            for k in range(len(self.hidden_sizes) - 1):
+                self.hidden.append(nn.Linear(self.hidden_sizes[k], self.hidden_sizes[k+1]))
+             
+            # Batch norm
+            self.batch_norm_layers = nn.ModuleList()
+            self.batch_norm = batch_norm
+            if batch_norm == True:
+                for k in range(len(self.hidden_sizes)):
+                    self.batch_norm_layers.append(nn.BatchNorm1d(self.hidden_sizes[k]))
+
+        else:
+            self.out = torch.nn.Linear(self.input_size, N_CLASSES)
+     
     def forward(self, x):
         x = x.reshape(x.size(0), -1) # flatten if needed
-        if self.activation == "sigmoid":
-            x = self.fc1(x)
-            sigmoid = torch.nn.Sigmoid()
-            if self.batch_norm == True:
-                x = self.batch_norm_layers[0](x)
-            x = sigmoid(x)
-        elif self.activation == "relu":
-            x = self.fc1(x)
-            if self.batch_norm == True:
-                x = self.batch_norm_layers[0](x)
-            x = torch.nn.functional.relu(x)
-        
-        x = self.dropout(x)
-        for k, lay in enumerate(self.hidden):
-            x = lay(x)
-            if self.batch_norm == True:
-                x = self.batch_norm_layers[k+1](x)
+        if self.hidden_sizes is not None:
             if self.activation == "sigmoid":
+                x = self.fc1(x)
+                sigmoid = torch.nn.Sigmoid()
+                if self.batch_norm == True:
+                    x = self.batch_norm_layers[0](x)
                 x = sigmoid(x)
             elif self.activation == "relu":
+                x = self.fc1(x)
+                if self.batch_norm == True:
+                    x = self.batch_norm_layers[0](x)
                 x = torch.nn.functional.relu(x)
+
             x = self.dropout(x)
+            for k, lay in enumerate(self.hidden):
+                x = lay(x)
+                if self.batch_norm == True:
+                    x = self.batch_norm_layers[k+1](x)
+                if self.activation == "sigmoid":
+                    x = sigmoid(x)
+                elif self.activation == "relu":
+                    x = torch.nn.functional.relu(x)
+                x = self.dropout(x)
             
+        # Else just return the linear transformation
         return (self.out(x))
     
 class ResNet(MLP):

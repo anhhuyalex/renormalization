@@ -25,11 +25,12 @@ from torch.utils.data import Subset
 import datetime
 import utils
 import attention
+import numpy as np
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
-    and callable(models.__dict__[name])) + ['coarsegrain_mlp', 'coarsegrain_attention']
+    and callable(models.__dict__[name])) + ['coarsegrain_mlp', 'coarsegrain_attention', 'randomfeatures']
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('data', metavar='DIR', nargs='?', default='imagenet',
@@ -63,10 +64,17 @@ parser.add_argument('--scheduler_step_size', default=30, type=int,
 
 parser.add_argument('--image_transform_loader',   
                     default=  'TileImagenet',
-                     choices=['dummy', 'RescaleImagenet', 'TileImagenet', 'CoarseGrainImagenet'],
+                     choices=['dummy', 'RescaleImagenet', 'TileImagenet', 'CoarseGrainImagenet', 'SubsampleImagenet'],
                     help='type of image perturbation to run')
 parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
                     help='whether to zero out center or do something else')
+### RANDOM FEATURES EXP
+parser.add_argument('--num_subsamples', default=0, type=int,  
+                    help='number of sub-samples')
+parser.add_argument('--num_hidden_features', default=0, type=int,  
+                    help='number of hidden fourier features')
+
+
 parser.add_argument(
             '--tiling_orientation_ablation', 
             default="no_ablation", type=str
@@ -80,6 +88,8 @@ parser.add_argument(
             '--gaussian_blur', 
             default=False, type=lambda x: (str(x).lower() == 'true')
 )
+
+
 
 parser.add_argument('--max_sigma', default=2.0, type=float,
                     help='max_sigma for gaussian_blur, default=2.0 ',
@@ -348,7 +358,7 @@ class CoarseGrainImagenet(datasets.ImageFolder):
         sample, target = super(CoarseGrainImagenet, self).__getitem__(index)
         
         sample = self.avg_kernel(sample)
-#         print(x[:15,:], x.shape)
+        # print(x[:15,:], x.shape)
         sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=2)
         sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=1)
         remainder = sample[:, :, :self.rem_idx]
@@ -362,6 +372,83 @@ class CoarseGrainImagenet(datasets.ImageFolder):
         
        
         return sample, target
+    
+class RandomFeaturesImagenet(datasets.ImageFolder):
+    def __init__(self, root = "./data",  
+                 target_size = 224,
+                 phase = "train",
+                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225]),
+                 block_size = 1, 
+                 superclasses = None,
+                 class_to_superclass_dict = None
+                ):
+        
+        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
+        self.target_size = target_size
+        self.class_to_superclass_dict = class_to_superclass_dict
+        
+        self.block_size = block_size        
+        self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
+        self.rem_idx = target_size % block_size
+        
+        if phase == "train":
+            transform =  transforms.Compose([
+                    #transforms.RandomResizedCrop(self.target_size),
+                    #transforms.RandomHorizontalFlip(),
+                    transforms.Resize(256),
+                    transforms.CenterCrop(self.target_size),
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+        else:
+            transform =  transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(self.target_size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+         
+        super(RandomFeaturesImagenet, self).__init__(root, transform)
+        # dataset = datasets.ImageFolder(root, transform)
+        # targets = [235, 283] # dogs vs. cats
+        # indices = [i for i, label in enumerate(dataset.targets) if label in targets]
+        # dataset = torch.utils.data.Subset(dataset, indices)
+        
+        # if phase == "train":
+        #     self.dataset = torch.utils.data.Subset(dataset, range(int(num_subsamples * len(train_dataset)))) # subsample train_dataset
+        # else:
+        #    self.dataset = dataset
+            # no need to subsample val_dataset
+            # val_dataset = torch.utils.data.Subset(val_dataset, range(int(args.num_subsamples * len(train_dataset))))
+        
+        # self.random_feature = torch.randn(num_hidden_features, 3*self.target_size*self.target_size)
+        # self.random_bias = torch.rand(num_hidden_features, 1) * 2 * np.pi
+  
+            
+    #def __len__(self):
+    #    return 256*10
+    
+    def __getitem__(self, index: int):
+        #sample, target = self.dataset.__getitem__(index)
+        #random_transformed_im = np.sqrt(2.0 / self.num_hidden_features) * torch.cos(torch.matmul(self.random_feature,im.ravel().unsqueeze(1) ) + self.random_bias)
+        sample, target = super(RandomFeaturesImagenet, self).__getitem__(index)
+        
+        sample = self.avg_kernel(sample)
+        # print(x[:15,:], x.shape)
+        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=2)
+        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=1)
+        remainder = sample[:, :, :self.rem_idx]
+         
+        # fill in horizontal pieces
+        sample = torch.cat((sample,remainder), dim=2)
+        
+        # fill in vertical pieces
+        remainder = sample[:, :self.rem_idx, :]
+        sample = torch.cat((sample, remainder), dim=1)
+        
+        # print("target", target, "class_to_superclass_dict",  self.class_to_superclass_dict[target])
+        return sample, self.class_to_superclass_dict[target]
         
 def main():
     args = parser.parse_args()
@@ -442,12 +529,17 @@ def main_worker(gpu, ngpus_per_node, args):
         elif args.arch == "coarsegrain_attention":
             model = attention.SimpleViT(
                 image_size = 224,
-                patch_size = 16,
+                patch_size = 16, 
                 num_classes = 1000,
                 dim = 1024,
                 depth = 6,
                 heads = 16,
                 mlp_dim = 2048
+            )
+        elif args.arch == "randomfeatures":
+            model = utils.MLP(
+                input_size = 3*224*224, hidden_sizes = [args.num_hidden_features],
+                keep_rate=1.0, N_CLASSES = 11, activation = "relu", randomfeatures =  True
             )
         else:
             model = models.__dict__[args.arch]()
@@ -461,6 +553,7 @@ def main_worker(gpu, ngpus_per_node, args):
         print('using distributed')
         if torch.cuda.is_available():
             if args.gpu is not None:
+                print("args.gpu", args.gpu)
                 torch.cuda.set_device(args.gpu)
                 model.cuda(args.gpu)
                 # When using a single GPU per process and per
@@ -616,6 +709,28 @@ def main_worker(gpu, ngpus_per_node, args):
             block_size = args.coarsegrain_blocksize,
           
         )
+    elif args.image_transform_loader == "SubsampleImagenet":    
+        traindir = os.path.join(args.data, 'train')
+        valdir = os.path.join(args.data, 'val')
+        
+        label_map = np.load('./data/imagenetinfo/imagenet_label_map.npy', allow_pickle=True).item()
+        label_to_wnid = np.load('./data/imagenetinfo/imagenet_label_to_wnid.npy', allow_pickle=True).item()
+        superclasses = np.load('./data/imagenetinfo/superclasses.npy', allow_pickle=True).item()
+        class_to_superclass_dict = torch.load('./data/imagenetinfo/class_to_superclass_dict.pt')
+        
+        train_dataset = RandomFeaturesImagenet(root = traindir,  
+                phase = "train",   
+                block_size = args.coarsegrain_blocksize,
+                superclasses = superclasses,
+                class_to_superclass_dict = class_to_superclass_dict
+                )
+        
+        val_dataset = RandomFeaturesImagenet(root = valdir,  
+                phase = "train",   
+                block_size = args.coarsegrain_blocksize,
+                superclasses = superclasses,
+                class_to_superclass_dict = class_to_superclass_dict
+                )
     else:
         raise ValueError(f"{args.image_transform_loader} not supported")
 
@@ -728,11 +843,11 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, device, a
         
         if isinstance(scheduler, CosineAnnealingWarmupRestarts):
             scheduler.step()
-            
+        # if i > 5: break
         if i % args.print_freq == 0:
             progress.display(i + 1)
-            for name, t in model.named_parameters():
-                record_weights.gradient_stats[name].append(t.grad.mean())
+            #for name, t in model.named_parameters():
+            #    record_weights.gradient_stats[name].append(t.grad.mean())
             
     if args.distributed:
         losses.all_reduce()
