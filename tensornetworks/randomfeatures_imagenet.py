@@ -27,6 +27,7 @@ import utils
 import attention
 import numpy as np
 from cosine_annealing_warmup import CosineAnnealingWarmupRestarts
+import math
 
 model_names = sorted(name for name in models.__dict__
     if name.islower() and not name.startswith("__")
@@ -99,7 +100,7 @@ parser.add_argument('--zero_out', default=None, type=str,
 parser.add_argument('--growth_factor', default=1.0, type=float,
                     help='growth factor for zero_out = grow_from_center, default=1.0 ',
                     dest='growth_factor')
-parser.add_argument('-p', '--print-freq', default=10, type=int,
+parser.add_argument('-p', '--print-freq', default=50, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -435,17 +436,19 @@ class RandomFeaturesImagenet(datasets.ImageFolder):
         sample, target = super(RandomFeaturesImagenet, self).__getitem__(index)
         
         sample = self.avg_kernel(sample)
+        
+        
         # print(x[:15,:], x.shape)
-        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=2)
-        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=1)
-        remainder = sample[:, :, :self.rem_idx]
+        # sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=2)
+        #sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=1)
+        #remainder = sample[:, :, :self.rem_idx]
          
         # fill in horizontal pieces
-        sample = torch.cat((sample,remainder), dim=2)
+        #sample = torch.cat((sample,remainder), dim=2)
         
         # fill in vertical pieces
-        remainder = sample[:, :self.rem_idx, :]
-        sample = torch.cat((sample, remainder), dim=1)
+        #remainder = sample[:, :self.rem_idx, :]
+        #sample = torch.cat((sample, remainder), dim=1)
         
         # print("target", target, "class_to_superclass_dict",  self.class_to_superclass_dict[target])
         return sample, self.class_to_superclass_dict[target]
@@ -537,8 +540,10 @@ def main_worker(gpu, ngpus_per_node, args):
                 mlp_dim = 2048
             )
         elif args.arch == "randomfeatures":
+            # formula from https://pytorch.org/docs/stable/generated/torch.nn.AvgPool2d.html
+            width_after_pool = math.floor((224 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
             model = utils.MLP(
-                input_size = 3*224*224, hidden_sizes = [args.num_hidden_features],
+                input_size = 3*(width_after_pool)*(width_after_pool), hidden_sizes = [args.num_hidden_features],
                 keep_rate=1.0, N_CLASSES = 11, activation = "relu", randomfeatures =  True
             )
         else:
@@ -633,9 +638,9 @@ def main_worker(gpu, ngpus_per_node, args):
                     num_train_epochs = args.epochs
                 ),
                 metrics = utils.dotdict(
-                    train_losses = utils.dotdict(),
-                    train_acc5 = utils.dotdict(),
-                    train_acc1 = utils.dotdict(),
+                    train_losses = utils.dotdict(default=[]),
+                    train_acc5 = utils.dotdict(default=[]),
+                    train_acc1 = utils.dotdict(default=[]),
                     val_losses = utils.dotdict(),
                     val_acc5 = utils.dotdict(),
                     val_acc1 = utils.dotdict(),
@@ -757,6 +762,8 @@ def main_worker(gpu, ngpus_per_node, args):
     
     best_model = None
     
+    
+        
     for epoch in range(record.curr_epoch, record.train_params.num_train_epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
@@ -765,30 +772,29 @@ def main_worker(gpu, ngpus_per_node, args):
         train_losses, train_acc5, train_acc1 = train(train_loader, model, criterion, optimizer, scheduler,
                                                      epoch, device, args, record, record_weights)
 
-        # evaluate on validation set
-        val_losses, val_acc5, val_acc1 = validate(val_loader, model, criterion, args)
-        
+
         if isinstance(scheduler, StepLR):
             scheduler.step()
         
         
-        
+        # evaluate on validation set
+        val_losses, val_acc5, val_acc1 = validate(val_loader, model, criterion, args)
         
         
         if not args.multiprocessing_distributed or (args.multiprocessing_distributed
                 and args.rank % ngpus_per_node == 0):
             record.curr_epoch = epoch
-            record_weights.state_dict = copy.deepcopy(model.state_dict())
-            record_weights.optimizer = copy.deepcopy(optimizer.state_dict())
-            record_weights.scheduler = copy.deepcopy(scheduler.state_dict())
+            record_weights.state_dict = (model.state_dict())
+            record_weights.optimizer =  (optimizer.state_dict())
+            record_weights.scheduler =  (scheduler.state_dict())
 
             if val_acc1 > record.best_val_acc1:
                 record_weights.best_model = copy.deepcopy(model.state_dict())
                 record.best_val_acc1 = max(val_acc1, record.best_val_acc1)
                 
-            record.metrics.train_losses[epoch] = train_losses
-            record.metrics.train_acc5[epoch] = train_acc5
-            record.metrics.train_acc1[epoch] = train_acc1
+            #record.metrics.train_losses[epoch] = train_losses
+            #record.metrics.train_acc5[epoch] = train_acc5
+            #record.metrics.train_acc1[epoch] = train_acc1
             record.metrics.val_losses[epoch] = val_losses
             record.metrics.val_acc5[epoch] = val_acc5
             record.metrics.val_acc1[epoch] = val_acc1
@@ -846,6 +852,12 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, device, a
         # if i > 5: break
         if i % args.print_freq == 0:
             progress.display(i + 1)
+            record.metrics.train_losses[epoch].append(losses.avg)
+            record.metrics.train_acc5[epoch].append ( top5.avg)
+            record.metrics.train_acc1[epoch].append ( top1.avg)
+            losses.reset()
+            top5.reset()
+            top5.reset()
             #for name, t in model.named_parameters():
             #    record_weights.gradient_stats[name].append(t.grad.mean())
             

@@ -2,7 +2,7 @@
 #SBATCH --job-name=hipp_test
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=30G
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --partition=della-gpu
 #SBATCH --output imagenet-%J.log
 #SBATCH --gres=gpu:1
@@ -33,8 +33,8 @@ source activate renormalization
 # for tiling in 1 2 3 4 5 ; do sbatch hipp.sh $tiling; done
 # python imagenet.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation no_ablation --gaussian_blur True --max_sigma 4.0 --fileprefix AUGSTILINGmar23
 # python imagenet.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --tiling_imagenet  $1 --tiling_orientation_ablation orientation --gaussian_blur False --max_sigma 0.0 --fileprefix AUGSTILINGmar23 
-#i_vals=(1 2 3 4 5 6 7 8 9)
-i_vals=(0.001 0.005 0.01 0.05 0.1 0.5)
+i_vals=(1 2 3 4 5 6 7 8 9)
+# i_vals=(0.00001 0.00005 0.0001 0.0005 0.001 0.002 0.005 0.01)
 j_vals=(5 10 50 100 500 1000 5000 10000 50000 100000)
 i=${i_vals[$SLURM_ARRAY_TASK_ID / ${#j_vals[@]}]}
 j=${j_vals[$SLURM_ARRAY_TASK_ID % ${#j_vals[@]}]}
@@ -43,7 +43,7 @@ echo "i = $i, j = $j"
 # python -u tractable_polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 7 --num_examples 50000 --model_name ridge --random_coefs True --input_strategy random  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --tags ridge 
 
 # python imagenet.py -a coarsegrain_attention --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8 --lr 0.03  --image_transform_loader CoarseGrainImagenet --coarsegrain_blocksize  $i --fileprefix coarsegraining_attention_APR25_lr0.03
-python randomfeatures_imagenet.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 5 --scheduler_step_size 8 --lr $i --image_transform_loader SubsampleImagenet --coarsegrain_blocksize  1 --num_hidden_features $j  --fileprefix randomfeatures_MAY5
+python randomfeatures_imagenet.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 5 --scheduler_step_size 8 --lr 0.01 --image_transform_loader SubsampleImagenet --coarsegrain_blocksize  $i --num_hidden_features $j  --fileprefix randomfeatures_MAY6
 # for i in 9 8 7 6 5 4 3 2 1; do sbatch hipp.sh $i; done
 # python imagenet_ensemble.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --num_models_ensemble $1
 # python imagenet_vmap_ensemble.py -a resnet18 --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8  --image_transform_loader TileImagenet --num_independent_samples num_models_ensemble --num_models_ensemble $1 --fileprefix Ensemble24EpochsMar19TwoStageAug  --gaussian_blur False --max_sigma 0.0
