@@ -64,7 +64,7 @@ parser.add_argument('--scheduler_step_size', default=30, type=int,
 
 parser.add_argument('--image_transform_loader',   
                     default=  'TileImagenet',
-                     choices=['dummy', 'RescaleImagenet', 'TileImagenet', 'CoarseGrainImagenet', 'SubsampleImagenet'],
+                     choices=['dummy', 'SubsampleImagenet'],
                     help='type of image perturbation to run')
 parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
                     help='whether to zero out center or do something else')
@@ -74,11 +74,7 @@ parser.add_argument('--num_train_samples', default=1, type=int,
 parser.add_argument('--num_hidden_features', default=0, type=int,  
                     help='number of hidden fourier features')
 
-
-parser.add_argument(
-            '--tiling_orientation_ablation', 
-            default="no_ablation", type=str
-)
+ 
 parser.add_argument(
             '--coarsegrain_blocksize', 
             default=1, type=int,
@@ -89,21 +85,7 @@ parser.add_argument(
             default="relu", type=str,
             help = "nonlinearity used in MLP"
 )
-parser.add_argument(
-            '--gaussian_blur', 
-            default=False, type=lambda x: (str(x).lower() == 'true')
-)
-
-
-
-parser.add_argument('--max_sigma', default=2.0, type=float,
-                    help='max_sigma for gaussian_blur, default=2.0 ',
-                    dest='max_sigma')
-parser.add_argument('--zero_out', default=None, type=str,  
-                    help='whether to zero out center or do something else')
-parser.add_argument('--growth_factor', default=1.0, type=float,
-                    help='growth factor for zero_out = grow_from_center, default=1.0 ',
-                    dest='growth_factor')
+   
 parser.add_argument('-p', '--print-freq', default=1, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
@@ -144,243 +126,8 @@ parser.add_argument(
             default="",
             type=str, 
             action='store')
-parser.add_argument(
-            '--data_rescale', 
-            default=1.0, type=float, 
-            action='store')
 
-
-class RescaleImagenet(datasets.ImageFolder):
-    def __init__(self, root = "./data", data_rescale = 1.0, 
-                 target_size = 224,
-                 phase = "train",
-                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                 zero_out = None,
-                 growth_factor = 1.0
-                ):
-        
-        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
-        self.target_size = target_size
-        self.actual_size = int(target_size*data_rescale)
-        self.zero_out = zero_out
-       
-        # number of tilings of the reduced sample
-        self.tiles = self.target_size // self.actual_size        
-        # remainder part
-        self.rem_idx = self.target_size % self.actual_size
-        
-        # Image is only shown in the central block
-        if self.zero_out == "all_except_center":
-            middle_tile = self.tiles // 2
-            self.start_id = middle_tile * self.actual_size
-            self.end_id = self.start_id + self.actual_size
-        elif self.zero_out == "grow_from_center": # Image is grown progressively from center
-            self.growth_size = int(self.actual_size * growth_factor)
-            assert self.growth_size <= self.target_size, f"Desired growth size {self.growth_size} exceeds target size {self.target_size}"
-
-            self.start_id = (self.target_size - self.growth_size) // 2
-            self.end_id = self.start_id + self.growth_size
-        
-        if phase == "train":
-            transform = transforms.Compose([
-                    transforms.RandomResizedCrop(self.actual_size),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(self.target_size),
-                transforms.Resize(self.actual_size),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        
-        super(RescaleImagenet, self).__init__(root, transform)
-        
-    #def __len__(self):
-    #    return 256*10
-    
-    def __getitem__(self, index: int):
-        sample, target = super(RescaleImagenet, self).__getitem__(index)
-        
-        
-        remainder = sample[:, :, :self.rem_idx]
-        
-        
-        # tile image horizontally
-        sample = torch.tile(sample, (1, self.tiles, self.tiles))
-        
-        # fill in horizontal pieces
-        sample = torch.cat((sample, torch.tile(remainder, (1, self.tiles, 1))), dim=2)
-        
-        # fill in vertical pieces
-        remainder = sample[:, :self.rem_idx, :]
-        sample = torch.cat((sample, remainder), dim=1)
-        
-        # optionally zero out 
-        if self.zero_out in ["all_except_center", "grow_from_center"]:
-            zeros = torch.zeros_like(sample)
-            zeros[:, self.start_id:self.end_id, self.start_id:self.end_id] = sample[:, self.start_id:self.end_id, self.start_id:self.end_id]
-            return zeros, target
-        else:
-            return sample, target
-        
-    
-class TileImagenet(datasets.ImageFolder):
-    def __init__(self, root = "./data",  
-                 target_size = 224,
-                 tile = [1, 1],
-                 tiling_orientation_ablation = False,
-                 gaussian_blur = False,
-                 phase = "train",
-                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                 max_sigma = 2.0
-                 
-                ):
-        
-        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
-        self.target_size = target_size
-        assert isinstance(tile, list) and len(tile) == 2, "tile must be a list of 2 numbers, default is [1, 1] to return original image"
-        self.nrow, self.ncol = tile
-        self.tile = tile
-        self.tiling_orientation_ablation = tiling_orientation_ablation
-        if phase == "train":
-            transform = transforms.Compose([
-                    transforms.RandomResizedCrop(self.target_size),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(self.target_size),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        self.do_gaussian_blur = gaussian_blur
-        if gaussian_blur and max_sigma > 1e-2:
-            self.gaussianblur = transforms.GaussianBlur(kernel_size = 9, sigma=(0.1, max_sigma))
-        else:
-            print("No gaussian blur")
-        super(TileImagenet, self).__init__(root, transform)
-        
-    #def __len__(self):
-    #    return 256*10
-    
-    def upside_down_flip(self, sample):
-        if self.do_gaussian_blur:
-            sample = self.gaussianblur(sample)
-        return torch.flip(sample, dims=[1])
-    
-    def left_right_flip(self, sample):
-        if self.do_gaussian_blur:
-            sample = self.gaussianblur(sample)
-        return torch.flip(sample, dims=[2])
-    
-    def upside_down_left_right_flip(self, sample):
-        if self.do_gaussian_blur:
-            sample = self.gaussianblur(sample)
-        return torch.flip(sample, dims=[1, 2])
-    
-    def __getitem__(self, index: int):
-        sample, target = super(TileImagenet, self).__getitem__(index)
-        
-        # tile image 
-        if self.tiling_orientation_ablation == "orientation":
-            
-            upside_down_flip = torch.flip(sample, dims=[1])
-            left_right_flip = torch.flip(sample, dims=[2])
-            
-            first_row = third_row = torch.tile(self.upside_down_flip(sample), [1, 1] + [self.ncol])
-            if self.do_gaussian_blur:
-                central_sample = self.gaussianblur(sample)
-            else:
-                central_sample = sample
-            central_column = torch.cat([self.upside_down_flip(sample), central_sample, self.upside_down_flip(sample)], dim=1)
-            
-            
-            
-            if self.ncol == 1:
-                sample = central_column
-            elif self.ncol == 2:
-                side_column = torch.cat([self.upside_down_left_right_flip(sample), self.left_right_flip(sample), self.upside_down_left_right_flip(sample)], dim=1)
-                sample = torch.cat([side_column, central_column], dim=2)
-            elif self.ncol == 3:
-                side_column = torch.cat([self.upside_down_left_right_flip(sample), self.left_right_flip(sample), self.upside_down_left_right_flip(sample)], dim=1)
-                sample = torch.cat([side_column, central_column, side_column], dim=2)
-                    
-            # get nrow rows
-            if self.nrow == 1:
-                sample = sample[:,self.target_size:(self.target_size * 2),:]
-            else:
-                sample = sample[:,:self.target_size*self.nrow,:]
-            
-                
-        elif self.tiling_orientation_ablation == "no_ablation":
-            sample = torch.tile(sample, [1] + self.tile)
-        elif self.tiling_orientation_ablation == "no_ablation_center_1,2flip":
-            sample = torch.cat([sample, self.left_right_flip(sample)], dim= 2)
-        return sample, target
-    
-class CoarseGrainImagenet(datasets.ImageFolder):
-    def __init__(self, root = "./data", block_size = 1, 
-                 target_size = 224,
-                 phase = "train",
-                 normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225]),
-                ):
-        
-        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
-        self.target_size = target_size
-        
-        self.block_size = block_size        
-        self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
-        self.rem_idx = target_size % block_size
-        
-        if phase == "train":
-            transform = transforms.Compose([
-                    transforms.RandomResizedCrop(self.target_size),
-                    transforms.RandomHorizontalFlip(),
-                    transforms.ToTensor(),
-                    normalize,
-                ])
-        else:
-            transform = transforms.Compose([
-                transforms.Resize(256),
-                transforms.CenterCrop(self.target_size),
-                transforms.ToTensor(),
-                normalize,
-            ])
-        
-        super(CoarseGrainImagenet, self).__init__(root, transform)
-        
-    #def __len__(self):
-    #    return 256*10
-    
-    def __getitem__(self, index: int):
-        sample, target = super(CoarseGrainImagenet, self).__getitem__(index)
-        
-        sample = self.avg_kernel(sample)
-        # print(x[:15,:], x.shape)
-        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=2)
-        sample = torch.repeat_interleave(sample, repeats = self.block_size, dim=1)
-        remainder = sample[:, :, :self.rem_idx]
-         
-        # fill in horizontal pieces
-        sample = torch.cat((sample,remainder), dim=2)
-        
-        # fill in vertical pieces
-        remainder = sample[:, :self.rem_idx, :]
-        sample = torch.cat((sample, remainder), dim=1)
-        
-       
-        return sample, target
-    
+   
 class RandomFeaturesImagenet(datasets.ImageFolder):
     def __init__(self, root = "./data",  
                  target_size = 224,
@@ -462,7 +209,6 @@ class RandomFeaturesImagenet(datasets.ImageFolder):
         # print("target", target, "class_to_superclass_dict",  self.class_to_superclass_dict[target])
         return sample, self.class_to_superclass_dict[target]
 
-class     
 def main():
     args = parser.parse_args()
     print("Args", args)
