@@ -64,8 +64,9 @@ parser.add_argument('--scheduler_step_size', default=30, type=int,
 
 parser.add_argument('--image_transform_loader',   
                     default=  'TileImagenet',
-                     choices=['dummy', 'SubsampleImagenet'],
+                     choices=['dummy', 'SubsampleImagenet', 'RandomFeaturesClassification'],
                     help='type of image perturbation to run')
+
 parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
                     help='whether to zero out center or do something else')
 ### RANDOM FEATURES EXP
@@ -209,6 +210,78 @@ class RandomFeaturesImagenet(datasets.ImageFolder):
         # print("target", target, "class_to_superclass_dict",  self.class_to_superclass_dict[target])
         return sample, self.class_to_superclass_dict[target]
 
+class RandomFeaturesClassificationImagenet(datasets.ImageFolder):
+    def __init__(self, root = "./data",  
+                target_size = 224,
+                phase = "train",
+                normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                    std=[0.229, 0.224, 0.225]),
+                width_after_pool = 224,
+                block_size = 1, 
+                noise_seed = 1,
+                SNR = 1.0,
+                N_CLASSES = 11
+                ):
+        
+        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
+        self.target_size = target_size
+        
+        self.block_size = block_size        
+        self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
+        
+        if phase == "train":
+            transform =  transforms.Compose([
+                    #transforms.RandomResizedCrop(self.target_size),
+                    #transforms.RandomHorizontalFlip(),
+                    transforms.Resize(256),
+                    transforms.CenterCrop(self.target_size),
+                    transforms.ToTensor(),
+                    normalize,
+                ])
+        else:
+            transform =  transforms.Compose([
+                transforms.Resize(256),
+                transforms.CenterCrop(self.target_size),
+                transforms.ToTensor(),
+                normalize,
+            ])
+         
+        super(RandomFeaturesClassificationImagenet, self).__init__(root, transform)
+        self.sqrtD = np.sqrt(3*(width_after_pool)*(width_after_pool))
+        rng = np.random.default_rng(42)
+        self.teacher = torch.tensor(rng.standard_normal(size=3*(width_after_pool)*(width_after_pool))).float()
+        print("self.teacher", self.teacher)
+        noise_rng = np.random.default_rng(noise_seed)
+        self.noise = noise_rng.standard_normal(size=self.__len__()) / np.sqrt(SNR)
+        print("noise", self.noise)
+        
+        # dataset = datasets.ImageFolder(root, transform)
+        # targets = [235, 283] # dogs vs. cats
+        # indices = [i for i, label in enumerate(dataset.targets) if label in targets]
+        # dataset = torch.utils.data.Subset(dataset, indices)
+        
+        # if phase == "train":
+        #     self.dataset = torch.utils.data.Subset(dataset, range(int(num_subsamples * len(train_dataset)))) # subsample train_dataset
+        # else:
+        #    self.dataset = dataset
+            # no need to subsample val_dataset
+            # val_dataset = torch.utils.data.Subset(val_dataset, range(int(args.num_subsamples * len(train_dataset))))
+        
+        # self.random_feature = torch.randn(num_hidden_features, 3*self.target_size*self.target_size)
+        # self.random_bias = torch.rand(num_hidden_features, 1) * 2 * np.pi
+  
+            
+    #def __len__(self):
+    #    return 256*10
+    
+    def __getitem__(self, index: int):
+        sample, target = super(RandomFeaturesClassificationImagenet, self).__getitem__(index)
+        
+        sample = self.avg_kernel(sample).flatten()
+        print("torch.dot(sample, self.teacher)", torch.dot(sample, self.teacher)/ self.sqrtD)
+        
+        return sample, self.class_to_superclass_dict[target]
+
 def main():
     args = parser.parse_args()
     print("Args", args)
@@ -307,7 +380,7 @@ def main_worker(gpu, ngpus_per_node, args):
             width_after_pool = math.floor((224 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
             model = utils.MLP(
                 input_size = 3*(width_after_pool)*(width_after_pool), hidden_sizes = [args.num_hidden_features],
-                keep_rate=1.0, N_CLASSES = 11, activation = args.nonlinearity, randomfeatures =  True
+                keep_rate=1.0, N_CLASSES = args.N_CLASSES, activation = args.nonlinearity, randomfeatures =  True
             )
             rng = np.random.default_rng(42)
             model.fc1.weight.data = torch.tensor(rng.standard_normal(size=[args.num_hidden_features,
@@ -449,59 +522,6 @@ def main_worker(gpu, ngpus_per_node, args):
         print("=> Dummy data is used!")
         train_dataset = datasets.FakeData(10, (3, 224, 224), 1000, transforms.ToTensor())
         val_dataset = datasets.FakeData(50, (3, 224, 224), 1000, transforms.ToTensor())
-    elif args.image_transform_loader == "RescaleImagenet":
-        traindir = os.path.join(args.data, 'train')
-        valdir = os.path.join(args.data, 'val')
-      
-        train_dataset = RescaleImagenet(
-            root = traindir, data_rescale = record.data_rescale, phase = "train", 
-            zero_out = args.zero_out,
-            growth_factor = args.growth_factor
-            )
-        
-        val_dataset = RescaleImagenet(
-            root = valdir, data_rescale = record.data_rescale, phase = "test", 
-            zero_out = args.zero_out,
-            growth_factor = args.growth_factor
-        )
-    elif args.image_transform_loader == "TileImagenet":
-        traindir = os.path.join(args.data, 'train')
-        valdir = os.path.join(args.data, 'val')
-        tile = [int(t) for t in args.tiling_imagenet.split(",")]
-        print("tile", tile)
-        train_dataset = TileImagenet(
-            root = traindir,  
-            phase = "train", 
-            tile = tile,
-            tiling_orientation_ablation = args.tiling_orientation_ablation,
-            gaussian_blur = args.gaussian_blur,
-            max_sigma = args.max_sigma
-            )
-        
-        val_dataset = TileImagenet(
-            root = valdir, 
-            phase = "test", 
-            tile = tile,
-            tiling_orientation_ablation = args.tiling_orientation_ablation,
-            gaussian_blur = args.gaussian_blur,
-            max_sigma = args.max_sigma
-        )
-    elif args.image_transform_loader == "CoarseGrainImagenet":
-        traindir = os.path.join(args.data, 'train')
-        valdir = os.path.join(args.data, 'val')
-        train_dataset = CoarseGrainImagenet(
-            root = traindir,  
-            phase = "train", 
-            block_size = args.coarsegrain_blocksize,
-            
-            )
-        
-        val_dataset = CoarseGrainImagenet(
-            root = valdir, 
-            phase = "test", 
-            block_size = args.coarsegrain_blocksize,
-          
-        )
     elif args.image_transform_loader == "SubsampleImagenet":   
         assert args.distributed == False, "args.distributed not supported for SubsampleImagenet"
         traindir = os.path.join(args.data, 'train')
@@ -532,14 +552,19 @@ def main_worker(gpu, ngpus_per_node, args):
         traindir = os.path.join(args.data, 'train')
         valdir = os.path.join(args.data, 'val')
 
+        width_after_pool = math.floor((224 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
         train_dataset = RandomFeaturesClassificationImagenet(root = traindir,  
                 phase = "train",   
                 block_size = args.coarsegrain_blocksize,
+                width_after_pool = width_after_pool,
+                N_CLASSES = args.N_CLASSES
                 )
         
         val_dataset = RandomFeaturesClassificationImagenet(root = valdir,  
                 phase = "test",   
                 block_size = args.coarsegrain_blocksize,
+                width_after_pool = width_after_pool,
+                N_CLASSES = args.N_CLASSES
                 )
         
         
