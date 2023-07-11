@@ -140,7 +140,7 @@ class RandomFeaturesImagenet(datasets.ImageFolder):
                  class_to_superclass_dict = None
                 ):
         
-        assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
+        #assert phase in ["train", "test"], f"phase must be either 'train' or 'test', got {phase} instead"
         self.target_size = target_size
         self.class_to_superclass_dict = class_to_superclass_dict
         

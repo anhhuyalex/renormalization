@@ -16,4 +16,4 @@ jupyter-notebook*
 *.out
 *.log
 tensornetworks/data
-
+hipp.sh
