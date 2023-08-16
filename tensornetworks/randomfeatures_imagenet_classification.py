@@ -61,12 +61,14 @@ parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
 parser.add_argument('--scheduler_step_size', default=30, type=int,
                     help='scheduler_step_size (default: 30)',
                     dest='scheduler_step_size')
-
 parser.add_argument('--image_transform_loader',   
                     default=  'TileImagenet',
                      choices=['dummy', 'SubsampleImagenet', 'RandomFeaturesClassification'],
                     help='type of image perturbation to run')
-
+parser.add_argument('--N_CLASSES',
+                    default=  11,
+                    type=int,
+                    help='how many classes in prediction')
 parser.add_argument('--tiling_imagenet', default='1,1', type=str,  
                     help='whether to zero out center or do something else')
 ### RANDOM FEATURES EXP
@@ -249,28 +251,12 @@ class RandomFeaturesClassificationImagenet(datasets.ImageFolder):
         super(RandomFeaturesClassificationImagenet, self).__init__(root, transform)
         self.sqrtD = np.sqrt(3*(width_after_pool)*(width_after_pool))
         rng = np.random.default_rng(42)
-        self.teacher = torch.tensor(rng.standard_normal(size=3*(width_after_pool)*(width_after_pool))).float()
+        self.teacher = torch.tensor(rng.standard_normal(size=(3*(width_after_pool)*(width_after_pool), N_CLASSES)), ).float()
         print("self.teacher", self.teacher)
         noise_rng = np.random.default_rng(noise_seed)
         self.noise = noise_rng.standard_normal(size=self.__len__()) / np.sqrt(SNR)
         print("noise", self.noise)
-        
-        # dataset = datasets.ImageFolder(root, transform)
-        # targets = [235, 283] # dogs vs. cats
-        # indices = [i for i, label in enumerate(dataset.targets) if label in targets]
-        # dataset = torch.utils.data.Subset(dataset, indices)
-        
-        # if phase == "train":
-        #     self.dataset = torch.utils.data.Subset(dataset, range(int(num_subsamples * len(train_dataset)))) # subsample train_dataset
-        # else:
-        #    self.dataset = dataset
-            # no need to subsample val_dataset
-            # val_dataset = torch.utils.data.Subset(val_dataset, range(int(args.num_subsamples * len(train_dataset))))
-        
-        # self.random_feature = torch.randn(num_hidden_features, 3*self.target_size*self.target_size)
-        # self.random_bias = torch.rand(num_hidden_features, 1) * 2 * np.pi
-  
-            
+
     #def __len__(self):
     #    return 256*10
     
@@ -278,9 +264,10 @@ class RandomFeaturesClassificationImagenet(datasets.ImageFolder):
         sample, target = super(RandomFeaturesClassificationImagenet, self).__getitem__(index)
         
         sample = self.avg_kernel(sample).flatten()
-        print("torch.dot(sample, self.teacher)", torch.dot(sample, self.teacher)/ self.sqrtD)
-        
-        return sample, self.class_to_superclass_dict[target]
+        linearlytransformed_sample = torch.matmul(sample.unsqueeze(0), self.teacher)/ self.sqrtD
+        #print("linearlytransformed_sample", )
+        #print("teacher", self.teacher.shape)
+        return sample, torch.argmax(linearlytransformed_sample)
 
 def main():
     args = parser.parse_args()

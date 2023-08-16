@@ -6,8 +6,8 @@
 #SBATCH --output imagenet-%J.log
 #SBATCH --mail-type=end
 #SBATCH --mail-user=alexn@uni.minerva.edu
-#SBATCH --partition=della-gpu
-#SBATCH --gres=gpu:1
+# SBATCH --partition=della-gpu
+# SBATCH --gres=gpu:1
 
 # SBATCH --mail-type=ALL
 # SBATCH --mail-user=alexn@minerva.kgi.edu
@@ -42,22 +42,17 @@ source activate renormalization
 
 
 
-#i_vals=({1..1000..50}) # 12
-#j_vals=({j..1000..50}) # 12
-i_vals=(10 100 1000 10000 20000 50000) # 10
-j_vals=(10 100 1000 10000 20000 50000) # 10
-#j_vals=(10 100 1000 5000 10000 50000 100000 500000 1000000) # 10
-
-# k=$1
+# sbatch --array=0-35 hipp.sh
+i_vals=(10 100 1000 10000 20000 60000) # 6
+j_vals=(10 100 1000 10000 20000 60000) # 6
+# i_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
+# j_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
 
 i=${i_vals[$SLURM_ARRAY_TASK_ID / ${#j_vals[@]}]}
-# i=${i_vals[$SLURM_ARRAY_TASK_ID % ${#j_vals[@]}]}
-# j=501
 j=${j_vals[$SLURM_ARRAY_TASK_ID % ${#j_vals[@]}]}
-echo "i = $i, j = $j"
+echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
 # echo "i = $i"
 # i=$1
-# python -u tractable_polynomial.py --save_dir /scratch/gpfs/qanguyen/poly_roots --num_inputs $1 --order 7 --num_examples 50000 --model_name ridge --random_coefs True --input_strategy random  --is_online False --output_strategy evaluate_at_0 --sample_strategy roots --noise 0.0 --tags ridge 
 
 # python imagenet.py -a coarsegrain_attention --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 24 --scheduler_step_size 8 --lr 0.03  --image_transform_loader CoarseGrainImagenet --coarsegrain_blocksize  $i --fileprefix coarsegraining_attention_APR25_lr0.03
 # i=3; j=100; python randomfeatures_imagenet.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --multiprocessing-distributed --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs 5 --scheduler_step_size 5 --lr 0.01 --image_transform_loader SubsampleImagenet --coarsegrain_blocksize  $i --num_hidden_features $j  --fileprefix randomfeatures_MAY11
@@ -68,11 +63,14 @@ echo "i = $i, j = $j"
 # for k in {36..60..7}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN18; done
 # for k in {1..35}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.00001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN18; done
 # for k in {36..60..7}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.00001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN18; done
-for k in {1..35}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_classification.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.01 --image_transform_loader RandomFeaturesClassification --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN18; done
-for k in {36..60..7}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_classification.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.01 --image_transform_loader RandomFeaturesClassification --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN18; done
+# for k in {1..10}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_classification.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.001 --image_transform_loader RandomFeaturesClassification --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUL11; done
+# for k in {10..36..2}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_classification.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.001 --image_transform_loader RandomFeaturesClassification --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUL11; done
+# for k in {36..60..7}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_classification.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.001 --image_transform_loader RandomFeaturesClassification --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUL11; done
 # epochs=100; i=100; j=100; k=5; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_classification.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.01 --image_transform_loader RandomFeaturesClassification --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN18 
-# for k in {1..35}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr0.05gradient_descent_noisyJUN15 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 100 --lr 0.05 ; done
-# for k in {36..60..7}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr0.05gradient_descent_noisyJUN15 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 100 --lr 0.05; done
- #  i=100;j=1000;k=5;epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_noisyclass.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN23
-#  for k in {1..35}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_noisyclass.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.0001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN25 --class_noise 0.1; done
+# for k in {1..10}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr1gradient_descent_noisyJUL25 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 1000 --lr 1.0 ; done
+# for k in {10..36..2}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr1gradient_descent_noisyJUL25 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 1000 --lr 1.0 ; done
+# for k in {36..60..7}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr1gradient_descent_noisyJUL25 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 1000 --lr 1.0; done
+# for k in {1..14}; do python -u mnist_classification.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix relulr0.1_wd0_mnistAUG06 --nonlinearity relu --train_method gradient_descent --epochs 150 --lr 0.1 --wd 0.0000000000000000000000001; done #   
+# for k in {1..14}; do python -u mnist_classification_wholenetwork.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix tanhlr0.1_wd1em5_mnistAUG11 --nonlinearity tanh --train_method gradient_descent --epochs 150 --lr 0.1; done #    --wd 0.0000000000000000000000001
+for k in 1 2 3 4 5 6 7 8 9 11 17; do python -u cifar_classification_randomfeatures.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix tanhlr0.1_wd1em5_cifarAUG15 --nonlinearity tanh --train_method gradient_descent --epochs 150 --lr 0.1; done #    --wd 0.0000000000000000000000001
 # for k in {36..60..7}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_noisyclass.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.0001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN25 --class_noise 0.1; done

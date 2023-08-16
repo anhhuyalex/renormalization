@@ -43,7 +43,7 @@ parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
-parser.add_argument('--wd', '--weight-decay', default=1e-4, type=float,
+parser.add_argument('--wd', '--weight-decay', default=1e-1000, type=float,
                     metavar='W', help='weight decay (default: 1e-4)',
                     dest='weight_decay')
 parser.add_argument(
@@ -59,7 +59,7 @@ parser.add_argument('--num_hidden_features', default=0, type=int,
                     help='number of hidden fourier features')
 parser.add_argument('--nonlinearity', default="tanh", type=str,  
                     help='type of nonlinearity used')
-parser.add_argument('--gamma_regularize', default=1e-6, type=float,  
+parser.add_argument('--gamma_regularize', default=1e-4, type=float,  
                     help='fraction of training set to use')
 parser.add_argument('--SNR', default=1e-6, type=float,  
                     help='fraction of training set to use')
@@ -113,12 +113,12 @@ class RandomFeaturesImagenet(datasets.ImageFolder):
         rng = np.random.default_rng(42)
         
         self.teacher = torch.tensor(rng.standard_normal(size=3*(width_after_pool)*(width_after_pool))).float()
-        print("teacher", self.teacher[:100])
+         
         self.sqrtD = np.sqrt(3*(width_after_pool)*(width_after_pool))
         super(RandomFeaturesImagenet, self).__init__(root, transform)
         noise_rng = np.random.default_rng(noise_seed)
         self.noise = noise_rng.standard_normal(size=self.__len__()) / np.sqrt(SNR)
-        print("noise", self.noise)
+        
         
             
     #def __len__(self):
@@ -166,7 +166,8 @@ def get_record(args):
                 args = args,
                 metrics = utils.dotdict(
                     train_mse = -1,
-                    test_mse = -1
+                    test_mse = -1,
+                    distance_to_true = -1
                 )
                 
         )  
@@ -200,12 +201,14 @@ def get_dataset(args):
                 noise_seed = 2022
                 )
         val_dataset.teacher = train_dataset.teacher.detach().clone()
-        print("train teacher",train_dataset.teacher )
-        print("val teacher",val_dataset.teacher )
+        print("train teacher",train_dataset.teacher [:100] )
+        print("val teacher",val_dataset.teacher [:100])
+        print("train noise",train_dataset.noise [:100] )
+        print("val noise",val_dataset.noise [:100])
         rng = np.random.default_rng(42)
         num_train = len(train_dataset)
         train_idx = rng.integers(low=0, high=num_train, size=args.num_train_samples)
-        print(train_idx[:100])
+        print("train_idx", train_idx[:100])
         train_sampler = torch.utils.data.SubsetRandomSampler(train_idx)
         val_sampler = None
     elif "random_normal_data" in args.data:
@@ -309,15 +312,32 @@ def validate_ridge_regression(val_loader, alpha, random_features_model, args, no
         test_mse = torch.nn.functional.mse_loss(Y_pred, Ys)
     return test_mse
 
-def train_gradient_descent(train_loader, device, random_features_model, nonlinearity, sqrtD, args, record):#, model, criterion, optimizer, scheduler, , args, record, record_weights):
+def train_gradient_descent(regression_mse, alpha, train_loader, device, random_features_model, nonlinearity, sqrtD, args, record): 
+    """ 
+    Train a linear model using gradient descent
+
+    :param alpha: the ridge regression solution
+    :param train_loader: the training data loader
+    :param device: the device to train on
+    :param random_features_model: the random features model
+    :param nonlinearity: the nonlinearity used
+    :param sqrtD: the square root of the dimension of the random features
+    :param args: the arguments
+    :param record: the record to save the metrics
+
+    :return: the trained model
+    """
     losses = utils.AverageMeter('Loss', ':.4e')
     data_time = utils.AverageMeter('Data', ':6.3f')
-    output_layer = torch.nn.Linear(in_features = args.num_hidden_features, out_features = 1).to(device).float()
-    optimizer = torch.optim.SGD(output_layer.parameters(),  
-                                    args.lr / (np.sqrt(args.num_hidden_features)),
-                                    momentum=args.momentum,
+    output_layer = torch.nn.Linear(in_features = args.num_hidden_features, out_features = 1, 
+                                   bias = False
+                                   ).to(device).float()
+    optimizer = torch.optim.Adam(output_layer.parameters(),  
+                                 lr=   args.lr ,#/ (np.sqrt(args.num_hidden_features)),
+                                    #momentum=args.momentum,
                                     weight_decay=args.weight_decay
                                      )
+    scheduler = StepLR(optimizer, step_size=100, gamma=0.8)
     # define loss function (criterion), optimizer, and learning rate scheduler
     criterion = nn.MSELoss().to(device)
     
@@ -334,20 +354,24 @@ def train_gradient_descent(train_loader, device, random_features_model, nonlinea
             # move data to the same device as model
             images = images.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
-            print("images, target", images.shape, target.shape)
+            
 
             random_features = nonlinearity(torch.matmul(images, random_features_model) / sqrtD )
             optimizer.zero_grad()
             output = output_layer(random_features)
-            #print("output", output)
-            loss = criterion(output, target)
+            print("images, target", images, target, output)
+            print("output distance", torch.nn.functional.mse_loss(output_layer.weight, alpha.squeeze(1)))
+            loss = torch.nn.functional.mse_loss(output.flatten(), target.flatten())
             loss.backward()
             optimizer.step()
-            losses.update(loss.item(), images.size(0))
-    
-        print("Current average loss", losses.avg )
+            losses.update(loss.item(), images.size(0)) 
+        # step scheduler
+        scheduler.step()
+        print("Current average loss", losses.avg, "epoch", epoch, "regression_mse", regression_mse, alpha, output_layer.weight )
              
         record.metrics.train_mse[epoch] = losses.avg
+        record.metrics.distance_to_true[epoch] = torch.nn.functional.mse_loss(output_layer.weight, alpha.squeeze(1)).item() 
+        print("record.metrics.distance_to_true", record.metrics.distance_to_true[epoch])
     return losses.avg, output_layer
 
 def validate_gradient_descent(val_loader, output_layer, random_features_model, args, nonlinearity, sqrtD, device):
@@ -377,13 +401,14 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     random_features_model = get_model(args).to(device)
     train_loader, val_loader, sqrtD = get_dataset(args)
+    
     record = get_record(args)
     nonlinearity = get_nonlinearity(args)
     # Save parameters
     args.exp_name = f"{args.fileprefix}" \
                 + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
     print(f"saved to {args.save_dir}/{args.exp_name}", )
-   
+    
 
     # train
     if args.train_method == "ridge_regression":
@@ -393,7 +418,10 @@ def main():
         record.metrics.test_mse = test_mse
     elif args.train_method == "gradient_descent":
         record.metrics.train_mse = {}
-        train_mse, output_layer = train_gradient_descent(train_loader, device, random_features_model, nonlinearity, sqrtD, args, record)
+        record.metrics.distance_to_true = {}
+        regression_mse, alpha = train_ridge_regression(train_loader, device, random_features_model, nonlinearity, sqrtD, args)
+        train_mse, output_layer = train_gradient_descent(regression_mse, alpha, train_loader, device, random_features_model, nonlinearity, sqrtD, args, record)
+        
         test_mse = validate_gradient_descent(val_loader, output_layer, random_features_model, args, nonlinearity, sqrtD, device)
         record.metrics.test_mse = test_mse
     # evaluate on validation set

@@ -569,3 +569,663 @@ def find_free_port():
         return str(s.getsockname()[1])
                                
                                
+from scipy import interpolate
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from matplotlib.colors import LogNorm
+
+
+def in_notebook():
+    try:
+        from IPython import get_ipython
+        if 'IPKernelApp' not in get_ipython().config:  # pragma: no cover
+            return False
+    except ImportError:
+        return False
+    except AttributeError:
+        return False
+    return True
+
+def show_plt_if_in_notebook(title=None):
+    if in_notebook():
+        plt.show()
+    else:
+        plt.savefig(title)
+
+from IPython.display import display 
+from collections import defaultdict
+import glob 
+import seaborn as sns 
+import math 
+import matplotlib.pyplot as plt 
+import pandas as pd 
+
+def get_record(  is_online, extra = "", title = None,  
+               zero_out_list = None,
+               image_transform_loader_list = None,
+               tiling_orientation_ablation_list = None,
+               tiling_list = None,
+               outdir = "/scratch/gpfs/qanguyen/poly1/",
+              palette = sns.color_palette("Set3", 10),
+               hue_variable = "data_rescale",
+               num_hidden_features_list = None,
+               max_epoch = 0, 
+               num_runs = 1000,
+):
+     
+    train_pars = defaultdict(list)
+    val_pars = defaultdict(list)
+   
+    
+    record_names = glob.glob(f"{outdir}/lr0.0005gradient_descent_noisyJUL18*pth.tar")
+     
+    for _, f in enumerate(record_names[:num_runs]):
+        #print(f)
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+        except Exception as e: 
+            print(e)
+        
+        try:
+            
+            
+            if (num_hidden_features_list is not None) and (record.args.num_hidden_features not in num_hidden_features_list):   
+                continue
+        except Exception as e: 
+            print(e)
+            print(f, "continue", record.curr_epoch )
+            continue
+        
+        #print(f, "plotting" )
+        for epoch in range(max_epoch):
+         
+            
+             
+            
+            width_after_pool = math.floor((224 - record.args.coarsegrain_blocksize) / record.args.coarsegrain_blocksize + 1)
+            D = 3*(width_after_pool)*(width_after_pool)
+            
+            N =  record.args.num_train_samples
+            
+            P = record.args.num_hidden_features
+            if P < N:
+                continue 
+            train_pars["block_size"].extend( [record.args.coarsegrain_blocksize]) 
+            train_pars["N"].extend([N])
+            train_pars["D"].extend([D]) 
+            train_pars["P"].extend([ f"P={P},N={N}" ])
+            train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+            train_pars["logN/D"].extend([np.log( N / D) ])
+            train_pars["epoch"].append(epoch)
+            train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+
+    # plot train_loss as a function of epochs 
+    train_pars = pd.DataFrame(train_pars) 
+    train_pars = train_pars.sort_values(by=["P", "block_size", "epoch"]) 
+    sns.lineplot(x="epoch", y="train_loss", hue="P", data=train_pars, palette=palette)  
+    plt.title(title) 
+    plt.legend(bbox_to_anchor=(1.05, 1), loc=2, borderaxespad=0.)
+    plt.show() 
+
+def small_lr_regression_exp(  is_online, extra = "", title = None,  
+               zero_out_list = None,
+               image_transform_loader_list = None,
+               tiling_orientation_ablation_list = None,
+               tiling_list = None,
+               outdir = "/scratch/gpfs/qanguyen/poly1/",
+              palette = sns.color_palette("Set3", 10),
+               hue_variable = "data_rescale",
+               num_hidden_features_list = None,
+               max_epoch = 0
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list)
+    val_pars = defaultdict(list)
+     
+    record_names = glob.glob(f"{outdir}/lr0.01gradient_descent_noisyJUL24*pth.tar")
+     
+    for _, f in enumerate(record_names) :
+        #print(f)
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+        except Exception as e: 
+            print(e)
+        
+        try:
+            #if record.curr_epoch > 27:
+            #    continue
+            #print(w)
+              
+            #print( record.args )
+
+            #if (zero_out_list is not None) and (record.args.zero_out not in zero_out_list):
+            #    continue
+            
+            if (num_hidden_features_list is not None) and (record.args.num_hidden_features not in num_hidden_features_list):   
+                continue
+            #print(f, "plotting" )
+            for epoch in range(max_epoch):
+            #for epoch in range( 1):
+                #print(epoch, f)
+                
+                #pars["data_rescale"].append(record.data_rescale)
+                #pars["data_rescale"].append(record.args.growth_factor)
+                #pars["tiling_imagenet"].append(record.args.tiling_imagenet)
+                val_pars["block_size"].append(f'{record.args.coarsegrain_blocksize}')
+                train_pars["block_size"].extend( [record.args.coarsegrain_blocksize]) 
+                #val_pars["lr"].append(f'{record.args.lr}')
+                #train_pars["lr"].extend([ record.args.lr]  * len(record.metrics.train_losses[epoch]))
+                val_pars["P"].append(record.args.num_hidden_features)
+                train_pars["P"].extend([ record.args.num_hidden_features ])
+                width_after_pool = math.floor((224 - record.args.coarsegrain_blocksize) / record.args.coarsegrain_blocksize + 1)
+                D = 3*(width_after_pool)*(width_after_pool)
+                val_pars["D"].append( D)
+                train_pars["D"].extend([D]) 
+                N =  record.args.num_train_samples
+                val_pars["N"].append(N)
+                train_pars["N"].extend([N])
+                val_pars["logP/D"].append( np.log( record.args.num_hidden_features / D ))
+                train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+                val_pars["logN/D"].append( np.log( N / D ))
+                train_pars["logN/D"].extend([np.log( N / D) ])
+                #val_pars["P"].append(f'{record.args.num_hidden_features}')
+                #train_pars["P"].extend([ record.args.num_hidden_features ])
+                val_pars["epoch"].append(epoch)
+                train_pars["epoch"].append(epoch)
+                #mean_train_loss = np.mean([i  for i in record.metrics.train_losses["default"][epoch] if i != 0.0])
+                train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+                train_pars["distance_to_true"].append( (record.metrics.distance_to_true[epoch]).item() )
+                #print( record.metrics.train_losses)
+                train_pars["test_loss"].append( (record.metrics.test_mse  ) )
+                val_pars["test_loss"].append( (record.metrics.test_mse ) )
+            
+        except Exception as e: 
+            print(e)
+            continue
+        
+        
+             
+        #if _ > 40: break  
+        #print("record.args.coarsegrain_blocksize, record.args.num_hidden_features,  record.args.train_fraction", record.args.coarsegrain_blocksize, record.args.num_hidden_features,  record.args.train_fraction,   record.metrics.val_losses[epoch])
+    line_kwargs    = dict(linewidth=0.5, alpha=0.7, style=hue_variable,
+             markers=False, markersize=8, markeredgecolor='white',
+             dashes=False)
+    figheight, figwidth = (12, 8)
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    #display(train_pars) 
+    train_pars = train_pars.sort_values('test_loss', ascending=True)  
+    grouped = train_pars.groupby(["P", "N"])
+    for name, group in grouped:
+        #if name not in [(100, 10), (1000, 100), (10000, 1000), (10000, 100)]:
+        #    continue
+        #display(grouped)
+        group = group.sort_values(by=["D", "epoch"], ascending=True)
+        display(group)
+        sns.lineplot(x="epoch",y= "train_loss", data=group, label=name)
+    ax.set(  yscale="log")
+    plt.title(f"Train loss vs. D")
+    plt.legend()
+    plt.show()
+    
+    for name, group in grouped:
+        #if name not in [(100, 10), (1000, 100), (10000, 1000), (10000, 100)]:
+        #    continue
+        #display(grouped)
+        group = group.sort_values(by="D", ascending=True)
+        sns.lineplot(x="epoch",y= "distance_to_true", data=group, label=name)
+    ax.set(  yscale="log")
+    plt.title(f"Distance to ridge regression solution vs. D")
+    plt.legend()
+    plt.show() 
+    
+    
+    # Interpolate 
+    x = np.array(train_pars["logN/D"])
+    y = np.array(train_pars["logP/D"])
+    z = np.array(train_pars["train_loss"])
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    
+  
+    plt.title(f"Train loss block_size vs. num_hidden_features heatmap")
+    show_plt_if_in_notebook("train_loss_vs_epochs.png")
+    
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    val_pars = pd.DataFrame.from_dict(val_pars) 
+    val_pars = val_pars.sort_values(by=hue_variable, ascending=True)[val_pars["epoch"] == max_epoch ]
+#     val_loss = val_pars.pivot("logP/D", "logN/D", "test_loss")
+    val_loss = pd.pivot_table(val_pars, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    display(val_pars.sort_values(by="test_loss", ascending=True))
+    x = np.array(val_pars["logN/D"])
+    y = np.array(val_pars["logP/D"])
+    z = np.array(val_pars["test_loss"])
+    xx = np.array(val_loss.columns)
+    yy = np.array(val_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+        #     vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+              #  vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha= 0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title(f"Test loss block_size vs. num_hidden_features heatmap")
+    show_plt_if_in_notebook("test_loss_vs_epochs.png")
+    
+    # LOG TRAIN & TEST LOSSES
+    figheight, figwidth = (12, 8)
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    #display(train_pars) 
+    train_pars = train_pars.sort_values(by="block_size", ascending=True)[train_pars["epoch"] == max_epoch ]
+    train_loss = pd.pivot_table(train_pars, columns="logP/D", index="logN/D", values="train_loss",
+                               aggfunc='mean'
+                               )
+    display(train_loss)
+    # Interpolate 
+    x = np.array(train_pars["logN/D"])
+    y = np.array(train_pars["logP/D"])
+    z = np.log(np.array(train_pars["train_loss"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    
+  
+    plt.title(f"Train log loss block_size vs. num_hidden_features heatmap")
+    show_plt_if_in_notebook("log_train_loss_vs_epochs.png")
+    
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    val_pars = pd.DataFrame.from_dict(val_pars) 
+    val_pars = val_pars.sort_values(by=hue_variable, ascending=True)[val_pars["epoch"] == max_epoch ]
+    #val_loss = val_pars.pivot("logP/D", "logN/D", "test_loss")
+    val_loss = pd.pivot_table(val_pars, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    x = np.array(val_pars["logN/D"])
+    y = np.array(val_pars["logP/D"])
+    z = np.log(np.array(val_pars["test_loss"]))
+    xx = np.array(val_loss.columns)
+    yy = np.array(val_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+        #     vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+              #  vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha= 0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title(f"Test log loss block_size vs. num_hidden_features heatmap")
+    show_plt_if_in_notebook("log_test_loss_vs_epochs.png")
+
+# MNIST 
+def mnist_classification_exp(      
+               outdir = "",
+               hue_variable = "data_rescale",
+               max_epoch = 0,
+               num_runs_to_analyze=1000
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list)
+     
+    record_names = glob.glob(f"{outdir}/tanh*wd1*cifarAUG15*pth.tar")
+     
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        # print(f)
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+        except Exception as e: 
+            print(e)
+        
+        try:
+              
+            # for epoch in range(max_epoch):
+            for epoch in [max_epoch]:
+                train_pars["block_size"].extend( [record.args.coarsegrain_blocksize]) 
+                train_pars["lr"].append(f'{record.args.lr}')
+                train_pars["block"].append(f'{record.args.coarsegrain_blocksize}')
+                train_pars["P"].extend([ record.args.num_hidden_features ])
+                width_after_pool = math.floor((32 - record.args.coarsegrain_blocksize) / record.args.coarsegrain_blocksize + 1)
+                D = 3*(width_after_pool)*(width_after_pool)
+                 
+                train_pars["D"].extend([D]) 
+                N =  record.args.num_train_samples
+                
+                train_pars["N"].extend([N])
+                train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+                train_pars["logN/D"].extend([np.log( N / D) ])
+                train_pars["epoch"].append(epoch)
+                train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+                train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+                # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
+                train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
+                # train_pars["train_top1"].append( (record.metrics.train_top1[epoch]  ) )
+                train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+                #train_pars["weight_norm"].append( (record.metrics.weight_norm[epoch].item()  ) )
+        except Exception as e: 
+            print(e, record.metrics.test_mse[epoch])
+            raise ValueError
+        
+        
+              
+    figheight, figwidth = (12, 8)
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    #display(train_pars) 
+    train_pars = train_pars.sort_values('test_loss', ascending=True)  
+    
+    # plot train loss
+    grouped = train_pars.groupby(["P", "N"])
+    num_groups = 0
+    for name, group in grouped:
+        p, n = name
+        if (p > n) and (n > 10):
+            num_groups += 1 
+    # make palette with num_groups colors
+    palette = sns.color_palette("icefire", num_groups)
+    num_groups = 0
+    for name, group in grouped:
+    
+        group = group.sort_values(by=["D", "test_loss"  ], ascending=[True, True])
+    
+        group = group.drop_duplicates(subset=["D"], keep="first")
+ 
+        p, n = name 
+        if (p > n) and (n > 10):
+            
+            sns.lineplot(x="D",y= "train_loss", data=group, label=name, color=palette[num_groups])
+            num_groups += 1
+    ax.set(  yscale="log")
+    plt.title(f"Train loss vs. D")
+    plt.legend(loc=(1.04,0))
+    plt.show()
+
+    grouped = train_pars.groupby(["P", "N"])
+    num_groups = 0
+    for name, group in grouped:
+        p, n = name
+        if (p > n) and (n > 10):
+            num_groups += 1 
+    # make palette with num_groups colors
+    palette = sns.color_palette("icefire", num_groups)
+    num_groups = 0
+    for name, group in grouped:
+      
+        group = group.sort_values(by=["D", "test_loss"  ], ascending=[True, True])
+        group = group.drop_duplicates(subset=["D"], keep="first")
+        p, n = name 
+        if (p > n) and (n > 10):
+            
+            sns.lineplot(x="D",y= "test_loss", data=group, label=name, color=palette[num_groups])
+            num_groups += 1
+    #ax.set(  yscale="log")
+    plt.title(f"Test loss vs. D")
+    plt.legend(loc=(1.04,0))
+    plt.show()
+
+    
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    grouped = train_pars.groupby(["P", "N"])
+    num_groups = 0
+    for name, group in grouped:
+        p, n = name
+        if (p > n) and (n > 10):
+            num_groups += 1 
+    # make palette with num_groups colors
+    palette = sns.color_palette("icefire", num_groups)
+    num_groups = 0
+    
+    for name, group in grouped:
+        #if name not in [(100, 10), (1000, 100), (10000, 1000), (10000, 100)]:
+        #    continue
+        #display(grouped)
+        group = group.sort_values(by=["D", "test_top1"  ], ascending=[True, True])
+        #display(group)
+        group = group.drop_duplicates(subset=["D"], keep="first")
+        #display(group)
+        p, n = name 
+        if (p > n) and (n > 10):
+            
+            sns.lineplot(x="D",y= "test_top1", data=group, label=name, color=palette[num_groups])
+            num_groups += 1
+    ax.set(  yscale="log")
+    plt.title(f"Test top 1 accuracy vs. D")
+    plt.legend(loc=(1.04,0))
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    #display(train_pars) 
+    grouped = train_pars.groupby(["P", "N"])
+    num_groups = 0
+    for name, group in grouped:
+        p, n = name
+        if (p > n) and (n > 10):
+            num_groups += 1 
+    # make palette with num_groups colors
+    palette = sns.color_palette("icefire", num_groups)
+    num_groups = 0
+    for name, group in grouped:
+        #if name not in [(100, 10), (1000, 100), (10000, 1000), (10000, 100)]:
+        #    continue
+        #display(grouped)
+        group = group.sort_values(by=["D", "test_top5"  ], ascending=[True, True])
+        #display(group)
+        group = group.drop_duplicates(subset=["D"], keep="first")
+        #display(group)
+        p, n = name 
+        if (p > n) and (n > 10):
+             
+            sns.lineplot(x="D",y= "test_top5", data=group, label=name, color=palette[num_groups])
+            num_groups += 1
+    ax.set(  yscale="log")
+    plt.title(f"Test top 5 accuracy vs. D")
+    plt.legend(loc=(1.04,0))
+    plt.show()
+
+    # plot weight norm 
+    # fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    # grouped = train_pars.groupby(["P", "N"])
+    # num_groups = 0
+    # for name, group in grouped:
+    #     p, n = name
+    #     if (p > n) and (n > 10):
+    #         num_groups += 1 
+    # # make palette with num_groups colors
+    # palette = sns.color_palette("icefire", num_groups)
+    # num_groups = 0
+    
+    # for name, group in grouped:
+         
+    #     group = group.sort_values(by=["D", "test_loss"  ], ascending=[True, True])
+    #     #display(group)
+    #     group = group.drop_duplicates(subset=["D"], keep="first")
+    #     #display(group)
+    #     p, n = name 
+    #     if (p > n) and (n > 10):
+            
+    #         sns.lineplot(x="D",y= "weight_norm", data=group, label=name, color=palette[num_groups])
+    #         num_groups += 1
+    # ax.set(  yscale="log")
+    # plt.title(f"Weight norm of best test loss run vs. D")
+    # plt.legend(loc=(1.04,0))
+    # plt.show()
+    
+    train_pars_heatmap = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).drop_duplicates(subset=["P","N","D"], keep="first")  
+    # print("train_pars")
+    # display(train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).iloc[:1000 , :])
+    # print("train_pars_heatmap")
+    # display(train_pars_heatmap)
+    train_loss = pd.pivot_table(train_pars_heatmap, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    #display(train_loss)
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    x = np.array(train_pars_heatmap["logN/D"])
+    y = np.array(train_pars_heatmap["logP/D"])
+    z =np.log(np.array(train_pars_heatmap["test_loss"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title("Log test loss heat map")
+    plt.show()
+    
+    # top 1 acc heatmap 
+    train_pars_heatmap = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).drop_duplicates(subset=["P","N","D"], keep="first")  
+    train_loss = pd.pivot_table(train_pars_heatmap, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    x = np.array(train_pars_heatmap["logN/D"])
+    y = np.array(train_pars_heatmap["logP/D"])
+    z = (np.array(train_pars_heatmap["test_top1"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title("Log test top 1 accuracy heat map")
+    plt.show()
+     
+    # top 5 acc heatmap 
+    train_pars_heatmap = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).drop_duplicates(subset=["P","N","D"], keep="first")  
+    train_loss = pd.pivot_table(train_pars_heatmap, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    x = np.array(train_pars_heatmap["logN/D"])
+    y = np.array(train_pars_heatmap["logP/D"])
+    z = (np.array(train_pars_heatmap["test_top5"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title("Log test top 5 accuracy heat map")
+    plt.show()
