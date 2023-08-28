@@ -87,7 +87,7 @@ def get_record(args):
     return record
 
  
-class RandomFeaturesMNIST(datasets.MNIST):
+class RandomFeaturesCIFAR10(datasets.CIFAR10):
     def __init__(self, root = "./data",  
                  train = True,
                  transform = None,
@@ -100,23 +100,23 @@ class RandomFeaturesMNIST(datasets.MNIST):
         
          
          
-        super(RandomFeaturesMNIST, self).__init__(root, train=train, transform=transform, download=True)
+        super(RandomFeaturesCIFAR10, self).__init__(root, train=train, transform=transform, download=True)
          
     
     def __getitem__(self, index: int):
-        sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
+        sample, target = super(RandomFeaturesCIFAR10, self).__getitem__(index)
         
         sample = self.avg_kernel(sample)
          
-        return sample, target
+        return sample, target 
 
 
 def get_model(args, nonlinearity):
-    width_after_pool = math.floor((28 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
+    width_after_pool = math.floor((32 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
     # 2 layer MLP
     model = nn.Sequential(
         nn.Flatten(),
-        nn.Linear(width_after_pool**2, args.num_hidden_features),
+        nn.Linear(3*width_after_pool**2, args.num_hidden_features),
         nonlinearity,
         nn.Linear(args.num_hidden_features, 10),
     )
@@ -132,18 +132,17 @@ def get_dataset(args):
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
    
-    transform=transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-        ]) 
-    train_dataset = RandomFeaturesMNIST(root = "./data", 
+    transform = transforms.Compose(
+        [transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+    train_dataset = RandomFeaturesCIFAR10(root = "./data", 
                                         train = True,
                                         transform = transform,
                                         block_size = args.coarsegrain_blocksize
                                          ) 
     
     
-    val_dataset = RandomFeaturesMNIST(root = "./data",
+    val_dataset = RandomFeaturesCIFAR10(root = "./data",
                                       train = False,
                                       transform = transform,
                                       block_size = args.coarsegrain_blocksize)
@@ -226,7 +225,7 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
-            print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0], model.state_dict()['3.weight'][0])
+            # print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0], model.state_dict()['3.weight'][0])
             
         # step scheduler
         scheduler.step()

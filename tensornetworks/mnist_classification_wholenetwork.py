@@ -1,4 +1,4 @@
-
+from torchmetrics.functional.classification import multiclass_calibration_error
 import argparse
 import os
 import copy
@@ -60,6 +60,8 @@ parser.add_argument('--num_hidden_features', default=0, type=int,
                     help='number of hidden fourier features')
 parser.add_argument('--nonlinearity', default="tanh", type=str,  
                     help='type of nonlinearity used')
+parser.add_argument('--upsample', action='store_true', default=False,
+                        help='whether to upsample the downsampled data to original size')
 parser.add_argument(
             '--fileprefix', 
             default="",
@@ -82,6 +84,9 @@ def get_record(args):
                     test_top1 = utils.dotdict(),
                     test_top5 = utils.dotdict(),
                     weight_norm = utils.dotdict(),
+                    l1_calibration = utils.dotdict(),
+                    l2_calibration = utils.dotdict(),
+                    lmax_calibration = utils.dotdict(),
                     )
         )  
     return record
@@ -92,12 +97,13 @@ class RandomFeaturesMNIST(datasets.MNIST):
                  train = True,
                  transform = None,
                  block_size = 1, 
+                 upsample = False
                 ):
         
         
         self.block_size = block_size        
         self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
-        
+        self.upsample = upsample
          
          
         super(RandomFeaturesMNIST, self).__init__(root, train=train, transform=transform, download=True)
@@ -107,12 +113,24 @@ class RandomFeaturesMNIST(datasets.MNIST):
         sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
         
         sample = self.avg_kernel(sample)
-         
+        if self.upsample:
+            sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
+            sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
+            sample_size = sample.shape[-1]
+            remainder = 28 - sample_size # size of imagenet - current sample size
+            sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
+            sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
+            
+
         return sample, target
 
 
 def get_model(args, nonlinearity):
-    width_after_pool = math.floor((28 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
+    if args.upsample == False:
+        width_after_pool = math.floor((28 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
+    else:
+        width_after_pool = 28
+
     # 2 layer MLP
     model = nn.Sequential(
         nn.Flatten(),
@@ -136,17 +154,22 @@ def get_dataset(args):
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,))
         ]) 
+    
     train_dataset = RandomFeaturesMNIST(root = "./data", 
                                         train = True,
                                         transform = transform,
-                                        block_size = args.coarsegrain_blocksize
+                                        block_size = args.coarsegrain_blocksize,
+                                        upsample = args.upsample
                                          ) 
     
     
     val_dataset = RandomFeaturesMNIST(root = "./data",
                                       train = False,
                                       transform = transform,
-                                      block_size = args.coarsegrain_blocksize)
+                                      block_size = args.coarsegrain_blocksize,
+                                      upsample = args.upsample
+                                      )
+
     # Get a fixed subset of the training set
     rng = np.random.default_rng(42)
     num_train = len(train_dataset)
@@ -226,7 +249,7 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
-            print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0], model.state_dict()['3.weight'][0])
+            print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0])
             
         # step scheduler
         scheduler.step()
@@ -239,10 +262,14 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
         record.metrics.train_top5[epoch] = top5.avg
         
 
-        val_losses, val_top1, val_top5 = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
+        val_losses, val_top1, val_top5, l1_calibration, l2_calibration, lmax_calibration  = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
         record.metrics.test_mse[epoch] = val_losses
         record.metrics.test_top1[epoch] = val_top1
         record.metrics.test_top5[epoch] = val_top5
+        record.metrics.l1_calibration[epoch] = l1_calibration
+        record.metrics.l2_calibration[epoch] = l2_calibration
+        record.metrics.lmax_calibration[epoch] = lmax_calibration
+        
         print("val_losses, val_top1, val_top5", val_losses, val_top1, val_top5)
 
     record.metrics.weight_norm = model.state_dict()
@@ -256,13 +283,17 @@ def validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, 
     model.eval()
     with torch.no_grad():
          
-         
+        outputs_for_calibration = []
+        targets_for_calibration = []
+        
         for i, (images, target) in enumerate(val_loader):
             images = images.to(device, non_blocking=True).view(images.shape[0], -1) # flatten
             target = target.to(device, non_blocking=True)
                 
              
             output = model(images)
+            outputs_for_calibration.append(output)
+            targets_for_calibration.append(target)
             
             loss = criterion(output, target)
             #print(loss.item())
@@ -270,8 +301,15 @@ def validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, 
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
-             
-    return losses.avg, top1.avg, top5.avg
+
+    outputs_for_calibration = torch.cat(outputs_for_calibration, dim=0)
+    targets_for_calibration = torch.cat(targets_for_calibration, dim=0)
+    l1_calibration = multiclass_calibration_error(outputs_for_calibration, targets_for_calibration, num_classes=10, n_bins=15, norm='l1')
+    l2_calibration = multiclass_calibration_error(outputs_for_calibration, targets_for_calibration, num_classes=10, n_bins=15, norm='l2')
+    lmax_calibration = multiclass_calibration_error(outputs_for_calibration, targets_for_calibration, num_classes=10, n_bins=15, norm='max')
+    print("l1_calibration", l1_calibration, "l2_calibration", l2_calibration, "lmax_calibration", lmax_calibration)
+    
+    return losses.avg, top1.avg, top5.avg, l1_calibration, l2_calibration, lmax_calibration
 
 def main():
     args = parser.parse_args()
@@ -298,12 +336,15 @@ def main():
     record.metrics.distance_to_true = {}
     train_mse, model, criterion = train_gradient_descent(train_loader, val_loader, device, model, nonlinearity, args, record)
     
-    val_losses, val_top1, val_top5 = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
+    val_losses, val_top1, val_top5, l1_calibration, l2_calibration, lmax_calibration  = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
     record.metrics.test_mse[args.epochs+1] = val_losses
     record.metrics.test_top1[args.epochs+1] = val_top1
     record.metrics.test_top5[args.epochs+1] = val_top5
     print("val_losses, val_top1, val_top5", val_losses, val_top1, val_top5)
-     
+    record.metrics.l1_calibration[args.epochs+1] = l1_calibration
+    record.metrics.l2_calibration[args.epochs+1] = l2_calibration
+    record.metrics.lmax_calibration[args.epochs+1] = lmax_calibration
+    
     utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
     #utils.save_checkpoint(record_weights, save_dir = args.save_dir, filename = f"weights_{args.exp_name}")
 

@@ -938,7 +938,7 @@ def mnist_classification_exp(
     pd.set_option('display.max_rows', 1000)
     train_pars = defaultdict(list)
      
-    record_names = glob.glob(f"{outdir}/tanh*wd1*cifarAUG15*pth.tar")
+    record_names = glob.glob(f"{outdir}/upsample_tanh*_wd1em5_mnistAUG21*pth.tar")
      
     for _, f in enumerate(record_names[:num_runs_to_analyze]) :
         # print(f)
@@ -956,8 +956,12 @@ def mnist_classification_exp(
                 train_pars["lr"].append(f'{record.args.lr}')
                 train_pars["block"].append(f'{record.args.coarsegrain_blocksize}')
                 train_pars["P"].extend([ record.args.num_hidden_features ])
-                width_after_pool = math.floor((32 - record.args.coarsegrain_blocksize) / record.args.coarsegrain_blocksize + 1)
-                D = 3*(width_after_pool)*(width_after_pool)
+                if "mnist" in f:
+                    width_after_pool = math.floor((28 - record.args.coarsegrain_blocksize) / record.args.coarsegrain_blocksize + 1)
+                    D = 1*(width_after_pool)*(width_after_pool)
+                elif "cifar" in f:
+                    width_after_pool = math.floor((32 - record.args.coarsegrain_blocksize) / record.args.coarsegrain_blocksize + 1)
+                    D = 3*(width_after_pool)*(width_after_pool)
                  
                 train_pars["D"].extend([D]) 
                 N =  record.args.num_train_samples
