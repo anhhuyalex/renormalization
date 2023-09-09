@@ -929,7 +929,15 @@ def small_lr_regression_exp(  is_online, extra = "", title = None,
     show_plt_if_in_notebook("log_test_loss_vs_epochs.png")
 
 # MNIST 
-def mnist_classification_exp(      
+# def mnist_classification_exp(      
+#                outdir = "",
+#                hue_variable = "data_rescale",
+#                max_epoch = 0,
+#                num_runs_to_analyze=1000
+# ):
+
+# MNIST 
+def mnist_classification_calibrate_exp(      
                outdir = "",
                hue_variable = "data_rescale",
                max_epoch = 0,
@@ -938,13 +946,14 @@ def mnist_classification_exp(
     pd.set_option('display.max_rows', 1000)
     train_pars = defaultdict(list)
      
-    record_names = glob.glob(f"{outdir}/upsample_tanh*_wd1em5_mnistAUG21*pth.tar")
+    record_names = glob.glob(f"{outdir}/upsample_calibrated_relu_randomfeatures_lr*_wd1em5_mnistAUG29*pth.tar")
      
     for _, f in enumerate(record_names[:num_runs_to_analyze]) :
         # print(f)
         try:
             
             record = torch.load(f, map_location="cpu") 
+             
         except Exception as e: 
             print(e)
         
@@ -976,7 +985,11 @@ def mnist_classification_exp(
                 train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
                 # train_pars["train_top1"].append( (record.metrics.train_top1[epoch]  ) )
                 train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+                train_pars["l1_calibration"].append( (record.metrics.l1_calibration[epoch].item()  ) ) 
+                train_pars["l2_calibration"].append( (record.metrics.l2_calibration[epoch].item()  ) )
+                train_pars["lmax_calibration"].append( (record.metrics.lmax_calibration[epoch].item()  ) )
                 #train_pars["weight_norm"].append( (record.metrics.weight_norm[epoch].item()  ) )
+
         except Exception as e: 
             print(e, record.metrics.test_mse[epoch])
             raise ValueError
@@ -1033,7 +1046,7 @@ def mnist_classification_exp(
             
             sns.lineplot(x="D",y= "test_loss", data=group, label=name, color=palette[num_groups])
             num_groups += 1
-    #ax.set(  yscale="log")
+    ax.set(  yscale="log")
     plt.title(f"Test loss vs. D")
     plt.legend(loc=(1.04,0))
     plt.show()
@@ -1063,7 +1076,7 @@ def mnist_classification_exp(
             
             sns.lineplot(x="D",y= "test_top1", data=group, label=name, color=palette[num_groups])
             num_groups += 1
-    ax.set(  yscale="log")
+    # ax.set(  yscale="log")
     plt.title(f"Test top 1 accuracy vs. D")
     plt.legend(loc=(1.04,0))
     plt.show()
@@ -1092,7 +1105,7 @@ def mnist_classification_exp(
              
             sns.lineplot(x="D",y= "test_top5", data=group, label=name, color=palette[num_groups])
             num_groups += 1
-    ax.set(  yscale="log")
+    # ax.set(  yscale="log")
     plt.title(f"Test top 5 accuracy vs. D")
     plt.legend(loc=(1.04,0))
     plt.show()
@@ -1232,4 +1245,109 @@ def mnist_classification_exp(
     plt.xlabel("logN/D")
     plt.ylabel("logP/D")
     plt.title("Log test top 5 accuracy heat map")
+    plt.show()
+
+    # l1 calibration heatmap
+    train_pars_heatmap = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).drop_duplicates(subset=["P","N","D"], keep="first")  
+    train_loss = pd.pivot_table(train_pars_heatmap, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    x = np.array(train_pars_heatmap["logN/D"])
+    y = np.array(train_pars_heatmap["logP/D"])
+    z = np.log(np.array(train_pars_heatmap["l1_calibration"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title("log l1 calibration heat map")
+    plt.show()
+
+    # l2 calibration heatmap
+    train_pars_heatmap = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).drop_duplicates(subset=["P","N","D"], keep="first")  
+    train_loss = pd.pivot_table(train_pars_heatmap, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    x = np.array(train_pars_heatmap["logN/D"])
+    y = np.array(train_pars_heatmap["logP/D"])
+    z = np.log(np.array(train_pars_heatmap["l2_calibration"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title("log l2 calibration heat map")
+    plt.show()
+
+    # lmax calibration heatmap
+    train_pars_heatmap = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True).drop_duplicates(subset=["P","N","D"], keep="first")  
+    train_loss = pd.pivot_table(train_pars_heatmap, columns="logP/D", index="logN/D", values="test_loss",
+                               aggfunc='mean'
+                               )
+    fig, ax = plt.subplots(figsize=(figheight, figwidth))
+    x = np.array(train_pars_heatmap["logN/D"])
+    y = np.array(train_pars_heatmap["logP/D"])
+    z = np.log(np.array(train_pars_heatmap["lmax_calibration"]))
+    xx = np.array(train_loss.columns)
+    yy = np.array(train_loss.index.values.tolist())
+    xx, yy = np.meshgrid(xx, yy)
+    points = np.vstack([xx.flatten(), yy.flatten()]).T
+    
+    plt.contourf(xx, yy, 
+                 interpolate.griddata(np.vstack((x, y)).T, z, points).reshape(xx.shape), 
+              #   vmin=-25,vmax=30,
+                 cmap='Spectral_r')
+    plt.colorbar()
+    plt.scatter(x, y, 
+               c = z,
+                 cmap='Spectral_r',
+            #   vmin=-25,vmax=30,
+               )
+    plt.scatter(x, y, 
+               c = "blue",
+                marker="+",
+                alpha=0.1
+               )
+    plt.plot(x, x, '-')
+    plt.xlabel("logN/D")
+    plt.ylabel("logP/D")
+    plt.title("log lmax calibration heat map")
     plt.show()

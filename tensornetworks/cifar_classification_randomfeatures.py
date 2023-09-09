@@ -55,7 +55,8 @@ parser.add_argument('--train_method', default=90, type=str,
                     help='train method (either ridge regression or gradient descent)')
 parser.add_argument('--num_train_samples', default=1, type=int,  
                     help='fraction of training set to use')
-
+parser.add_argument('--upsample', action='store_true', default=False,
+                        help='whether to upsample the downsampled data to original size')
 parser.add_argument('--num_hidden_features', default=0, type=int,  
                     help='number of hidden fourier features')
 parser.add_argument('--nonlinearity', default="tanh", type=str,  
@@ -82,6 +83,9 @@ def get_record(args):
                     test_top1 = utils.dotdict(),
                     test_top5 = utils.dotdict(),
                     weight_norm = utils.dotdict(),
+                    l1_calibration = utils.dotdict(),
+                    l2_calibration = utils.dotdict(),
+                    lmax_calibration = utils.dotdict(),
                     )
         )  
     return record
@@ -92,12 +96,13 @@ class RandomFeaturesCIFAR10(datasets.CIFAR10):
                  train = True,
                  transform = None,
                  block_size = 1, 
+                 upsample = False
                 ):
         
         
         self.block_size = block_size        
         self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
-        
+        self.upsample = upsample
          
          
         super(RandomFeaturesCIFAR10, self).__init__(root, train=train, transform=transform, download=True)
@@ -107,6 +112,17 @@ class RandomFeaturesCIFAR10(datasets.CIFAR10):
         sample, target = super(RandomFeaturesCIFAR10, self).__getitem__(index)
         
         sample = self.avg_kernel(sample)
+        if self.upsample:
+            sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
+            sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
+            sample_size = sample.shape[-1]
+            if sample_size != 28: # if not the original size, pad the last few pixels
+                remainder = 28 - sample_size # size of imagenet - current sample size
+                sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
+                sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
+                
+        
+        
          
         return sample, target
 
