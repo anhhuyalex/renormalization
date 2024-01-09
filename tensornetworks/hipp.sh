@@ -5,6 +5,8 @@
 #SBATCH --time=24:00:00
 #SBATCH --output imagenet-%J.log
 #SBATCH --mail-type=end
+#SBATCH -o slurms/%j.out
+
 #SBATCH --mail-user=alexn@uni.minerva.edu
 # SBATCH --partition=della-gpu
 # SBATCH --gres=gpu:1
@@ -43,8 +45,8 @@ source activate renormalization
 
 
 # sbatch --array=0-35 hipp.sh
-i_vals=(10 100 1000 10000 20000 60000) # 6
-j_vals=(10 100 1000 10000 20000 60000) # 6
+i_vals=(10 20 50 75 100 150 200 250 500 750 900 1000 1250 1500 2000 2500 5000 6000 7500 10000 12500 15000 16000 17500 20000 60000) # 6
+j_vals=(10 20 50 75 100 150 200 250 500 750 900 1000 1250 1500 2000 2500 5000 6000 7500 10000 12500 15000 16000 17500 20000 60000) 
 # i_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
 # j_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
 
@@ -70,9 +72,13 @@ echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
 # for k in {1..10}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr1gradient_descent_noisyJUL25 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 1000 --lr 1.0 ; done
 # for k in {10..36..2}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr1gradient_descent_noisyJUL25 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 1000 --lr 1.0 ; done
 # for k in {36..60..7}; do python randomfeatures_imagenet_regression.py /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix lr1gradient_descent_noisyJUL25 --nonlinearity line --SNR 0.2 --train_method gradient_descent --epochs 1000 --lr 1.0; done
-for k in 1 2 3 4 5 6 8 10 15; do python -u mnist_classification.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix upsample_calibrated_relu_randomfeatures_lr0.001_wd1em5_mnistAUG29 --lr 0.001 --nonlinearity relu --train_method gradient_descent --epochs 150  --upsample  ; done # --upsample   --wd 0.0000000000000000000000001
+# for k in 1 2 3 4 5 6 8 10 15; do python -u mnist_classification.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix shuffle_pixels_upsample_calibrated_relu_randomfeatures_lr0.001_wd1em5_mnistOCT5 --lr 0.001 --shuffle_pixels --nonlinearity relu --avg_kernel average --train_method gradient_descent --epochs 150  --upsample  ; done # --upsample   --wd 0.0000000000000000000000001
 # for k in 1 2 3 4 5 6 8 10 15; do python -u mnist_classification_wholenetwork.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix upsample_calibrated_relu_wholenetwork_lr0.1_wd1em5_mnistAUG29 --lr 0.1 --nonlinearity relu --train_method gradient_descent --epochs 150  --upsample; done #    --wd 0.0000000000000000000000001
 # for k in 1 2 3 4 5 6 7 8 9 11 17; do python -u cifar_classification_randomfeatures.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix tanhlr0.1_wd1em5_cifarAUG15 --nonlinearity tanh --train_method gradient_descent --epochs 150 --lr 0.1; done #    --wd 0.0000000000000000000000001
-# for k in 1 2 3 4 5 6 7 8 9 11 17; do python -u cifar_classification_randomfeatures_wholenetwork.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix tanhlr0.1_wd1em5_cifar_fullnetAUG16 --nonlinearity tanh --train_method gradient_descent --epochs 150 --lr 0.1; done #    --wd 0.0000000000000000000000001
-# i=100;j=100;k=5;python -u mnist_classification_wholenetwork.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix test --lr 0.001 --nonlinearity relu --train_method gradient_descent --epochs 150  --upsample
-# for k in {36..60..7}; do epochs=100; CUDA_VISIBLE_DEVICES=0 python randomfeatures_imagenet_noisyclass.py -a randomfeatures --dist-url 'tcp://127.0.0.1' --dist-backend 'nccl' --world-size 1 --rank 0 /scratch/gpfs/DATASETS/imagenet/ilsvrc_2012_classification_localization  --epochs $epochs --lr 0.0001 --image_transform_loader SubsampleImagenet --nonlinearity line --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix randomfeatures_JUN25 --class_noise 0.1; done
+# for k in 1 2 3 4 5 6 7 9 11 32; do python -u cifar_classification_wholenetwork.py ./data  --coarsegrain_blocksize  $k --num_hidden_features $i --num_train_samples $j  --fileprefix relulr0.1_wd1em5_cifar_fullnetOCT30  --lr 0.1 --nonlinearity line --train_method gradient_descent  --avg_kernel average --epochs 150 --upsample; done #    --wd 0.0000000000000000000000001
+# for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_wholenetwork.py ./data  --target_size  $k --num_hidden_features $i --num_train_samples $j  --fileprefix linelr0.1_mnist_fullnet_fractional_cg_DEC04  --lr 0.1 --nonlinearity line  --epochs 150 --upsample; done #    --wd 0.0000000000000000000000001
+# for k in 28 27 25 23 21 19 17 15 13 11 9 7 5 3 1; do python -u mnist_classification_wholenetwork.py ./data  --target_size  $k --num_hidden_features $j --num_train_samples 60000  --fileprefix relulr0.1_mnist_fullnet_fractional_cg_DEC04  --lr 0.1 --nonlinearity relu  --epochs 150 --upsample; done #    --wd 0.0000000000000000000000001
+# for i in {0..200}; do python -u mnist_classification_wholenetwork.py ./data --fileprefix linelr0.01_mnist_fullnet_fractional_cg_no_transform_DEC13 --grid_NDP --lr 0.01 --nonlinearity line --epochs 10 --upsample --no_transform; done # --wd 0.0000000000000000000000001 
+# for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_lr.py ./data --fileprefix multiclasslr0.01_mnist_fractional_cg_no_transform_DEC21 --lr 0.01   --target_size  $k --num_hidden_features $i --num_train_samples $j --epochs 20 --upsample --no_transform --multiclass_lr; done # --wd 0.0000000000000000000000001 
+# for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_lr.py ./data --fileprefix multiclasslr$1_mnist_fractional_cg_no_transform_DEC28 --lr $1   --target_size  $k --num_hidden_features $i --nonlinearity line --multiclass_lr --num_train_samples $j --epochs 20 --upsample --no_transform; done # --wd 0.0000000000000000000000001 
+for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_scale_epochs.py ./data --fileprefix linelr$1_mnist_fractional_cg_no_transform_scale_epochs_DEC28 --lr $1   --target_size  $k --num_hidden_features $i --nonlinearity line --num_train_samples $j --epochs 10 --upsample --no_transform --save_dir /tigress/qanguyen/imagenet_info; done # --wd 0.0000000000000000000000001 

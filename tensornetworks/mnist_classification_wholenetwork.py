@@ -47,17 +47,22 @@ parser.add_argument('--wd', '--weight-decay', default=1e-5, type=float,
                     dest='weight_decay')
 parser.add_argument(
             '--coarsegrain_blocksize', 
-            default=1, type=int,
+            default=None, type=int,
             help = "if coarse graining, what is the block size of the coarse graining")
+parser.add_argument(
+            '--target_size', 
+            default=None, type=int,
+            help = "target size of the coarse graining, using Wave's fractional coarse-graining scheme")
 parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
-parser.add_argument('--train_method', default=90, type=str, 
-                    help='train method (either ridge regression or gradient descent)')
 parser.add_argument('--num_train_samples', default=1, type=int,  
                     help='fraction of training set to use')
-
 parser.add_argument('--num_hidden_features', default=0, type=int,  
                     help='number of hidden fourier features')
+parser.add_argument('--grid_NDP', action='store_true', 
+                    help='grid search N vs. D vs. P')
+parser.add_argument('--no_transform', action='store_true', 
+                    help='no normalization')
 parser.add_argument('--nonlinearity', default="tanh", type=str,  
                     help='type of nonlinearity used')
 parser.add_argument('--upsample', action='store_true', default=False,
@@ -97,40 +102,92 @@ class RandomFeaturesMNIST(datasets.MNIST):
                  train = True,
                  transform = None,
                  block_size = 1, 
-                 upsample = False
+                 upsample = False,
+                 target_size = None,
                 ):
         
         
         self.block_size = block_size        
         self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
+        # self.avg_kernel no grad 
+        for param in self.avg_kernel.parameters():
+            param.requires_grad = False
+
+        if target_size is not None:
+            self.target_size = target_size
+            self.transform_matrix = self.get_transformation_matrix(target_size, 28)
+            self.retransform_matrix = self.get_transformation_matrix(28, target_size)
+            
         self.upsample = upsample
-         
          
         super(RandomFeaturesMNIST, self).__init__(root, train=train, transform=transform, download=True)
          
-    
+    def get_transformation_matrix(self, target_size, full_shape):
+        # List of coarse-grained coordinates
+        x1,y1=torch.meshgrid(torch.arange(target_size),torch.arange(target_size))
+        x2,y2 = x1+1,y1+1
+        x1,y1,x2,y2 = x1/target_size,y1/target_size,x2/target_size,y2/target_size
+        r_prime = torch.vstack([x1.flatten(),x2.flatten(),y1.flatten(),y2.flatten()]).T 
+
+        # List of fine-grained coordinates
+        m1,n1=torch.meshgrid(torch.arange(full_shape),torch.arange(full_shape))
+        m2,n2 = m1+1,n1+1
+        m1,n1,m2,n2 = m1 / full_shape,n1 /full_shape,m2 / full_shape,n2 /full_shape 
+        r = torch.vstack([m1.flatten(),m2.flatten(),n1.flatten(),n2.flatten()]).T 
+
+        minrprimex1x2 = torch.minimum(r_prime[:,0], r_prime[:,1])
+        minrx1x2 = torch.minimum(r[:,0], r[:,1])
+        maxrprimex1x2 = torch.maximum(r_prime[:,0], r_prime[:,1])
+        maxrx1x2 = torch.maximum(r[:,0], r[:,1])
+
+        minrprimey1y2 = torch.minimum(r_prime[:,2], r_prime[:,3])
+        minry1y2 = torch.minimum(r[:,2], r[:,3])
+        maxrprimey1y2 = torch.maximum(r_prime[:,2], r_prime[:,3])
+        maxry1y2 = torch.maximum(r[:,2], r[:,3])
+
+        x1 = torch.maximum(minrprimex1x2.unsqueeze(0),minrx1x2.unsqueeze(1))
+        x2 = torch.minimum(maxrprimex1x2.unsqueeze(0),maxrx1x2.unsqueeze(1)) 
+        delta_x = torch.clamp(x2-x1,min=0)
+        y1 = torch.maximum(minrprimey1y2.unsqueeze(0),minry1y2.unsqueeze(1))
+        y2 = torch.minimum(maxrprimey1y2.unsqueeze(0),maxry1y2.unsqueeze(1)) 
+        delta_y = torch.clamp(y2-y1,min=0)
+        return delta_x * delta_y
+        
+
     def __getitem__(self, index: int):
         sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
-        
-        sample = self.avg_kernel(sample)
-        if self.upsample:
-            sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
-            sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
-            sample_size = sample.shape[-1]
-            if sample_size != 28: # if not the original size, pad the last few pixels
-                remainder = 28 - sample_size # size of imagenet - current sample size
-                sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
-                sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
+        if self.target_size is not None:
+            sample = torch.matmul(sample.view(1, -1), self.transform_matrix)
             
+            sample = sample.view(1, self.target_size, self.target_size) * self.target_size * self.target_size
+            if self.upsample:
+                sample = torch.matmul (sample.view(1, -1), self.retransform_matrix)
+                sample = sample.view(1, 28, 28) * 28 * 28
+        else:
+            sample = self.avg_kernel(sample)
+            if self.upsample:
+                sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
+                sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
+                sample_size = sample.shape[-1]
+                if sample_size != 28: # if not the original size, pad the last few pixels
+                    remainder = 28 - sample_size # size of imagenet - current sample size
+                    sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
+                    sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
+                
 
         return sample, target
 
 
 def get_model(args, nonlinearity):
+    
     if args.upsample == False:
-        width_after_pool = math.floor((28 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
+        if args.target_size is not None:
+            width_after_pool = args.target_size
+        else:
+            width_after_pool = math.floor((28 - args.coarsegrain_blocksize) / args.coarsegrain_blocksize + 1)
     else:
         width_after_pool = 28
+    
 
     # 2 layer MLP
     model = nn.Sequential(
@@ -151,15 +208,21 @@ def get_dataset(args):
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
    
-    transform=transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.1307,), (0.3081,))
-        ]) 
+    if args.no_transform == True:
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+        ])
+    else:
+        transform=transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,))
+            ]) 
     
     train_dataset = RandomFeaturesMNIST(root = "./data", 
                                         train = True,
                                         transform = transform,
                                         block_size = args.coarsegrain_blocksize,
+                                        target_size = args.target_size,
                                         upsample = args.upsample
                                          ) 
     
@@ -168,6 +231,7 @@ def get_dataset(args):
                                       train = False,
                                       transform = transform,
                                       block_size = args.coarsegrain_blocksize,
+                                      target_size = args.target_size,
                                       upsample = args.upsample
                                       )
 
@@ -217,7 +281,7 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
     top5 = utils.AverageMeter('Acc@5', ':6.2f')
     data_time = utils.AverageMeter('Data', ':6.3f')
      
-    optimizer = torch.optim.Adam(model.parameters(),  
+    optimizer = torch.optim.SGD(model.parameters(),  
                                  lr=   args.lr , 
                                     weight_decay=args.weight_decay
                                      )
@@ -263,17 +327,14 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
         record.metrics.train_top5[epoch] = top5.avg
         
 
-        val_losses, val_top1, val_top5, l1_calibration, l2_calibration, lmax_calibration  = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
+        val_losses, val_top1, val_top5 = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
         record.metrics.test_mse[epoch] = val_losses
         record.metrics.test_top1[epoch] = val_top1
         record.metrics.test_top5[epoch] = val_top5
-        record.metrics.l1_calibration[epoch] = l1_calibration
-        record.metrics.l2_calibration[epoch] = l2_calibration
-        record.metrics.lmax_calibration[epoch] = lmax_calibration
-        
+       
         print("val_losses, val_top1, val_top5", val_losses, val_top1, val_top5)
 
-    record.metrics.weight_norm = model.state_dict()
+    # record.metrics.weight_norm = model.state_dict()
     return losses.avg, model, criterion
 
 def validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device):
@@ -302,24 +363,36 @@ def validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, 
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
-
-    outputs_for_calibration = torch.cat(outputs_for_calibration, dim=0)
-    targets_for_calibration = torch.cat(targets_for_calibration, dim=0)
-    l1_calibration = multiclass_calibration_error(outputs_for_calibration, targets_for_calibration, num_classes=10, n_bins=15, norm='l1')
-    l2_calibration = multiclass_calibration_error(outputs_for_calibration, targets_for_calibration, num_classes=10, n_bins=15, norm='l2')
-    lmax_calibration = multiclass_calibration_error(outputs_for_calibration, targets_for_calibration, num_classes=10, n_bins=15, norm='max')
-    print("l1_calibration", l1_calibration, "l2_calibration", l2_calibration, "lmax_calibration", lmax_calibration)
-    
-    return losses.avg, top1.avg, top5.avg, l1_calibration, l2_calibration, lmax_calibration
+ 
+    return losses.avg, top1.avg, top5.avg 
 
 def main():
     args = parser.parse_args()
-    print("Args", args)
+    
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     if use_cuda:
         device = torch.device("cuda")
     else:
         device = torch.device("cpu") 
+
+    if args.grid_NDP:
+        x, y = np.meshgrid(np.arange(0, 10, 0.2), np.arange(0, 10, 0.2))
+        P, N = [], []
+        Df = []
+        D = np.array([1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 28])
+        for d in D:
+            P.extend(np.exp(x.flatten()) * d)
+            N.extend(np.exp(y.flatten()) * d)
+            Df.extend([d] * len(x.flatten()))
+        P,N,Df = np.array(P),np.array(N),np.array(Df)        
+        Pf = P[np.logical_and(np.logical_and(P>10,N>10),np.logical_and(P<60000,N<60000))]
+        Nf = N[np.logical_and(np.logical_and(P>10,N>10),np.logical_and(P<60000,N<60000))]
+        Df = Df[np.logical_and(np.logical_and(P>10,N>10),np.logical_and(P<60000,N<60000))]
+        random_idx = np.random.choice(len(Pf)) 
+        args.num_hidden_features = int(Pf[random_idx])
+        args.num_train_samples = int(Nf[random_idx])
+        args.target_size = int(Df[random_idx])
+    print("Args", args)
     nonlinearity = get_nonlinearity(args)
     model = get_model(args, nonlinearity).to(device)
     train_loader, val_loader = get_dataset(args)
@@ -337,17 +410,13 @@ def main():
     record.metrics.distance_to_true = {}
     train_mse, model, criterion = train_gradient_descent(train_loader, val_loader, device, model, nonlinearity, args, record)
     
-    val_losses, val_top1, val_top5, l1_calibration, l2_calibration, lmax_calibration  = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
+    val_losses, val_top1, val_top5 = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
     record.metrics.test_mse[args.epochs+1] = val_losses
     record.metrics.test_top1[args.epochs+1] = val_top1
     record.metrics.test_top5[args.epochs+1] = val_top5
     print("val_losses, val_top1, val_top5", val_losses, val_top1, val_top5)
-    record.metrics.l1_calibration[args.epochs+1] = l1_calibration
-    record.metrics.l2_calibration[args.epochs+1] = l2_calibration
-    record.metrics.lmax_calibration[args.epochs+1] = lmax_calibration
-    
+   
     utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
-    #utils.save_checkpoint(record_weights, save_dir = args.save_dir, filename = f"weights_{args.exp_name}")
 
 if __name__ == '__main__':
     main()

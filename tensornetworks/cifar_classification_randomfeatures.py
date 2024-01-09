@@ -86,8 +86,8 @@ def get_record(args):
                     l1_calibration = utils.dotdict(),
                     l2_calibration = utils.dotdict(),
                     lmax_calibration = utils.dotdict(),
-                    )
-        )  
+                )
+    )  
     return record
 
  
@@ -116,14 +116,10 @@ class RandomFeaturesCIFAR10(datasets.CIFAR10):
             sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
             sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
             sample_size = sample.shape[-1]
-            if sample_size != 28: # if not the original size, pad the last few pixels
-                remainder = 28 - sample_size # size of imagenet - current sample size
+            if sample_size != 32: # if not the original size, pad the last few pixels
+                remainder = 32 - sample_size # size of imagenet - current sample size
                 sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
                 sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
-                
-        
-        
-         
         return sample, target
 
 
