@@ -1648,10 +1648,10 @@ def slices_plot(
             
             record = torch.load(f, map_location="cpu") 
              
-            if record.args.num_hidden_features > 10000:
-                continue
-            if record.args.num_train_samples < 10:
-                continue
+            # if record.args.num_hidden_features > 10000:
+                # continue
+            # if record.args.num_train_samples < 10:
+                # continue
         except Exception as e: 
             print(e)
             continue 
@@ -1687,13 +1687,13 @@ def slices_plot(
             print(e )
             raise ValueError
     train_pars = pd.DataFrame.from_dict(train_pars) 
-    train_pars = train_pars.sort_values(["P","N","D",'test_loss'], ascending=True)
+    train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
     # display(train_pars.iloc[:100, :]) 
-    train_pars = train_pars.drop_duplicates(subset=["P","N","D"], keep="first")  
+    train_pars = train_pars.drop_duplicates(subset=["N","P","D"], keep="first")  
     display(train_pars.iloc[:100, :]) 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="N",y= "train_loss", data=train_pars, hue="D")
-    ax.set(  yscale="log")
+    ax.set(  xscale="log",  yscale="log")
     plt.title(f"Train loss vs. N")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -1704,7 +1704,7 @@ def slices_plot(
     
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="N",y= "test_loss", data=train_pars, hue="D")
-    ax.set(  yscale="log")
+    ax.set(  xscale="log",  yscale="log")
     plt.title(f"Test loss vs. N")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)

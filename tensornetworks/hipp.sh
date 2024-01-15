@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=hipp_test
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=10G
+#SBATCH --mem-per-cpu=5G
 #SBATCH --time=24:00:00
 #SBATCH --output imagenet-%J.log
 #SBATCH --mail-type=end
@@ -45,8 +45,9 @@ source activate renormalization
 
 
 # sbatch --array=0-35 hipp.sh
-i_vals=(10 20 50 75 100 150 200 250 500 750 900 1000 1250 1500 2000 2500 5000 6000 7500 10000 12500 15000 16000 17500 20000 60000) # 6
-j_vals=(10 20 50 75 100 150 200 250 500 750 900 1000 1250 1500 2000 2500 5000 6000 7500 10000 12500 15000 16000 17500 20000 60000) 
+i_vals=(10 20 50 75 100 150 200 250 500 750 1000 1500 2000 2500 5000 6000 7500 10000 12500 15000 17500 20000 60000) # 6
+# j_vals=(1 3 5 7 9 10 20 50 75 100 200 250 500 1000 1250 1500 2000 2500 5000 7500 10000 12500 15000 17500 20000 60000) 
+j_vals=(1 3 5 7 9 10 20 50 75 100 200 250 500 1000 1250 1500 2000 2500 5000 7500 10000 12500 15000 17500 20000 60000)
 # i_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
 # j_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
 
@@ -81,4 +82,4 @@ echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
 # for i in {0..200}; do python -u mnist_classification_wholenetwork.py ./data --fileprefix linelr0.01_mnist_fullnet_fractional_cg_no_transform_DEC13 --grid_NDP --lr 0.01 --nonlinearity line --epochs 10 --upsample --no_transform; done # --wd 0.0000000000000000000000001 
 # for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_lr.py ./data --fileprefix multiclasslr0.01_mnist_fractional_cg_no_transform_DEC21 --lr 0.01   --target_size  $k --num_hidden_features $i --num_train_samples $j --epochs 20 --upsample --no_transform --multiclass_lr; done # --wd 0.0000000000000000000000001 
 # for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_lr.py ./data --fileprefix multiclasslr$1_mnist_fractional_cg_no_transform_DEC28 --lr $1   --target_size  $k --num_hidden_features $i --nonlinearity line --multiclass_lr --num_train_samples $j --epochs 20 --upsample --no_transform; done # --wd 0.0000000000000000000000001 
-for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_scale_epochs.py ./data --fileprefix linelr$1_mnist_fractional_cg_no_transform_scale_epochs_DEC28 --lr $1   --target_size  $k --num_hidden_features $i --nonlinearity line --num_train_samples $j --epochs 10 --upsample --no_transform --save_dir /tigress/qanguyen/imagenet_info; done # --wd 0.0000000000000000000000001 
+for k in 1 3 5 7 9 11 13 15 17 19 21 23 25 27 28; do python -u mnist_classification_scale_epochs.py ./data --fileprefix multiclasslr$1_mnist_fractional_cg_no_transform_scale_epochs_DEC28 --lr $1 --multiclass_lr  --target_size  $k --num_hidden_features $i --nonlinearity relu --num_train_samples $j --epochs 10 --upsample --no_transform --save_dir /tigress/qanguyen/imagenet_info; done # --wd 0.0000000000000000000000001 

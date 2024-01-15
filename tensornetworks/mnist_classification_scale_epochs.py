@@ -291,7 +291,7 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
     criterion = nn.CrossEntropyLoss().to(device)
     
     
-    args.epochs = int (args.epochs * (60000 / args.num_train_samples)) + 1
+    args.epochs = min(int (args.epochs * (60000 / args.num_train_samples)) + 1, 1000)
     
     for epoch in range(args.epochs):
         losses.reset() 
@@ -312,7 +312,7 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
             target = target.to(device, non_blocking=True)
                       
             output = model(images)
-            print (model.state_dict()['3.weight'])
+            # print (model.state_dict()['3.weight'])
             loss = criterion(output, target)
             loss.backward()
             optimizer.step()
