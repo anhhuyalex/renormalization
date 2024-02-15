@@ -37,6 +37,8 @@ parser.add_argument('-b', '--batch-size', default=64, type=int,
                          'using Data Parallel or Distributed Data Parallel')
 parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
+parser.add_argument('--optimizer_type', default="sgd", type=str,
+                    help='optimizer type')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
@@ -54,6 +56,8 @@ parser.add_argument(
             help = "target size of the coarse graining, using Wave's fractional coarse-graining scheme")
 parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')
+parser.add_argument('--lr_scheduler', default="linear", type=str,  
+                    help='learning rate scheduler')
 parser.add_argument('--num_train_samples', default=1, type=int,  
                     help='fraction of training set to use')
 parser.add_argument('--num_hidden_features', default=0, type=int,  
@@ -103,16 +107,16 @@ class RandomFeaturesMNIST(datasets.MNIST):
                 ):
         
         
-        self.block_size = block_size        
-        self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
-        # self.avg_kernel no grad 
-        for param in self.avg_kernel.parameters():
-            param.requires_grad = False
+        # self.block_size = block_size        
+        # self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
+        # # self.avg_kernel no grad 
+        # for param in self.avg_kernel.parameters():
+        #     param.requires_grad = False
 
-        if target_size is not None:
-            self.target_size = target_size
-            self.transform_matrix = self.get_transformation_matrix(target_size, 28)
-            self.retransform_matrix = self.get_transformation_matrix(28, target_size)
+        # if target_size is not None:
+        self.target_size = target_size
+        self.transform_matrix = self.get_transformation_matrix(target_size, 28)
+        self.retransform_matrix = self.get_transformation_matrix(28, target_size)
             
         self.upsample = upsample
          
@@ -152,23 +156,23 @@ class RandomFeaturesMNIST(datasets.MNIST):
 
     def __getitem__(self, index: int):
         sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
-        if self.target_size is not None:
-            sample = torch.matmul(sample.view(1, -1), self.transform_matrix)
-            
-            sample = sample.view(1, self.target_size, self.target_size) * self.target_size * self.target_size
-            if self.upsample:
-                sample = torch.matmul (sample.view(1, -1), self.retransform_matrix)
-                sample = sample.view(1, 28, 28) * 28 * 28
-        else:
-            sample = self.avg_kernel(sample)
-            if self.upsample:
-                sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
-                sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
-                sample_size = sample.shape[-1]
-                if sample_size != 28: # if not the original size, pad the last few pixels
-                    remainder = 28 - sample_size # size of imagenet - current sample size
-                    sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
-                    sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
+        # if self.target_size is not None:
+        sample = torch.matmul(sample.view(1, -1), self.transform_matrix)
+        
+        sample = sample.view(1, self.target_size, self.target_size) * self.target_size * self.target_size
+        # if self.upsample:
+        sample = torch.matmul (sample.view(1, -1), self.retransform_matrix)
+        sample = sample.view(1, 28, 28) * 28 * 28
+        # else:
+        #     sample = self.avg_kernel(sample)
+        #     if self.upsample:
+        #         sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
+        #         sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
+        #         sample_size = sample.shape[-1]
+        #         if sample_size != 28: # if not the original size, pad the last few pixels
+        #             remainder = 28 - sample_size # size of imagenet - current sample size
+        #             sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
+        #             sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
                 
 
         return sample, target
@@ -222,7 +226,7 @@ def get_dataset(args):
     train_dataset = RandomFeaturesMNIST(root = "./data", 
                                         train = True,
                                         transform = transform,
-                                        block_size = args.coarsegrain_blocksize,
+                                        # block_size = args.coarsegrain_blocksize,
                                         target_size = args.target_size,
                                         upsample = args.upsample
                                          ) 
@@ -231,13 +235,13 @@ def get_dataset(args):
     val_dataset = RandomFeaturesMNIST(root = "./data",
                                       train = False,
                                       transform = transform,
-                                      block_size = args.coarsegrain_blocksize,
+                                    #   block_size = args.coarsegrain_blocksize,
                                       target_size = args.target_size,
                                       upsample = args.upsample
                                       )
 
     # Get a fixed subset of the training set
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng()
     num_train = len(train_dataset)
     train_idx = rng.integers(low=0, high=num_train, size=args.num_train_samples)
     print("train_idx", train_idx[:100])
@@ -281,17 +285,31 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
     top1 = utils.AverageMeter('Acc@1', ':6.2f')
     top5 = utils.AverageMeter('Acc@5', ':6.2f')
     data_time = utils.AverageMeter('Data', ':6.3f')
-     
-    optimizer = torch.optim.SGD(model.parameters(),  
-                                 lr=   args.lr , 
+    model = model.to(device)
+    if args.optimizer_type == "sgd":
+        optimizer = torch.optim.SGD(model.parameters(),  
+                                    lr=args.lr , 
                                     weight_decay=args.weight_decay
-                                     )
-    scheduler = StepLR(optimizer, step_size=30, gamma=0.5)
+                                        )
+    elif args.optimizer_type == "adam":
+        optimizer = torch.optim.Adam(model.parameters(),  
+                                    lr=args.lr , 
+                                    weight_decay=args.weight_decay
+                                    )
+    # scheduler = StepLR(optimizer, step_size=1000, gamma=0.5)
+    if args.lr_scheduler == "linear":
+        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1, end_factor=0.01, 
+                                                  total_iters=args.epochs * len(train_loader), last_epoch=-1)
+    elif args.lr_scheduler == "cosine":
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100, eta_min=0.01, last_epoch=-1)
+    elif args.lr_scheduler == "OneCycleLR":
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=args.lr, total_steps = args.epochs * len(train_loader),
+                                                        pct_start = 0.01, final_div_factor = 1e4, last_epoch=-1, verbose=False)
     # define loss function (criterion), optimizer, and learning rate scheduler
     criterion = nn.CrossEntropyLoss().to(device)
     
     
-    args.epochs = min(int (args.epochs * (60000 / args.num_train_samples)) + 1, 1000)
+    # args.epochs = min(int (args.epochs * (60000 / args.num_train_samples)) + 1, 1000)
     
     for epoch in range(args.epochs):
         losses.reset() 
@@ -313,24 +331,30 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
                       
             output = model(images)
             # print (model.state_dict()['3.weight'])
+            # print ("target", target)
             loss = criterion(output, target)
             loss.backward()
+            if i == 0: weight_norm = torch.norm(model[1].weight.grad.flatten()).cpu().detach().clone().numpy()
             optimizer.step()
             losses.update(loss.item(), images.size(0)) 
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
             print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0])
+            if args.lr_scheduler == "OneCycleLR":
+                scheduler.step()
             
         # step scheduler
-        scheduler.step()
+        if args.lr_scheduler != "OneCycleLR":
+            scheduler.step()
 
         # save metrics
-        # print("output",  torch.argsort(output, dim=-1), "target", target )
+        # print("output",  torch.argsortaaaaaSAaSAsaa       (output, dim=-1), "target", target )
         print("Current average loss", losses.avg, top1.avg, top5.avg, "epoch", epoch, "norm of weights") 
         record.metrics.train_mse[epoch] = losses.avg
         record.metrics.train_top1[epoch] = top1.avg
         record.metrics.train_top5[epoch] = top5.avg
+        record.metrics.weight_norm[epoch] = weight_norm
         
 
         val_losses, val_top1, val_top5 = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)

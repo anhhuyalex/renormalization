@@ -1631,13 +1631,13 @@ def fractional_mnist(
     plt.ylabel("logP/D")
     plt.title("Test top 5 accuracy heat map")
     plt.show()
- 
-def slices_plot(      
+
+def lbfgs_plot(      
                outdir = "",
                exp_name = "",
                hue_variable = "data_rescale",
                max_epoch = 0,
-               num_runs_to_analyze=1000
+               num_runs_to_analyze=1000,
 ):
     pd.set_option('display.max_rows', 1000)
     train_pars = defaultdict(list) 
@@ -1646,8 +1646,120 @@ def slices_plot(
     for _, f in enumerate(record_names[:num_runs_to_analyze]) :
         try:
             
+            record = torch.load(f, map_location="cpu")  
+        except Exception as e: 
+            print(e)
+            continue 
+        try:
+            
+            # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            # for epoch in [max_epoch]:
+            # train_pars["target_size"].extend( [record.args.target_size]) 
+            train_pars["target_size"].extend( [record["target_size"] ])
+            train_pars["n_pca_components_kept"].extend( [record["target_size"] ])
+            # train_pars["lr"].append(f'{record.args.lr}') 
+            # train_pars["wd"].append(f'{record.args.weight_decay}') 
+            # print ('lr',record.args.lr)
+            # train_pars["P"].extend([ record.args.num_hidden_features ])
+            
+            # D = record.args.target_size #* record.args.target_size
+            train_pars["D"].extend([record["target_size"] ])
+            # train_pars["D"].extend([record.args.target_size]) 
+            # N =  record.args.num_train_samples
+            # P = record.args.num_hidden_features
+            train_pars["N"].extend([record["num_train_samples"] ])
+            # train_pars["N"].extend([record.args.num_train_samples ])
+            # train_pars["P,N"].extend([f'{P},{N}']/) 
+            # train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
+            # train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
+            # train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+            # train_pars["logN/D"].extend([np.log( N / D) ])
+            # train_pars["epoch"].append(epoch)
+            # train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+            train_pars["train_loss"].append( (record["train_loss"]))
+            # train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+            train_pars["test_loss"].append ( (record["test_loss"]  ) )
+            # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
+            # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
+            # print ("record.metrics.train_top1", record.metrics.train_top1)
+            # train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
+            # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
+            # train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+            train_pars["test_top1"].append( (record["test_score"]  ) )
+            train_pars["train_top1"].append( (record["train_score"]  ) )
+                
+                
+        except Exception as e: 
+            print(e )
+            raise ValueError
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
+    train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True) 
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="D",y= "train_loss", data=train_pars, hue="N", marker="+")
+    # ax.set(  yscale="log")
+    plt.title(f"Train loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Train loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="D",y= "train_top1", data=train_pars, hue="N", marker="+")
+    plt.title(f"Train top1 vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Train top1")
+    plt.show() 
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="D",y= "test_loss", data=train_pars, hue="N", marker="+")
+    # ax.set(  yscale="log")
+    plt.title(f"Test loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Test loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="D",y= "test_top1", data=train_pars, hue="N", marker="+")
+    plt.title(f"Test top1 vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Test top1")
+    plt.show()
+
+     
+ 
+    return train_pars
+          
+def slices_plot(      
+               outdir = "",
+               exp_name = "",
+               hue_variable = "data_rescale",
+               max_epoch = 0,
+               num_runs_to_analyze=1000,
+               P_list = None
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list) 
+    record_names = glob.glob(f"{outdir}/{exp_name}")
+    print ("P", P_list, "num runs", len(record_names), flush=True)
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        try:
+            
             record = torch.load(f, map_location="cpu") 
-             
+            if record.args.num_hidden_features not in P_list:
+                continue
             # if record.args.num_hidden_features > 10000:
                 # continue
             # if record.args.num_train_samples < 10:
@@ -1657,133 +1769,166 @@ def slices_plot(
             continue 
         try:
             
-            max_epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
-            for epoch in [max_epoch]:
-                train_pars["target_size"].extend( [record.args.target_size]) 
-                train_pars["lr"].append(f'{record.args.lr}') 
-                # print ('lr',record.args.lr)
-                train_pars["P"].extend([ record.args.num_hidden_features ])
-                 
-                D = record.args.target_size #* record.args.target_size
-                train_pars["D"].extend([D]) 
-                N =  record.args.num_train_samples
-                P = record.args.num_hidden_features
-                train_pars["N"].extend([N])
-                train_pars["P,N"].extend([f'{P},{N}']) 
-                train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
-                train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
-                train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
-                train_pars["logN/D"].extend([np.log( N / D) ])
-                train_pars["epoch"].append(epoch)
-                train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
-                train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
-                # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
-                train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
-                # train_pars["train_top1"].append( (record.metrics.train_top1[epoch]  ) )
-                train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+            epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            # for epoch in [max_epoch]:
+            train_pars["target_size"].extend( [record.args.target_size]) 
+            # train_pars["target_size"].extend( [record["target_size"] ])
+            # train_pars["lr"].append(f'{record.args.lr}') 
+            # train_pars["wd"].append(f'{record.args.weight_decay}') 
+            # print ('lr',record.args.lr)
+            train_pars["P"].extend([ record.args.num_hidden_features ])
+            
+            # D = record.args.target_size #* record.args.target_size
+            # train_pars["D"].extend([record["target_size"] ])
+            train_pars["D"].extend([record.args.target_size]) 
+            # N =  record.args.num_train_samples
+            # P = record.args.num_hidden_features
+            # train_pars["N"].extend([record["num_train_samples"] ])
+            train_pars["N"].extend([record.args.num_train_samples ])
+            # train_pars["P,N"].extend([f'{P},{N}']/) 
+            # train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
+            # train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
+            # train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+            # train_pars["logN/D"].extend([np.log( N / D) ])
+            # train_pars["epoch"].append(epoch)
+            train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+            # train_pars["train_loss"].append( (record["train_loss"]))
+            train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+            # train_pars["test_loss"].append ( (record["test_loss"]  ) )
+            # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
+            # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
+            # print ("record.metrics.train_top1", record.metrics.train_top1)
+            train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
+            # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
+            train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+            # train_pars["test_top1"].append( (record["test_score"]  ) )
+            # train_pars["train_top1"].append( (record["train_score"]  ) )
                 
                 
         except Exception as e: 
             print(e )
             raise ValueError
     train_pars = pd.DataFrame.from_dict(train_pars) 
-    train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
+    # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
+    train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True)
     # display(train_pars.iloc[:100, :]) 
-    train_pars = train_pars.drop_duplicates(subset=["N","P","D"], keep="first")  
-    display(train_pars.iloc[:100, :]) 
+    # train_pars = train_pars.drop_duplicates(subset=["N","P","D"], keep="first")  
+    # train_pars = train_pars.drop_duplicates(subset=["N", "D"], keep="first")  
+    # display(train_pars.iloc[:100, :]) 
+    # fig, ax = plt.subplots(figsize=(12, 8))
+    # sns.lineplot(x="N",y= "train_loss", data=train_pars, hue="D")
+    # ax.set(  xscale="log",  yscale="log")
+    # plt.title(f"Train loss vs. N")
+    # plt.legend(loc=(1.04,0))
+    # # plt.legend([],[], frameon=False)
+
+    # plt.xlabel("N")
+    # plt.ylabel("Log Train loss")
+    # plt.show()
+    
+    # fig, ax = plt.subplots(figsize=(12, 8))
+    # sns.lineplot(x="N",y= "test_loss", data=train_pars, hue="D")
+    # ax.set(  xscale="log",  yscale="log")
+    # plt.title(f"Test loss vs. N")
+    # plt.legend(loc=(1.04,0))
+    # # plt.legend([],[], frameon=False)
+
+    # plt.xlabel("N")
+    # plt.ylabel("Log Test loss")
+    # plt.show()
+
+
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="N",y= "train_loss", data=train_pars, hue="D")
-    ax.set(  xscale="log",  yscale="log")
-    plt.title(f"Train loss vs. N")
+    sns.lineplot(x="D",y= "train_loss", data=train_pars, hue="N", marker="+")
+    # ax.set(  yscale="log")
+    plt.title(f"Train loss vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
 
-    plt.xlabel("N")
-    plt.ylabel("Log Train loss")
+    plt.xlabel("D")
+    plt.ylabel("Train loss")
     plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="D",y= "train_top1", data=train_pars, hue="N", marker="+")
+    plt.title(f"Train top1 vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Train top1")
+    plt.show() 
     
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="N",y= "test_loss", data=train_pars, hue="D")
-    ax.set(  xscale="log",  yscale="log")
-    plt.title(f"Test loss vs. N")
+    sns.lineplot(x="D",y= "test_loss", data=train_pars, hue="N", marker="+")
+    # ax.set(  yscale="log")
+    plt.title(f"Test loss vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
 
-    plt.xlabel("N")
-    plt.ylabel("Log Test loss")
-    plt.show()
-
-
-    fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="D",y= "test_loss", data=train_pars, hue="N")
-    ax.set(  yscale="log")
-    plt.title(f"Test loss vs. D")
-    # plt.legend(loc=(1.04,0))
-    plt.legend([],[], frameon=False)
-
     plt.xlabel("D")
-    plt.ylabel("Log Test loss")
+    plt.ylabel("Test loss")
     plt.show()
 
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="D",y= "test_top1", data=train_pars, hue="N")
+    sns.lineplot(x="D",y= "test_top1", data=train_pars, hue="N", marker="+")
     plt.title(f"Test top1 vs. D")
-    # plt.legend(loc=(1.04,0))
-    plt.legend([],[], frameon=False)
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
 
     plt.xlabel("D")
-    plt.ylabel("Log Test loss")
+    plt.ylabel("Test top1")
     plt.show()
 
     
     # sort train_pars by logP-logN 
-    train_pars = train_pars.sort_values(by=["logP-logN", "logP+logN"  ], ascending=[True, True])
-    # display first 1000 rows of train_pars
-    # display(train_pars.iloc[:100, :]) 
-    # get unique values of logP-logN
-    logP_logNs = train_pars["logP-logN"].unique() 
-    # get every 5th value of logP_logN
-    nrows = int(len(logP_logNs)//4)+1
+    # train_pars = train_pars.sort_values(by=["logP-logN", "logP+logN"  ], ascending=[True, True])
+    # # display first 1000 rows of train_pars
+    # # display(train_pars.iloc[:100, :]) 
+    # # get unique values of logP-logN
+    # logP_logNs = train_pars["logP-logN"].unique() 
+    # # get every 5th value of logP_logN
+    # nrows = int(len(logP_logNs)//4)+1
     
-    fig, ax = plt.subplots(nrows, 4, figsize=(30, 4*nrows)) 
-    print (nrows, len(logP_logNs), len(ax.flatten()))
-    for i, logP_logN in enumerate(logP_logNs):
-        # only keep values of train_pars where logP-logN is in logP_logN 
-        sns.scatterplot(x="logP+logN",y= "test_loss", data=train_pars[train_pars["logP-logN"].isin([logP_logN])],
-                color="black", marker="*", ax=ax.flatten()[i])
-        ax.flatten()[i].set(  yscale="log", title=f"logP-logN={logP_logN}", ylim=(0.1, 3))
-    plt.suptitle(f"Test loss vs. logP/D+logN/D, keeping logP-logN constant", y=1.0)
-    # plt.legend(loc=(1.04,0))
-    plt.legend([],[], frameon=False)
-    plt.xlabel("logP/D+logN/D")
-    plt.ylabel("Log Test loss")
-    plt.tight_layout(pad=1.15)
-    plt.show()
+    # fig, ax = plt.subplots(nrows, 4, figsize=(30, 4*nrows)) 
+    # print (nrows, len(logP_logNs), len(ax.flatten()))
+    # for i, logP_logN in enumerate(logP_logNs):
+    #     # only keep values of train_pars where logP-logN is in logP_logN 
+    #     sns.scatterplot(x="logP+logN",y= "test_loss", data=train_pars[train_pars["logP-logN"].isin([logP_logN])],
+    #             color="black", marker="*", ax=ax.flatten()[i])
+    #     ax.flatten()[i].set(  yscale="log", title=f"logP-logN={logP_logN}", ylim=(0.1, 3))
+    # plt.suptitle(f"Test loss vs. logP/D+logN/D, keeping logP-logN constant", y=1.0)
+    # # plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+    # plt.xlabel("logP/D+logN/D")
+    # plt.ylabel("Log Test loss")
+    # plt.tight_layout(pad=1.15)
+    # plt.show()
 
-    fig, ax = plt.subplots(nrows, 4, figsize=(30, 4*nrows)) 
+    # fig, ax = plt.subplots(nrows, 4, figsize=(30, 4*nrows)) 
     
-    for i, logP_logN in enumerate(logP_logNs):
-        # only keep values of train_pars where logP-logN is in logP_logN 
-        sns.scatterplot(x="logP+logN",y= "test_top1", data=train_pars[train_pars["logP-logN"].isin([logP_logN])],
-                color="black", marker="*", ax=ax.flatten()[i])
-        ax.flatten()[i].set(   title=f"logP-logN={logP_logN}", ylim=(0, 100))
-    plt.suptitle(f"Test top1 acc. vs. logP/D+logN/D, keeping logP-logN constant", y=1.0)
-    # plt.legend(loc=(1.04,0))
-    plt.legend([],[], frameon=False)
-    plt.xlabel("logP/D+logN/D")
-    plt.ylabel("Log Test loss")
-    plt.tight_layout(pad=1.15)
-    plt.show()
+    # for i, logP_logN in enumerate(logP_logNs):
+    #     # only keep values of train_pars where logP-logN is in logP_logN 
+    #     sns.scatterplot(x="logP+logN",y= "test_top1", data=train_pars[train_pars["logP-logN"].isin([logP_logN])],
+    #             color="black", marker="*", ax=ax.flatten()[i])
+    #     ax.flatten()[i].set(   title=f"logP-logN={logP_logN}", ylim=(0, 100))
+    # plt.suptitle(f"Test top1 acc. vs. logP/D+logN/D, keeping logP-logN constant", y=1.0)
+    # # plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+    # plt.xlabel("logP/D+logN/D")
+    # plt.ylabel("Log Test loss")
+    # plt.tight_layout(pad=1.15)
+    # plt.show()
 
-    fig,ax = plt.subplots(figsize=(12, 8)) 
-    # hue="logP-logN", 
-    sns.scatterplot(x="logP/D",y= "logN/D", data=train_pars, hue="test_loss", 
-                    palette=sns.color_palette("Spectral", as_cmap=True)) 
-    plt.xlabel("logP/D") 
-    plt.ylabel("logN/D")
-    plt.title("LogN/D vs. LogP/D")
-    plt.show()
+    # fig,ax = plt.subplots(figsize=(12, 8)) 
+    # # hue="logP-logN", 
+    # sns.scatterplot(x="logP/D",y= "logN/D", data=train_pars, hue="test_loss", 
+    #                 palette=sns.color_palette("Spectral", as_cmap=True)) 
+    # plt.xlabel("logP/D") 
+    # plt.ylabel("logN/D")
+    # plt.title("LogN/D vs. LogP/D")
+    # plt.show()
     
  
     return train_pars
-        
+         
