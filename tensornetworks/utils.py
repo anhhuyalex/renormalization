@@ -1758,7 +1758,7 @@ def slices_plot(
         try:
             
             record = torch.load(f, map_location="cpu") 
-            if record.args.num_hidden_features not in P_list:
+            if (P_list is not None) and (record.args.num_hidden_features not in P_list):
                 continue
             # if record.args.num_hidden_features > 10000:
                 # continue
@@ -1808,9 +1808,14 @@ def slices_plot(
         except Exception as e: 
             print(e )
             raise ValueError
+
     train_pars = pd.DataFrame.from_dict(train_pars) 
     # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
-    train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True)
+    # train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True)
+    # display(train_pars)
+    # get unique Ps
+
+    print ("unique Ps", train_pars["P"].unique())
     # display(train_pars.iloc[:100, :]) 
     # train_pars = train_pars.drop_duplicates(subset=["N","P","D"], keep="first")  
     # train_pars = train_pars.drop_duplicates(subset=["N", "D"], keep="first")  
@@ -1931,4 +1936,174 @@ def slices_plot(
     
  
     return train_pars
+
+import torchvision.datasets as datasets         
+class RandomFeaturesMNIST(datasets.MNIST):
+    def __init__(self, root = "./data",  
+                 train = True,
+                 transform = None,
+                 block_size = 1, 
+                 upsample = False,
+                 target_size = None,
+                ):
+        
+        
+        # self.block_size = block_size        
+        # self.avg_kernel = nn.AvgPool2d(block_size, stride=block_size)
+        # # self.avg_kernel no grad 
+        # for param in self.avg_kernel.parameters():
+        #     param.requires_grad = False
+
+        # if target_size is not None:
+        self.target_size = target_size
+        self.transform_matrix = self.get_transformation_matrix(target_size, 28)
+        self.retransform_matrix = self.get_transformation_matrix(28, target_size)
+            
+        self.upsample = upsample
+         
+        super(RandomFeaturesMNIST, self).__init__(root, train=train, transform=transform, download=True)
+         
+    def get_transformation_matrix(self, target_size, full_shape):
+        # List of coarse-grained coordinates
+        x1,y1=torch.meshgrid(torch.arange(target_size),torch.arange(target_size))
+        x2,y2 = x1+1,y1+1
+        x1,y1,x2,y2 = x1/target_size,y1/target_size,x2/target_size,y2/target_size
+        r_prime = torch.vstack([x1.flatten(),x2.flatten(),y1.flatten(),y2.flatten()]).T 
+
+        # List of fine-grained coordinates
+        m1,n1=torch.meshgrid(torch.arange(full_shape),torch.arange(full_shape))
+        m2,n2 = m1+1,n1+1
+        m1,n1,m2,n2 = m1 / full_shape,n1 /full_shape,m2 / full_shape,n2 /full_shape 
+        r = torch.vstack([m1.flatten(),m2.flatten(),n1.flatten(),n2.flatten()]).T 
+
+        minrprimex1x2 = torch.minimum(r_prime[:,0], r_prime[:,1])
+        minrx1x2 = torch.minimum(r[:,0], r[:,1])
+        maxrprimex1x2 = torch.maximum(r_prime[:,0], r_prime[:,1])
+        maxrx1x2 = torch.maximum(r[:,0], r[:,1])
+
+        minrprimey1y2 = torch.minimum(r_prime[:,2], r_prime[:,3])
+        minry1y2 = torch.minimum(r[:,2], r[:,3])
+        maxrprimey1y2 = torch.maximum(r_prime[:,2], r_prime[:,3])
+        maxry1y2 = torch.maximum(r[:,2], r[:,3])
+
+        x1 = torch.maximum(minrprimex1x2.unsqueeze(0),minrx1x2.unsqueeze(1))
+        x2 = torch.minimum(maxrprimex1x2.unsqueeze(0),maxrx1x2.unsqueeze(1)) 
+        delta_x = torch.clamp(x2-x1,min=0)
+        y1 = torch.maximum(minrprimey1y2.unsqueeze(0),minry1y2.unsqueeze(1))
+        y2 = torch.minimum(maxrprimey1y2.unsqueeze(0),maxry1y2.unsqueeze(1)) 
+        delta_y = torch.clamp(y2-y1,min=0)
+        return delta_x * delta_y
+        
+
+    def __getitem__(self, index: int):
+        sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
+        # if self.target_size is not None:
+        sample = torch.matmul(sample.view(1, -1), self.transform_matrix)
+        
+        sample = sample.view(1, self.target_size, self.target_size) * self.target_size * self.target_size
+        # if self.upsample:
+        sample = torch.matmul (sample.view(1, -1), self.retransform_matrix)
+        sample = sample.view(1, 28, 28) * 28 * 28
+        # else:
+        #     sample = self.avg_kernel(sample)
+        #     if self.upsample:
+        #         sample = torch.repeat_interleave(sample,   self.block_size, dim=1)
+        #         sample = torch.repeat_interleave(sample,   self.block_size, dim=2)
+        #         sample_size = sample.shape[-1]
+        #         if sample_size != 28: # if not the original size, pad the last few pixels
+        #             remainder = 28 - sample_size # size of imagenet - current sample size
+        #             sample = torch.cat([sample, sample[:, :, -remainder:]], dim=-1) # pad the last few pixels
+        #             sample = torch.cat([sample, sample[:, -remainder:, :]], dim=-2) # pad the last few pixels
+                
+
+        return sample, target
+    
+import torchvision.transforms as transforms
+def analyze_error(      
+               outdir = "",
+               exp_name = "",
+               hue_variable = "data_rescale",
+               max_epoch = 0,
+               num_runs_to_analyze=1000,
+               P_list = None
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list) 
+    record_names = glob.glob(f"{outdir}/{exp_name}")
+    print ("P", P_list, "num runs", len(record_names), flush=True)
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+            if (P_list is not None) and (record.args.num_hidden_features not in P_list):
+                continue
+                
+            transform = transforms.Compose([
+                transforms.ToTensor(),
+            ])
+            train_dataset = RandomFeaturesMNIST(root = "./data", 
+                                        train = True,
+                                        transform = transform,
+                                        target_size = record.args.target_size,
+                                        upsample = record.args.upsample
+                                         ) 
+            train_sampler=None
+            train_kwargs = {'batch_size': record.args.batch_size}
+            train_loader = torch.utils.data.DataLoader(
+                train_dataset, sampler=train_sampler, shuffle=(train_sampler is None),
+            **train_kwargs)
+            
+            width_after_pool = 28
+            if record.args.nonlinearity == "relu":
+                nonlinearity = nn.ReLU()
+            elif record.args.nonlinearity == "tanh":
+                nonlinearity = nn.Tanh()
+            elif record.args.nonlinearity == "line":
+                nonlinearity = nn.Identity()
+            else:
+                raise ValueError
+            model = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(width_after_pool**2, record.args.num_hidden_features),
+                nonlinearity,
+                nn.Linear(record.args.num_hidden_features, 10),
+            )
+            model.load_state_dict(record.model)
+            
+            
+            # if record.args.num_hidden_features > 10000:
+                # continue
+            # if record.args.num_train_samples < 10:
+                # continue
+        except Exception as e: 
+            print(e)
+            continue 
+        print("Results on Train")
+        for i, (images, target) in enumerate(train_loader):
+            images = images.to("cpu")
+            target = target.to("cpu")
+            output = model(images) 
+            logits = []
+            digits = []
+            target_digits = []
+            for dig in range(10):
+                logits.extend(output[target == dig].detach().numpy().flatten())
+                digits.extend([0,1,2,3,4,5,6,7,8,9]*len(output[target == dig] ))
+                target_digits.extend([dig]*10*len(output[target == dig] ))
+            # print lens of each list 
+            # print (len(logits), len(digits), len(target_digits))
+            df = pd.DataFrame({"logits": logits, "digits": digits,
+                               "target_digits": target_digits,
+                               })
+            
+            sns.lineplot(x="digits",y= "logits", hue = "target_digits",data=df)
+            plt.show()
+            # min max output 
+            print (output.min(), output.max())
+            plt.figure(figsize=(12, 8))
+            plt.imshow(output[torch.argsort(target)][:100].detach().numpy().T,vmin=-100,vmax=100)
+            plt.show()
+            # print (output[torch.argsort(target)], torch.argsort(target))
+            break 
+         
          

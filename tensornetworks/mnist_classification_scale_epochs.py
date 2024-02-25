@@ -68,6 +68,8 @@ parser.add_argument('--multiclass_lr', action='store_true',
                     help='multi-class logistic regression')
 parser.add_argument('--nonlinearity', default="tanh", type=str,  
                     help='type of nonlinearity used')
+parser.add_argument('--randomfeatures', action='store_true', default=False,
+                        help='whether to do random features')
 parser.add_argument('--upsample', action='store_true', default=False,
                         help='whether to upsample the downsampled data to original size')
 parser.add_argument(
@@ -201,6 +203,11 @@ def get_model(args, nonlinearity):
             nonlinearity,
             nn.Linear(args.num_hidden_features, 10),
         )
+        # random features
+        # make first layer untrainable 
+        if args.randomfeatures == True:
+            model[1].requires_grad_(False)
+
     return model
     
 def get_dataset(args):
@@ -334,13 +341,13 @@ def train_gradient_descent(train_loader, val_loader, device, model, nonlinearity
             # print ("target", target)
             loss = criterion(output, target)
             loss.backward()
-            if i == 0: weight_norm = torch.norm(model[1].weight.grad.flatten()).cpu().detach().clone().numpy()
+            if i == 0: weight_norm = 0 # torch.norm(model[3].weight.grad.flatten()).cpu().detach().clone().numpy()
             optimizer.step()
             losses.update(loss.item(), images.size(0)) 
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
-            print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0])
+            print("loss", loss.item(), "acc1", acc1[0], "acc5", acc5[0])#, model.state_dict()['1.weight'])
             if args.lr_scheduler == "OneCycleLR":
                 scheduler.step()
             
@@ -424,6 +431,8 @@ def main():
     record.metrics.test_mse[args.epochs] = val_losses
     record.metrics.test_top1[args.epochs] = val_top1
     record.metrics.test_top5[args.epochs] = val_top5
+    # save model
+    # record.model = model.state_dict()
     print("val_losses, val_top1, val_top5", val_losses, val_top1, val_top5)
    
     utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)

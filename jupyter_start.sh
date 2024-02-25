@@ -5,8 +5,8 @@
 #SBATCH --time=24:00:00
 #SBATCH --job-name=jupyter-notebook
 #SBATCH --output=jupyter-notebook-%J.log
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=alexn@minerva.kgi.edu
+# SBATCH --mail-type=ALL
+# SBATCH --mail-user=alexn@minerva.kgi.edu
 # SBATCH --partition=mig
 # SBATCH --gres=gpu:1
 
