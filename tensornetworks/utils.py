@@ -2025,7 +2025,9 @@ def analyze_error(
                hue_variable = "data_rescale",
                max_epoch = 0,
                num_runs_to_analyze=1000,
-               P_list = None
+               P_list = None,
+               target_size_list=None,
+                N_list=None
 ):
     pd.set_option('display.max_rows', 1000)
     train_pars = defaultdict(list) 
@@ -2036,6 +2038,10 @@ def analyze_error(
             
             record = torch.load(f, map_location="cpu") 
             if (P_list is not None) and (record.args.num_hidden_features not in P_list):
+                continue
+            if (target_size_list is not None) and (record.args.target_size not in target_size_list):
+                continue
+            if (N_list is not None) and (record.args.num_train_samples not in N_list):
                 continue
                 
             transform = transforms.Compose([
@@ -2048,10 +2054,23 @@ def analyze_error(
                                         upsample = record.args.upsample
                                          ) 
             train_sampler=None
-            train_kwargs = {'batch_size': record.args.batch_size}
+            train_kwargs = {'batch_size': 100}
             train_loader = torch.utils.data.DataLoader(
                 train_dataset, sampler=train_sampler, shuffle=(train_sampler is None),
             **train_kwargs)
+            
+            test_dataset = RandomFeaturesMNIST(root = "./data", 
+                                        train = False,
+                                        transform = transform,
+                                        target_size = record.args.target_size,
+                                        upsample = record.args.upsample
+                                         ) 
+            test_sampler=None
+            test_kwargs = {'batch_size': 100}
+            test_loader = torch.utils.data.DataLoader(
+                test_dataset, sampler=test_sampler, shuffle=(test_sampler is None),
+            **test_kwargs)
+            
             
             width_after_pool = 28
             if record.args.nonlinearity == "relu":
@@ -2079,6 +2098,7 @@ def analyze_error(
             print(e)
             continue 
         print("Results on Train")
+        criterion = nn.CrossEntropyLoss()
         for i, (images, target) in enumerate(train_loader):
             images = images.to("cpu")
             target = target.to("cpu")
@@ -2090,6 +2110,43 @@ def analyze_error(
                 logits.extend(output[target == dig].detach().numpy().flatten())
                 digits.extend([0,1,2,3,4,5,6,7,8,9]*len(output[target == dig] ))
                 target_digits.extend([dig]*10*len(output[target == dig] ))
+                print("train logits for digit:", dig)
+                for o in output[target == dig].detach().numpy():
+                    plt.plot(o)
+                plt.show()
+            # print lens of each list 
+            # print (len(logits), len(digits), len(target_digits))
+            df = pd.DataFrame({"logits": logits, "digits": digits,
+                               "target_digits": target_digits,
+                               })
+            
+            sns.lineplot(x="digits",y= "logits", hue = "target_digits",data=df)
+            plt.show()
+            # min max output 
+            print (output.min(), output.max())
+            plt.figure(figsize=(12, 8))
+            plt.imshow(output[torch.argsort(target)][:100].detach().numpy().T,vmin=-100,vmax=100)
+            plt.show()
+            # print (output[torch.argsort(target)], torch.argsort(target))
+            break 
+            
+        print("Results on Test")
+        for i, (images, target) in enumerate(test_loader):
+            images = images.to("cpu")
+            target = target.to("cpu")
+            output = model(images) 
+            logits = []
+            digits = []
+            target_digits = []
+            print("batch", i, "N", record.args.num_train_samples, "target", record.args.target_size, "cross entropy", criterion(output, target))
+            for dig in range(10):
+                logits.extend(output[target == dig].detach().numpy().flatten())
+                digits.extend([0,1,2,3,4,5,6,7,8,9]*len(output[target == dig] ))
+                target_digits.extend([dig]*10*len(output[target == dig] ))
+                print("test logits for digit:", dig)
+                for o in output[target == dig].detach().numpy():
+                    plt.plot(o)
+                plt.show()
             # print lens of each list 
             # print (len(logits), len(digits), len(target_digits))
             df = pd.DataFrame({"logits": logits, "digits": digits,
