@@ -1964,11 +1964,11 @@ def shuffled_pca(
             continue 
         try:
             
-            # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
             # for epoch in [max_epoch]:
             # train_pars["target_size"].extend( [record.args.target_size]) 
             # print(record)
-            train_pars["n_pca_components_kept"].extend( [record ["n_pca_components_kept"]]) 
+            train_pars["n_pca_components_kept"].extend( [record.args.highsignal_pca_components_kept ])
             # train_pars["target_size"].extend( [record["target_size"] ])
             # train_pars["lr"].append(f'{record.args.lr}') 
             # train_pars["wd"].append(f'{record.args.weight_decay}') 
@@ -1980,26 +1980,26 @@ def shuffled_pca(
             # train_pars["D"].extend([record.args.target_size]) 
             # N =  record.args.num_train_samples
             # P = record.args.num_hidden_features
-            train_pars["N"].extend([record["num_train_samples"] ])
-            # train_pars["N"].extend([record.args.num_train_samples ])
+            # train_pars["N"].extend([record["num_train_samples"] ])
+            train_pars["N"].extend([record.args.num_train_samples ])
             # train_pars["P,N"].extend([f'{P},{N}']/) 
             # train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
             # train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
             # train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
             # train_pars["logN/D"].extend([np.log( N / D) ])
             # train_pars["epoch"].append(epoch)
-            # train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
-            train_pars["train_loss"].append( (record["train_loss"]))
-            # train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
-            train_pars["test_loss"].append ( (record["test_loss"]  ) )
+            train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+            # train_pars["train_loss"].append( (record["train_loss"]))
+            train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+            # train_pars["test_loss"].append ( (record["test_loss"]  ) )
             # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
             # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
             # print ("record.metrics.train_top1", record.metrics.train_top1)
-            # train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
+            train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
             # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
-            # train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
-            train_pars["test_top1"].append( (record["test_score"]  ) )
-            train_pars["train_top1"].append( (record["train_score"]  ) )
+            train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+            # train_pars["test_top1"].append( (record["test_score"]  ) )
+            # train_pars["train_top1"].append( (record["train_score"]  ) )
                 
                 
         except Exception as e: 
