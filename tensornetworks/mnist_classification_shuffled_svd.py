@@ -216,7 +216,8 @@ def get_dataset(args):
     # Get a fixed subset of the training set
     rng = np.random.default_rng()
     num_train = len(X)
-    train_idx = rng.integers(low=0, high=num_train, size=args.num_train_samples)
+    # train_idx = rng.integers(low=0, high=num_train, size=args.num_train_samples)
+    train_idx = rng.permutation(num_train)[:args.num_train_samples]
     print("train_idx", train_idx[:100])
     train_sampler = torch.utils.data.SubsetRandomSampler(train_idx) 
     val_sampler = None 
