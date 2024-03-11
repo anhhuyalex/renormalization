@@ -1,6 +1,6 @@
 import argparse
 import datetime
-
+import copy
 from sklearn.datasets import load_iris
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
@@ -92,7 +92,8 @@ class RandomFeaturesMNIST(datasets.MNIST):
 
     def __getitem__(self, index: int):
         sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
-        prev_sample = sample.clone()
+        if self.target_size == 28:
+            return sample.flatten().numpy(), target
         
         if self.target_size is not None:
             sample = torch.matmul(sample.view(1, -1), self.transform_matrix)
@@ -157,7 +158,8 @@ class RandomFeaturesFashionMNIST(datasets.FashionMNIST):
     def __getitem__(self, index: int):
         sample, target = super(RandomFeaturesFashionMNIST, self).__getitem__(index)
         # prev_sample = sample.clone()
-        
+        if self.target_size == 28:
+            return sample.flatten().numpy(), target
         if self.target_size is not None:
             sample = torch.matmul(sample.view(1, -1), self.transform_matrix)
             
@@ -198,50 +200,76 @@ elif args.data == "fashionmnist":
                                     target_size = args.target_size,
                                     upsample = True
     )
-for seed in [0, 42, 1337, 2021, 2027]:
+
+for seed in [0, 5, 10, 15, 20]:
     rng = np.random.default_rng(seed)
     num_train = len(train_dataset)
     train_idx = rng.integers(low=0, high=num_train, size=args.num_train_samples)
-    
-    X, y = zip(*[train_dataset[i] for i in train_idx])
+
+    X, y = zip(*[train_dataset[i] for i in range(num_train)]) # get all the training samples
     X = np.array(X)
-    y = np.array(y)
+    y = np.array(y) 
+    
     if args.n_pca_components_kept is not None:
+        print ("X.shape, y.shape", X.shape, y.shape, X[0])
         assert args.target_size == 28
         pca = PCA(n_components=None)
         pca.fit(X)
         Xpca = pca.transform(X) 
+        if args.is_high_signal_to_noise != "False":
+            args.n_pca_components_kept = 1-args.n_pca_components_kept
         n_pca_components_kept = int(args.n_pca_components_kept * Xpca.shape[1])
-        high_signal, low_signal = Xpca[:,:n_pca_components_kept], Xpca[:,n_pca_components_kept:]
+        assert n_pca_components_kept >= 0, f"n_pca_components_kept must be greater than 0, got {n_pca_components_kept}"
+        high_signal, low_signal = copy.deepcopy(Xpca[:,:n_pca_components_kept]), copy.deepcopy(Xpca[:,n_pca_components_kept:])
+        print ("high_signal.shape, low_signal.shape", high_signal.shape, low_signal.shape)
         if args.is_high_signal_to_noise == "False":
-            high_signal = np.take(high_signal, np.random.default_rng(142).permutation(high_signal.shape[1]), axis=1) # shuffle the high signal
+            # high_signal_shuffle = np.random.default_rng(seed).permutation(high_signal.shape[1])
+            # high_signal = np.take(high_signal, high_signal_shuffle, axis=1) # shuffle the high signal
+            np.random.shuffle(high_signal.T)
         else:
-            low_signal = np.take(low_signal, np.random.default_rng(142).permutation(low_signal.shape[1]), axis=1) # shuffle the low signal
+            # low_signal_shuffle = np.random.default_rng(seed).permutation(low_signal.shape[1])
+            # low_signal = np.take(low_signal, low_signal_shuffle, axis=1) # shuffle the low signal
+            np.random.shuffle(low_signal.T) 
         Xpca = np.hstack([high_signal, low_signal])
-         
+            
         X = pca.inverse_transform(Xpca)
 
-    clf = LogisticRegression(max_iter=1e5, penalty=args.penalty).fit(X, y)
-    s = clf.score(X, y) 
-    train_loss = log_loss(y, clf.predict_proba(X))
+    # fit on subset of the training data
+    Xtrain = X[train_idx]
+    ytrain = y[train_idx]
+    print ("fitting Xtrain.shape, ytrain.shape", Xtrain.shape, ytrain.shape)
+    clf = LogisticRegression(max_iter=1e12, penalty=args.penalty,solver='lbfgs',verbose=1).fit(Xtrain, ytrain)
+    s = clf.score(Xtrain, ytrain)
+    train_loss = log_loss(ytrain, clf.predict_proba(Xtrain))
 
-    print ("score", s, "train_loss", train_loss, X.shape, y.shape)
+    print ("score", s, "train_loss", train_loss, Xtrain.shape, ytrain.shape)
+
     Xtest, ytest = zip(*[test_dataset[i] for i in range(len(test_dataset))]) 
     Xtest = np.array(Xtest)
     ytest = np.array(ytest)
     if args.n_pca_components_kept is not None:
+        print ("Xtest.shape, ytest.shape", Xtest.shape, ytest.shape)
         Xtestpca = pca.transform(Xtest)
-        high_signal, low_signal = Xtestpca[:,:n_pca_components_kept], Xtestpca[:,n_pca_components_kept:] 
+        high_signal, low_signal = copy.deepcopy(Xtestpca[:,:n_pca_components_kept]), copy.deepcopy(Xtestpca[:,n_pca_components_kept:])
+
+        print ("high_signal.shape, low_signal.shape", high_signal.shape, low_signal.shape)
         if args.is_high_signal_to_noise == "False":
-            high_signal = np.take(high_signal, np.random.default_rng(142).permutation(high_signal.shape[1]), axis=1) 
+            # high_signal = np.take(high_signal, high_signal_shuffle, axis=1) # shuffle the high signal
+            np.random.shuffle(high_signal.T)
         else:
-            low_signal = np.take(low_signal, np.random.default_rng(142).permutation(low_signal.shape[1]), axis=1)
+            # low_signal = np.take(low_signal, low_signal_shuffle, axis=1) # shuffle the low signal
+            np.random.shuffle(low_signal.T)
         Xtestpca = np.hstack([high_signal, low_signal])
         Xtest = pca.inverse_transform(Xtestpca)
     s_test = clf.score(Xtest, ytest)
     test_loss = log_loss(ytest, clf.predict_proba(Xtest))
     print ("score", s, s_test, test_loss, X.shape, y.shape)
-    record = {"seed": seed, "train_loss": train_loss, "test_loss": test_loss, "train_score": s, "test_score": s_test, "num_train_samples": args.num_train_samples, "target_size": args.target_size, "args":args}
+    record = {"seed": seed, 
+                "train_loss": train_loss, "test_loss": test_loss, 
+                "train_score": s, "test_score": s_test, 
+                "num_train_samples": args.num_train_samples, 
+                "n_pca_components_kept": n_pca_components_kept,
+                "target_size": args.target_size, "args":args}
     args.exp_name = f"{args.fileprefix}" \
                 + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
     print(f"saved to {args.save_dir}/{args.exp_name}" )

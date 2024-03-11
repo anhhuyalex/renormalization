@@ -1937,6 +1937,127 @@ def slices_plot(
  
     return train_pars
 
+def shuffled_pca(      
+               outdir = "",
+               exp_name = "",
+               hue_variable = "data_rescale",
+               max_epoch = 0,
+               num_runs_to_analyze=1000,
+               P_list = None
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list) 
+    record_names = glob.glob(f"{outdir}/{exp_name}")
+    print ("P", P_list, "num runs", len(record_names), flush=True)
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+            # if (P_list is not None) and (record.args.num_hidden_features not in P_list):
+                # continue
+            # if record.args.num_hidden_features > 10000:
+                # continue
+            # if record.args.num_train_samples < 10:
+                # continue
+        except Exception as e: 
+            print(e)
+            continue 
+        try:
+            
+            # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            # for epoch in [max_epoch]:
+            # train_pars["target_size"].extend( [record.args.target_size]) 
+            # print(record)
+            train_pars["n_pca_components_kept"].extend( [record ["n_pca_components_kept"]]) 
+            # train_pars["target_size"].extend( [record["target_size"] ])
+            # train_pars["lr"].append(f'{record.args.lr}') 
+            # train_pars["wd"].append(f'{record.args.weight_decay}') 
+            # print ('lr',record.args.lr)
+            # train_pars["P"].extend([ record.args.num_hidden_features ])
+            
+            # D = record.args.target_size #* record.args.target_size
+            # train_pars["D"].extend([record["target_size"] ])
+            # train_pars["D"].extend([record.args.target_size]) 
+            # N =  record.args.num_train_samples
+            # P = record.args.num_hidden_features
+            train_pars["N"].extend([record["num_train_samples"] ])
+            # train_pars["N"].extend([record.args.num_train_samples ])
+            # train_pars["P,N"].extend([f'{P},{N}']/) 
+            # train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
+            # train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
+            # train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+            # train_pars["logN/D"].extend([np.log( N / D) ])
+            # train_pars["epoch"].append(epoch)
+            # train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+            train_pars["train_loss"].append( (record["train_loss"]))
+            # train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+            train_pars["test_loss"].append ( (record["test_loss"]  ) )
+            # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
+            # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
+            # print ("record.metrics.train_top1", record.metrics.train_top1)
+            # train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
+            # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
+            # train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+            train_pars["test_top1"].append( (record["test_score"]  ) )
+            train_pars["train_top1"].append( (record["train_score"]  ) )
+                
+                
+        except Exception as e: 
+            print(e )
+            raise ValueError
+
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
+    # train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True)
+    display(train_pars)
+    # get unique Ps
+
+    # print ("unique Ps", train_pars["P"].unique()) 
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+")
+    # ax.set(  yscale="log")
+    plt.title(f"Train loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Train loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+")
+    plt.title(f"Train top1 vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Train top1")
+    plt.show() 
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+")
+    # ax.set(  yscale="log")
+    plt.title(f"Test loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Test loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+")
+    plt.title(f"Test top1 vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Test top1")
+    plt.show()
+
+    return train_pars 
+
 import torchvision.datasets as datasets         
 class RandomFeaturesMNIST(datasets.MNIST):
     def __init__(self, root = "./data",  
