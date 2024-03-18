@@ -27,7 +27,7 @@ from sklearn.decomposition import PCA
 
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('data', metavar='DIR', nargs='?', default='./data',
+parser.add_argument('--data', type = str, default = "mnist",
                     help='path to dataset (default: imagenet)')
 parser.add_argument('--epochs', default=90, type=int,  
                     help='number of total epochs to run')
@@ -64,6 +64,8 @@ parser.add_argument('--randomfeatures', action='store_true', default=False,
                         help='whether to do random features')
 parser.add_argument('--is_high_signal_to_noise', default="False", type=str,
                     help='whether to keep high signal to noise ratio')
+parser.add_argument('--is_shuffle_signal', default="True", type=str,
+                    help='whether to shuffle signal, if false, set signal to zero')
 parser.add_argument('--highsignal_pca_components_kept', 
                     default=1.0, type=float,
                     help='fraction of pca components to keep')
@@ -92,26 +94,7 @@ def get_record(args):
                     )
         )  
     return record
-
  
-class RandomFeaturesMNIST(datasets.MNIST):
-    def __init__(self, root = "./data",  
-                 train = True,
-                 transform = None,
-                 block_size = 1, 
-                 upsample = False,
-                 target_size = None,
-                ):
-        
-
-         
-        super(RandomFeaturesMNIST, self).__init__(root, train=train, transform=transform, download=True)
-
-          
-    def __getitem__(self, index: int):
-        sample, target = super(RandomFeaturesMNIST, self).__getitem__(index)
-        return sample.flatten().numpy(), target
-        
 
 def get_model(args, nonlinearity):
      
@@ -151,36 +134,35 @@ def get_dataset(args):
     transform = transforms.Compose([
         transforms.ToTensor(),
         ])
-
-    # transform=transforms.Compose([
-    #     transforms.ToTensor(),
-    #     transforms.Normalize((0.1307,), (0.3081,))
-    #     ]) 
-    
-    # train_dataset = RandomFeaturesMNIST(root = "./data", 
-    #                                     train = True,
-    #                                     transform = transform,
-    #                                     target_size = args.target_size,
-    #                                     upsample = args.upsample
-    #                                      ) 
-    train_dataset = datasets.MNIST(root = "./data",
-                                      train = True,
-                                      transform = transform,
-                                      download = True
-                                      )
-    
-    # val_dataset = RandomFeaturesMNIST(root = "./data",
-    #                                   train = False,
-    #                                   transform = transform,
-    #                                   target_size = args.target_size,
-    #                                   upsample = args.upsample
-    #                                   )
-
-    val_dataset = datasets.MNIST(root = "./data",
-                                        train = False,
+    if args.data == "mnist":
+        train_dataset = datasets.MNIST(root = "./data",
+                                        train = True,
                                         transform = transform,
                                         download = True
                                         )
+        
+
+        val_dataset = datasets.MNIST(root = "./data",
+                                            train = False,
+                                            transform = transform,
+                                            download = True
+                                            )
+    elif args.data == "fashionmnist":
+        train_dataset = datasets.FashionMNIST(root = "./data",
+                                        train = True,
+                                        transform = transform,
+                                        download = True
+                                        )
+        
+
+        val_dataset = datasets.FashionMNIST(root = "./data",
+                                            train = False,
+                                            transform = transform,
+                                            download = True
+                                            )
+    else:
+        raise ValueError(f"Invalid dataset: got {args.data}")
+    
     # get X, y
     X, y = zip(*[(dat,targ) for dat, targ in train_dataset]) # get all the training samples
     print ("X", len(X))
@@ -192,10 +174,16 @@ def get_dataset(args):
     Xpca = pca.transform(X)  
     highsignal_pca_components_kept = int(args.highsignal_pca_components_kept * Xpca.shape[1]) 
     high_signal, low_signal = copy.deepcopy(Xpca[:,:highsignal_pca_components_kept]), copy.deepcopy(Xpca[:,highsignal_pca_components_kept:]) 
-    if args.is_high_signal_to_noise == "False":
-        np.random.shuffle(high_signal.T)
-    else:
-        np.random.shuffle(low_signal.T) 
+    if args.is_shuffle_signal == "True": # shuffling signal 
+        if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
+            np.random.shuffle(high_signal.T)
+        else: # if using high signal (i.e. good coarse graining), shuffle the low signal
+            np.random.shuffle(low_signal.T) 
+    elif args.is_shuffle_signal == "False": # if not shuffling signal, set signal to zero
+        if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
+            high_signal = np.zeros_like(high_signal)
+        else: # if using high signal (i.e. good coarse graining), set the low signal to zero
+            low_signal = np.zeros_like(low_signal) 
     Xpca = np.hstack([high_signal, low_signal]) 
     X = pca.inverse_transform(Xpca)
     train_dataset = torch.utils.data.TensorDataset(torch.tensor(X).float(), torch.tensor(y).long())
@@ -205,10 +193,17 @@ def get_dataset(args):
     ytest = np.concatenate( [np.expand_dims(yi, axis=0) for yi in ytest], axis=0)
     Xtestpca = pca.transform(Xtest)
     high_test_signal, low_test_signal = copy.deepcopy(Xtestpca[:,:highsignal_pca_components_kept]), copy.deepcopy(Xtestpca[:,highsignal_pca_components_kept:])
-    if args.is_high_signal_to_noise == "False":
-        np.random.shuffle(high_test_signal.T)
-    else:
-        np.random.shuffle(low_test_signal.T)
+    if args.is_shuffle_signal == "True": # shuffling signal 
+        if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
+            np.random.shuffle(high_test_signal.T)
+        else: # if using high signal (i.e. good coarse graining), shuffle the low signal
+            np.random.shuffle(low_test_signal.T)
+    elif args.is_shuffle_signal == "False":
+        if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
+            high_test_signal = np.zeros_like(high_test_signal)
+        else: # if using high signal (i.e. good coarse graining), set the low signal to zero
+            low_test_signal = np.zeros_like(low_test_signal)
+            
     Xtestpca = np.hstack([high_test_signal, low_test_signal])
     Xtest = pca.inverse_transform(Xtestpca)
     val_dataset = torch.utils.data.TensorDataset(torch.tensor(Xtest).float(), torch.tensor(ytest).long())
