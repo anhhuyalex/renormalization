@@ -44,13 +44,14 @@ source activate renormalization
 
 
 
-# sbatch --array=0-179 hipp.sh 0.01 100000
+# sbatch --array=0-239 hipp.sh 0.0
 # i_vals=(10 20 50 75 100 150 200 250 500 750 1000 1500 2000 2500 5000 6000 7500 10000 12500 15000 17500 20000 60000) # 6
 # j_vals=(1 3 5 7 9 10 20 50 75 100 200 250 500 1000 1250 1500 2000 2500 5000 7500 10000 12500 15000 17500 20000 60000) 
 # j_vals=(1 3 5 7 9 10 20 50 75 100 200 250 500 1000 1250 1500 2000 2500 5000 7500 10000 12500 15000 17500 20000 60000)
 # i_vals=(28 27 25 23 21 19 17 15 13 11 9 7 5 3 1) # 15
 i_vals=(0.0 0.005 0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08 0.09 0.1 0.15 0.2 0.25 0.3 0.35 0.4 0.45 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.85 0.9 0.95 1.0) # len 30
-j_vals=(10000 20000 30000 40000 50000 60000) # 6
+j_vals=(500 1000 10000 20000 30000 40000 50000 60000) # 6
+# j_vals=(10 100 500 1000 2000 5000 10000) # 7
 
 
 
@@ -94,4 +95,8 @@ echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
 #1.0 0.95 0.9 0.85 0.8 0.75 0.7 0.65 0.6 0.55 0.5 0.45 0.4 0.35 0.3 0.25 0.2 0.15 0.1 0.09 0.08 0.07 0.06 0.05 0.04 0.03 0.02 0.01 0.005
 # python -u mnist_classification_lbfgs.py --data mnist --penalty none --fileprefix highsignal_multiclasslbfgs_pca_mnist_MAR10  --is_high_signal_to_noise True  --target_size  28   --num_train_samples $j --n_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info_shuffledpca  # --wd 0.0000000000000000000000001  
 # python -u mnist_classification_scale_epochs.py ./data --fileprefix P_10000_Adamonecyclelrschedule_full_batch_no_regularize_relu$1_mnist_MAR4 --optimizer_type adam --lr $1 --lr_scheduler OneCycleLR  --target_size  $i -b 500 --nonlinearity relu --num_train_samples $j --num_hidden_features $2 --epochs 500 --upsample --no_transform --wd 0.0  --randomfeatures --save_dir /scratch/gpfs/qanguyen/imagenet_info_relurandom #
-python -u mnist_classification_shuffled_svd.py ./data --fileprefix Adamshuffledsvd_highsignal_no_regularize_multiclass_mnist_MAR11 --optimizer_type adam --lr 0.001 --lr_scheduler OneCycleLR --multiclass_lr   -b 500  --num_train_samples $j --epochs 1000  --wd 0.0 --is_high_signal_to_noise True --highsignal_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info
+# for k in 1 3 5 7 9 11 13 15 17; do python -u mnist_classification_shuffled_svd.py --data fashionmnist --fileprefix Adamshuffledsvd_highsignal_no_regularize_multiclass_fashionmnist_setPCAtozero_MAR16 --optimizer_type adam --lr 0.001 --lr_scheduler OneCycleLR --multiclass_lr   -b 500  --num_train_samples $j --epochs 2000  --wd 0.0 --is_high_signal_to_noise True --is_shuffle_signal False --highsignal_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info; done
+# for k in 1 3 5 7 9 11 13 15 17; do python -u mnist_classification_shuffled_svd.py --data fashionmnist --randomfeatures_target_size 7 --fileprefix Adamshuffledsvd_highsignal_fashionmnist_doinversetransform_APR9_wd_$1 --optimizer_type adam --lr 0.001 --lr_scheduler OneCycleLR --multiclass_lr   -b 500  --num_train_samples $j --epochs 2000  --wd $1 --is_task_binary False --is_high_signal_to_noise True --is_shuffle_signal True --is_inverse_transform True --highsignal_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info; done
+# for k in 1 3 5 7 9 11 13 15 17; do python -u mnist_classification_shuffled_svd.py --data mnist --fileprefix lbfgs_shuffledsvd_highsignal_mnist_noinversetransform_APR23_wd_$1 --optimizer_type lbfgs --lr 0.001 --lr_scheduler OneCycleLR --multiclass_lr   -b 500  --num_train_samples $j --epochs 2000  --wd $1 --is_task_binary False --is_high_signal_to_noise True --is_shuffle_signal True --is_inverse_transform False --highsignal_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info; done
+for k in 1 3 5 7 9 11 13 15 17; do python -u mnist_classification_shuffled_svd.py --data mnist --fileprefix sklearnlbfgs_gaussianshuffledsvd_highsignal_mnist_noinversetransform_MAY02_wd_$1 --optimizer_type sklearn_lbfgs --lr 0.001 --lr_scheduler OneCycleLR --multiclass_lr   -b 500  --num_train_samples $j  --wd $1 --is_high_signal_to_noise True --is_shuffle_signal Gaussian --is_inverse_transform False --highsignal_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info; done
+# for k in 1 3 5 7 9 11 13 15 17; do python -u mnist_classification_shuffled_svd.py --data mnist --fileprefix Adam_gaussianshuffledsvd_highsignal_mnist_doinversetransform_APR30_wd_$1 --optimizer_type adam --lr 0.001 --lr_scheduler OneCycleLR --multiclass_lr   -b 500  --num_train_samples $j --epochs 2000  --wd $1 --is_task_binary False --is_high_signal_to_noise True --is_shuffle_signal Gaussian --is_inverse_transform True --highsignal_pca_components_kept $i --save_dir /scratch/qanguyen/imagenet_info; done

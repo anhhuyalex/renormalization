@@ -1937,13 +1937,14 @@ def slices_plot(
  
     return train_pars
 
-def shuffled_pca(      
+def shuffled_pca_timecourse(      
                outdir = "",
                exp_name = "",
                hue_variable = "data_rescale",
                max_epoch = 0,
                num_runs_to_analyze=1000,
-               P_list = None
+               P_list = None,
+               N_list = None
 ):
     pd.set_option('display.max_rows', 1000)
     train_pars = defaultdict(list) 
@@ -1953,6 +1954,9 @@ def shuffled_pca(
         try:
             
             record = torch.load(f, map_location="cpu") 
+            # print("record.args.num_train_samples",record.args.num_train_samples)
+            if (N_list is not None) and (record.args.num_train_samples not in N_list):
+                continue
             # if (P_list is not None) and (record.args.num_hidden_features not in P_list):
                 # continue
             # if record.args.num_hidden_features > 10000:
@@ -1965,10 +1969,102 @@ def shuffled_pca(
         try:
             
             epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            for epoch in range(0, epoch, 100):
+                # train_pars["target_size"].extend( [record.args.target_size]) 
+                # print(record)
+                train_pars["n_pca_components_kept"].extend( [record.args.highsignal_pca_components_kept ])
+                 
+                train_pars["N"].extend([record.args.num_train_samples ])
+                # train_pars["P,N"].extend([f'{P},{N}']/)  
+                train_pars["epoch"].append(epoch)
+                train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
+                # train_pars["train_loss"].append( (record["train_loss"]))
+                train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+                # train_pars["test_loss"].append ( (record["test_loss"]  ) )
+                # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
+                # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
+                # print ("record.metrics.train_top1", record.metrics.train_top1)
+                train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
+                # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
+                train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+                # train_pars["test_top1"].append( (record["test_score"]  ) )
+                # train_pars["train_top1"].append( (record["train_score"]  ) )
+                    
+                
+        except Exception as e: 
+            print(e )
+            raise ValueError
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
+    # train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True)
+    train_pars["n_pca_components_kept"] = train_pars["n_pca_components_kept"].astype('category')
+    # display(train_pars)
+    # get unique Ps
+
+    # print ("unique Ps", train_pars["P"].unique()) 
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="epoch",y= "train_loss", data=train_pars, hue="n_pca_components_kept")
+    ax.set(  yscale="log")
+    plt.title(f"Train loss vs. epoch")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("epoch")
+    plt.ylabel("Train loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="epoch",y= "test_loss", data=train_pars, hue="n_pca_components_kept")
+    ax.set(  yscale="log")
+    plt.title(f"Test loss vs. epoch")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("epoch")
+    plt.ylabel("Train loss")
+    plt.show()
+        
+def shuffled_pca(      
+               outdir = "",
+               exp_name = "",
+               hue_variable = "data_rescale",
+               max_epoch = 0,
+               num_runs_to_analyze=1000,
+               P_list = None
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list) 
+    record_names = glob.glob(f"{outdir}/{exp_name}")
+    print ("P", P_list, "num runs", len(record_names), flush=True)
+    reference_weights={}
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+            
+            # if (P_list is not None) and (record.args.num_hidden_features not in P_list):
+                # continue
+            # if record.args.num_hidden_features > 10000:
+                # continue
+            # if record.args.num_train_samples < 10:
+                # continue
+        except Exception as e: 
+            print(e)
+            continue 
+        try:
+            
+            # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            epoch = 1900#max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
             # for epoch in [max_epoch]:
             # train_pars["target_size"].extend( [record.args.target_size]) 
             # print(record)
-            train_pars["n_pca_components_kept"].extend( [record.args.highsignal_pca_components_kept ])
+            train_pars["n_pca_components_kept"].extend( [(record.args.highsignal_pca_components_kept) ])
+            train_pars["weight_norm"].extend( [ torch.linalg.norm(record.model['1.weight'].flatten(), ord=2).item() ])
+            # print("record.args is_inverse_transform",record.args.is_inverse_transform)
+            if record.args.highsignal_pca_components_kept == 1.0:
+                reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
+                 
             # train_pars["target_size"].extend( [record["target_size"] ])
             # train_pars["lr"].append(f'{record.args.lr}') 
             # train_pars["wd"].append(f'{record.args.weight_decay}') 
@@ -1991,10 +2087,12 @@ def shuffled_pca(
             train_pars["train_loss"].append( (record.metrics.train_mse[epoch]) )
             # train_pars["train_loss"].append( (record["train_loss"]))
             train_pars["test_loss"].append( (record.metrics.test_mse[epoch]  ) )
+            train_pars["log_test_loss"].append( np.log10(record.metrics.test_mse[epoch]  ) )
             # train_pars["test_loss"].append ( (record["test_loss"]  ) )
             # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
             # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
             # print ("record.metrics.train_top1", record.metrics.train_top1)
+            # print(record.metrics.test_top1 )
             train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
             # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
             train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
@@ -2005,17 +2103,24 @@ def shuffled_pca(
         except Exception as e: 
             print(e )
             raise ValueError
+        
 
+    # pd.set_option('display.max_rows', 2000)
     train_pars = pd.DataFrame.from_dict(train_pars) 
     # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
-    # train_pars = train_pars.sort_values(["N", "D",'test_loss'], ascending=True)
-    display(train_pars)
+    train_pars = train_pars.sort_values(["N", "n_pca_components_kept",'test_loss'], ascending=True)
+    train_pars["N"]=train_pars["N"].astype('category')
+    # display(train_pars)
     # get unique Ps
 
     # print ("unique Ps", train_pars["P"].unique()) 
 
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+")
+    sns.lineplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
+                 palette="rocket")
+    # plot both points and line 
+    sns.scatterplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
+                palette="rocket")
     # ax.set(  yscale="log")
     plt.title(f"Train loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2026,7 +2131,10 @@ def shuffled_pca(
     plt.show()
 
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+")
+    sns.lineplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+",
+                 palette= "rocket")
+    sns.scatterplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+",
+                  palette= "rocket")
     plt.title(f"Train top1 vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -2036,7 +2144,10 @@ def shuffled_pca(
     plt.show() 
     
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+")
+    sns.lineplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+",
+                 palette= "rocket")
+    sns.scatterplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+",
+                  palette= "rocket")
     # ax.set(  yscale="log")
     plt.title(f"Test loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2047,7 +2158,24 @@ def shuffled_pca(
     plt.show()
 
     fig, ax = plt.subplots(figsize=(12, 8))
-    sns.lineplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+")
+    sns.lineplot(x="n_pca_components_kept",y= "log_test_loss", data=train_pars, hue="N", marker="+",
+                 palette= "rocket")
+    sns.scatterplot(x="n_pca_components_kept",y= "log_test_loss", data=train_pars, hue="N", marker="+",
+                  palette= "rocket")
+    # ax.set(  yscale="log")
+    plt.title(f"Log Test loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Log Test loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+",
+                 palette= "rocket")
+    sns.scatterplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+",
+                 palette= "rocket")
     plt.title(f"Test top1 vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -2056,7 +2184,61 @@ def shuffled_pca(
     plt.ylabel("Test top1")
     plt.show()
 
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "weight_norm", data=train_pars, hue="N", marker="+",
+                 palette="rocket")
+    # plot both points and line 
+    sns.scatterplot(x="n_pca_components_kept",y= "weight_norm", data=train_pars, hue="N", marker="+",
+                palette="rocket")
+    # ax.set(  yscale="log")
+    plt.title(f"Weight norm vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Weight norm")
+    plt.show()
+    # train_pars = defaultdict(list)
+    # for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+    #     try:
+            
+    #         record = torch.load(f, map_location="cpu") 
+            
+    #         # if (P_list is not None) and (record.args.num_hidden_features not in P_list):
+    #             # continue
+    #         # if record.args.num_hidden_features > 10000:
+    #             # continue
+    #         # if record.args.num_train_samples < 10:
+    #             # continue
+    #     except Exception as e: 
+    #         print(e)
+    #         continue 
+
+    #     train_pars["n_pca_components_kept"].append(record.args.highsignal_pca_components_kept)
+    #     train_pars["diff_from_full_weight"].append( torch.linalg.norm(record.model['1.weight'].flatten() - reference_weights[record.args.num_train_samples], ord=2).item() )
+    #     train_pars["N"].append(record.args.num_train_samples)
+    #     if record.args.highsignal_pca_components_kept == 1.0:
+    #         reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
+        
+    # train_pars = pd.DataFrame.from_dict(train_pars)   
+    # train_pars["N"]=train_pars["N"].astype('category') 
+    # fig, ax = plt.subplots(figsize=(12, 8))
+    # sns.lineplot(x="n_pca_components_kept", y="diff_from_full_weight", data=train_pars, hue="N", marker="+",
+    #              palette="rocket")
+    # # plot both points and line
+    # sns.scatterplot(x="n_pca_components_kept", y="diff_from_full_weight", data=train_pars, hue="N", marker="+",
+    #             palette="rocket")
+    # # ax.set(  yscale="log")
+    # plt.title(f"Diff from full weight vs. D")
+    # plt.legend(loc=(1.04,0))
+    # # plt.legend([],[], frameon=False)
+    
+    # plt.xlabel("D")
+    # plt.ylabel("Diff from full weight")
+    # plt.show()
+
     return train_pars 
+ 
 
 import torchvision.datasets as datasets         
 class RandomFeaturesMNIST(datasets.MNIST):
