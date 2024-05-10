@@ -42,6 +42,8 @@ parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
                     help='number of data loading workers (default: 4)')
 parser.add_argument('--optimizer_type', default="sgd", type=str,
                     help='optimizer type')
+parser.add_argument('--is_random_init', default="False", type=str,
+                        help='whether to use random initialization')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
@@ -583,9 +585,13 @@ def train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, a
 
     from sklearn.linear_model import LogisticRegression
     clf = LogisticRegression(max_iter=1e12, 
+                            maxfun=1e7,
                              C = 1/args.weight_decay if args.weight_decay > 0 else 1.0,
-                             penalty=None if args.weight_decay <= 0.0 else 'l2',
-                             solver='lbfgs',verbose=1).fit(Xtrain, ytrain)
+                             penalty="none" if args.weight_decay <= 0.0 else 'l2',
+                             solver='lbfgs',verbose=1,
+                             multi_class='multinomial' if args.is_task_binary != "True" else 'ovr',
+                             random_init = True if args.is_random_init == "True" else False,
+                             ) 
     from sklearn.metrics import log_loss
 
     for i, (images, target) in enumerate(train_loader):
@@ -601,7 +607,9 @@ def train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, a
         target = target.cpu().numpy()
         record.metrics.test_mse[0] = log_loss(target, clf.predict_proba(images))
         record.metrics.test_top1[0] = clf.score(images, target) 
-    print("train_mse", record.metrics.train_mse[0], "test_mse", record.metrics.test_mse[0], "test_top1", record.metrics.test_top1[0], "test_top5", record.metrics.test_top5[0])
+    print("train_mse", record.metrics.train_mse[0], "test_mse", record.metrics.test_mse[0], "train_top1", record.metrics.train_top1[0], "test_top1", record.metrics.test_top1[0])
+    record["model"] = clf.coef_
+    return model, criterion, record
 
 def main():
     args = parser.parse_args()
@@ -633,7 +641,9 @@ def main():
         model, criterion = train_lbfgs(train_loader, val_loader, device, model, nonlinearity, args, record)
         val_losses, val_top1, val_top5 = validate_lbfgs(val_loader, model, args, nonlinearity, criterion, device)
     elif args.optimizer_type == "sklearn_lbfgs":
-        model, criterion = train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, args, record)
+        model, criterion, record = train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, args, record)
+        utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
+        return 
     else:
         train_mse, model, criterion = train_gradient_descent(train_loader, val_loader, device, model, nonlinearity, args, record)
         val_losses, val_top1, val_top5 = validate_gradient_descent(val_loader, model, args, nonlinearity, criterion, device)
