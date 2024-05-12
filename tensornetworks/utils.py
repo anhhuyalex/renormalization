@@ -1771,12 +1771,12 @@ def slices_plot(
             
             epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
             # for epoch in [max_epoch]:
-            train_pars["target_size"].extend( [record.args.target_size]) 
+            # train_pars["target_size"].extend( [record.args.target_size]) 
             # train_pars["target_size"].extend( [record["target_size"] ])
             # train_pars["lr"].append(f'{record.args.lr}') 
             # train_pars["wd"].append(f'{record.args.weight_decay}') 
             # print ('lr',record.args.lr)
-            train_pars["P"].extend([ record.args.num_hidden_features ])
+            # train_pars["P"].extend([ record.args.num_hidden_features ])
             
             # D = record.args.target_size #* record.args.target_size
             # train_pars["D"].extend([record["target_size"] ])
@@ -2055,15 +2055,18 @@ def shuffled_pca(
         try:
             
             # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
-            epoch = 1900#max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"])  #1900
             # for epoch in [max_epoch]:
             # train_pars["target_size"].extend( [record.args.target_size]) 
             # print(record)
             train_pars["n_pca_components_kept"].extend( [(record.args.highsignal_pca_components_kept) ])
-            train_pars["weight_norm"].extend( [ torch.linalg.norm(record.model['1.weight'].flatten(), ord=2).item() ])
+            # train_pars["weight_norm"].extend( [ torch.linalg.norm(record.model['1.weight'].flatten(), ord=2).item() ])
+            # print (record.model)
+            train_pars["weight_norm"].extend( [ np.linalg.norm(record.model.flatten(), ord=2).item() ])
             # print("record.args is_inverse_transform",record.args.is_inverse_transform)
-            if record.args.highsignal_pca_components_kept == 1.0:
-                reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
+            if record.args.highsignal_pca_components_kept == 0.99:
+                # reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
+                reference_weights[record.args.num_train_samples ] = record.model.flatten()
                  
             # train_pars["target_size"].extend( [record["target_size"] ])
             # train_pars["lr"].append(f'{record.args.lr}') 
