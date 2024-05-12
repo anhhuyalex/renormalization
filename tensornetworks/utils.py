@@ -2064,9 +2064,9 @@ def shuffled_pca(
             # print (record.model)
             train_pars["weight_norm"].extend( [ np.linalg.norm(record.model.flatten(), ord=2).item() ])
             # print("record.args is_inverse_transform",record.args.is_inverse_transform)
-            if record.args.highsignal_pca_components_kept == 0.99:
-                # reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
-                reference_weights[record.args.num_train_samples ] = record.model.flatten()
+            # if record.args.highsignal_pca_components_kept == 0.99:
+            # reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
+            # reference_weights[record.args.num_train_samples ] = record.model.flatten()
                  
             # train_pars["target_size"].extend( [record["target_size"] ])
             # train_pars["lr"].append(f'{record.args.lr}') 
