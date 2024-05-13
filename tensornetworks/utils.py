@@ -2065,8 +2065,9 @@ def shuffled_pca(
             train_pars["weight_norm"].extend( [ np.linalg.norm(record.model.flatten(), ord=2).item() ])
             # print("record.args is_inverse_transform",record.args.is_inverse_transform)
             # if record.args.highsignal_pca_components_kept == 0.99:
-            # reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
-            # reference_weights[record.args.num_train_samples ] = record.model.flatten()
+            if record.args.num_train_samples == 60000:
+                # reference_weights[record.args.highsignal_pca_components_kept ] = record.model['1.weight'].flatten()
+                reference_weights[record.args.highsignal_pca_components_kept ] = record.model.flatten()
                  
             # train_pars["target_size"].extend( [record["target_size"] ])
             # train_pars["lr"].append(f'{record.args.lr}') 
@@ -2201,44 +2202,43 @@ def shuffled_pca(
     plt.xlabel("D")
     plt.ylabel("Weight norm")
     plt.show()
-    # train_pars = defaultdict(list)
-    # for _, f in enumerate(record_names[:num_runs_to_analyze]) :
-    #     try:
+    train_pars = defaultdict(list)
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        try:
             
-    #         record = torch.load(f, map_location="cpu") 
+            record = torch.load(f, map_location="cpu")  
+            train_pars["diff_from_full_weight"].append( np.linalg.norm(record.model.flatten() - reference_weights[record.args.highsignal_pca_components_kept], ord=2).item() )
+            train_pars["n_pca_components_kept"].append(record.args.highsignal_pca_components_kept)
+            # train_pars["diff_from_full_weight"].append( torch.linalg.norm(record.model['1.weight'].flatten() - reference_weights[record.args.num_train_samples], ord=2).item() )
             
-    #         # if (P_list is not None) and (record.args.num_hidden_features not in P_list):
-    #             # continue
-    #         # if record.args.num_hidden_features > 10000:
-    #             # continue
-    #         # if record.args.num_train_samples < 10:
-    #             # continue
-    #     except Exception as e: 
-    #         print(e)
-    #         continue 
+            train_pars["N"].append(record.args.num_train_samples)
+            # if record.args.highsignal_pca_components_kept == 1.0:
+                # reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
+            if record.args.num_train_samples == 60000:
+                # reference_weights[record.args.highsignal_pca_components_kept ] = record.model['1.weight'].flatten()
+                reference_weights[record.args.highsignal_pca_components_kept ] = record.model.flatten()
+        except Exception as e: 
+            print(e)
+            continue 
 
-    #     train_pars["n_pca_components_kept"].append(record.args.highsignal_pca_components_kept)
-    #     train_pars["diff_from_full_weight"].append( torch.linalg.norm(record.model['1.weight'].flatten() - reference_weights[record.args.num_train_samples], ord=2).item() )
-    #     train_pars["N"].append(record.args.num_train_samples)
-    #     if record.args.highsignal_pca_components_kept == 1.0:
-    #         reference_weights[record.args.num_train_samples ] = record.model['1.weight'].flatten()
         
-    # train_pars = pd.DataFrame.from_dict(train_pars)   
-    # train_pars["N"]=train_pars["N"].astype('category') 
-    # fig, ax = plt.subplots(figsize=(12, 8))
-    # sns.lineplot(x="n_pca_components_kept", y="diff_from_full_weight", data=train_pars, hue="N", marker="+",
-    #              palette="rocket")
+    train_pars = pd.DataFrame.from_dict(train_pars)   
+    train_pars["N"]=train_pars["N"].astype('category') 
+    train_pars["n_pca_components_kept"]=train_pars["n_pca_components_kept"].astype('category') 
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="N", y="diff_from_full_weight", data=train_pars, hue="n_pca_components_kept", marker="+",
+                 palette="rocket")
     # # plot both points and line
-    # sns.scatterplot(x="n_pca_components_kept", y="diff_from_full_weight", data=train_pars, hue="N", marker="+",
-    #             palette="rocket")
+    sns.scatterplot(x="N", y="diff_from_full_weight", data=train_pars, hue="n_pca_components_kept", marker="+",
+                palette="rocket")
     # # ax.set(  yscale="log")
-    # plt.title(f"Diff from full weight vs. D")
-    # plt.legend(loc=(1.04,0))
+    plt.title(f"Diff from full weight vs. N")
+    plt.legend(loc=(1.04,0))
     # # plt.legend([],[], frameon=False)
     
-    # plt.xlabel("D")
-    # plt.ylabel("Diff from full weight")
-    # plt.show()
+    plt.xlabel("N")
+    plt.ylabel("Diff from full weight")
+    plt.show()
 
     return train_pars 
  
