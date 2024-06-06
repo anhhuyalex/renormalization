@@ -268,10 +268,11 @@ def get_dataset(args):
     highsignal_pca_components_kept = int(args.highsignal_pca_components_kept * Xpca.shape[1]) 
     high_signal, low_signal = copy.deepcopy(Xpca[:,:highsignal_pca_components_kept]), copy.deepcopy(Xpca[:,highsignal_pca_components_kept:]) 
     if args.is_shuffle_signal == "True": # shuffling signal 
+        rng = np.random.default_rng(args.seed * 2)
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
-            np.random.shuffle(high_signal.T)
+            rng.shuffle(high_signal.T)
         else: # if using high signal (i.e. good coarse graining), shuffle the low signal
-            np.random.shuffle(low_signal.T) 
+            rng.shuffle(low_signal.T)
     elif args.is_shuffle_signal == "False": # if not shuffling signal, set signal to zero
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
             high_signal = np.zeros_like(high_signal)
@@ -305,10 +306,11 @@ def get_dataset(args):
     Xtestpca = pca.transform(Xtest)
     high_test_signal, low_test_signal = copy.deepcopy(Xtestpca[:,:highsignal_pca_components_kept]), copy.deepcopy(Xtestpca[:,highsignal_pca_components_kept:])
     if args.is_shuffle_signal == "True": # shuffling signal 
+        rng = np.random.default_rng(args.seed * 3)
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
-            np.random.shuffle(high_test_signal.T)
+            rng.shuffle(high_test_signal.T)
         else: # if using high signal (i.e. good coarse graining), shuffle the low signal
-            np.random.shuffle(low_test_signal.T)
+            rng.shuffle(low_test_signal.T)
     elif args.is_shuffle_signal == "False":
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
             high_test_signal = np.zeros_like(high_test_signal)
@@ -332,6 +334,13 @@ def get_dataset(args):
     else:
         Xtest = Xtestpca
     val_dataset = torch.utils.data.TensorDataset(torch.tensor(Xtest).float(), torch.tensor(ytest).long())
+    save_data = {
+        "X": X,
+        "y": y,
+        "Xtest": Xtest,
+        "ytest": ytest
+    }
+    utils.save_checkpoint(save_data, save_dir = "./cache", filename = f"{args.exp_name}_data.pth.tar")
 
     # Get a fixed subset of the training set
     rng = np.random.default_rng(args.seed)
@@ -351,7 +360,7 @@ def get_dataset(args):
         **train_kwargs)
 
     val_loader = torch.utils.data.DataLoader(
-        val_dataset, sampler=val_sampler, shuffle=(val_sampler is None), **test_kwargs)
+        val_dataset, sampler=val_sampler, shuffle=False, **test_kwargs)
     
     return train_loader, val_loader 
 
@@ -613,7 +622,11 @@ def train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, a
 
 def main():
     args = parser.parse_args()
-    
+    # Save parameters
+    args.exp_name = f"{args.fileprefix}" \
+                + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
+    print(f"saved to {args.save_dir}/{args.exp_name}" )
+
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     if use_cuda:
         device = torch.device("cuda")
@@ -627,10 +640,7 @@ def main():
 
     record = get_record(args)
     
-    # Save parameters
-    args.exp_name = f"{args.fileprefix}" \
-                + f"_rep_{datetime.datetime.now().timestamp()}.pth.tar"
-    print(f"saved to {args.save_dir}/{args.exp_name}" )
+    
     
 
     
