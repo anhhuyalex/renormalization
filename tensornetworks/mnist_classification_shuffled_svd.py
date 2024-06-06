@@ -334,13 +334,13 @@ def get_dataset(args):
     else:
         Xtest = Xtestpca
     val_dataset = torch.utils.data.TensorDataset(torch.tensor(Xtest).float(), torch.tensor(ytest).long())
-    save_data = {
-        "X": X,
-        "y": y,
-        "Xtest": Xtest,
-        "ytest": ytest
-    }
-    utils.save_checkpoint(save_data, save_dir = "./cache", filename = f"{args.exp_name}_data.pth.tar")
+#     save_data = {
+#         "X": X,
+#         "y": y,
+#         "Xtest": Xtest,
+#         "ytest": ytest
+#     }
+#     utils.save_checkpoint(save_data, save_dir = "./cache", filename = f"{args.exp_name}_data.pth.tar")
 
     # Get a fixed subset of the training set
     rng = np.random.default_rng(args.seed)
