@@ -83,15 +83,9 @@ parser.add_argument('--save_iter', default=100, type=int,
 parser.add_argument('--seed', default=100, type=int,  
                     help='seed') 
 parser.add_argument(
-            '--fileprefix', 
-            default="",
-            type=str, 
-            action='store')
+            '--fileprefix', default="", type=str, action='store')
 parser.add_argument(
-            '--save_dir', 
-            default="/scratch/gpfs/qanguyen/imagenet_info",
-            type=str, 
-            action='store')
+            '--save_dir', default="/scratch/gpfs/qanguyen/imagenet_info", type=str, action='store')
     
 def get_record(args):
     record = utils.dotdict(
@@ -143,45 +137,11 @@ def get_dataset(args):
                        'pin_memory': True}
         train_kwargs.update(cuda_kwargs)
         test_kwargs.update(cuda_kwargs)
-   
     
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        ])
-    if args.data == "mnist":
-        train_dataset = datasets.MNIST(root = "./data",
-                                        train = True,
-                                        transform = transform,
-                                        download = True
-                                        )
-        val_dataset = datasets.MNIST(root = "./data",
-                                            train = False,
-                                            transform = transform,
-                                            download = True
-                                            )
-    elif args.data == "random_normalized_gaussian":
-        rng = np.random.default_rng(args.seed)
-        train_dataset = rng.normal(size = (1000, 1000))
-    elif args.data == "fashionmnist":
-        train_dataset = datasets.FashionMNIST(root = "./data",
-                                        train = True,
-                                        transform = transform,
-                                        download = True
-                                        )
-        val_dataset = datasets.FashionMNIST(root = "./data",
-                                            train = False,
-                                            transform = transform,
-                                            download = True
-                                            )
-    else:
-        raise ValueError(f"Invalid dataset: got {args.data}")
     
     # get X, y
-     
-    X, y = zip(*[(dat,targ) for dat, targ in train_dataset]) # get all the training samples
-    print ("X", len(X))
-    X = np.stack([x.flatten() for x in X], axis=0)
-    rng = np.random.default_rng(args.seed)
+    rng = np.random.default_rng(args.seed) 
+    X = rng.normal(size = (60000, 1000))
     beta_0 = rng.normal(size = X.shape[1]) / 10 # initialize true beta * (X.shape[1] ** -0.5) 
     # y = np.concatenate( [np.expand_dims(yi, axis=0) for yi in y], axis=0)
     y = X @ beta_0 + rng.normal(size = X.shape[0]) * args.true_noise # add noise
@@ -194,10 +154,19 @@ def get_dataset(args):
     if args.is_shuffle_signal == "True": # shuffling signal 
         rng = np.random.default_rng(args.seed * 2)
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
-            rng.shuffle(high_signal.T)
+            # rng.shuffle(high_signal.T)
+            high_signal_shuffle_column = []
+            for col in range(high_signal.shape[1]):
+                high_signal_shuffle_column.append(rng.permutation(high_signal[:,col]))
+            high_signal = np.stack(high_signal_shuffle_column, axis=1)
         else: # if using high signal (i.e. good coarse graining), shuffle the low signal
             # print ("low_signal", low_signal.shape)
-            rng.shuffle(low_signal.T) 
+            # rng.shuffle(low_signal.T) 
+            # low_signal_shuffle_column = [ for col in range(low_signal.shape[1])]
+            low_signal_shuffle_column = []
+            for col in range(low_signal.shape[1]):
+                low_signal_shuffle_column.append(rng.permutation(low_signal[:,col]))
+            low_signal = np.stack(low_signal_shuffle_column, axis=1) 
             # print ("low_signal", low_signal.shape)
     elif args.is_shuffle_signal == "False": # if not shuffling signal, set signal to zero
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
@@ -223,7 +192,7 @@ def get_dataset(args):
         X = pca.inverse_transform(Xpca)
     else:
         X = Xpca
-    train_dataset = torch.utils.data.TensorDataset(torch.tensor(X).float(), torch.tensor(y).long())
+    train_dataset = torch.utils.data.TensorDataset(torch.tensor(X).float(), torch.tensor(y).float())
      
     Xtest, ytest = zip(*[(dat,targ) for dat, targ in val_dataset]) # get all the training samples
     Xtest = np.stack ([x.flatten() for x in Xtest], axis=0)
@@ -235,9 +204,15 @@ def get_dataset(args):
     if args.is_shuffle_signal == "True": # shuffling signal 
         rng = np.random.default_rng(args.seed * 3)
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
-            rng.shuffle(high_test_signal.T)
+            high_test_signal_shuffle_column = []
+            for col in range(high_test_signal.shape[1]):
+                high_test_signal_shuffle_column.append(rng.permutation(high_test_signal[:,col]))
+            high_test_signal = np.stack(high_test_signal_shuffle_column, axis=1)
         else: # if using high signal (i.e. good coarse graining), shuffle the low signal
-            rng.shuffle(low_test_signal.T)
+            low_test_signal_shuffle_column = []
+            for col in range(low_test_signal.shape[1]):
+                low_test_signal_shuffle_column.append(rng.permutation(low_test_signal[:,col]))
+            low_test_signal = np.stack(low_test_signal_shuffle_column, axis=1)
     elif args.is_shuffle_signal == "False":
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
             high_test_signal = np.zeros_like(high_test_signal)
@@ -269,7 +244,7 @@ def get_dataset(args):
     # }
     # utils.save_checkpoint(save_data, save_dir = "./cache", filename = f"{args.exp_name}_data.pth.tar")
 
-    val_dataset = torch.utils.data.TensorDataset(torch.tensor(Xtest).float(), torch.tensor(ytest).long())
+    val_dataset = torch.utils.data.TensorDataset(torch.tensor(Xtest).float(), torch.tensor(ytest).float())
 
     # Get a fixed subset of the training set
     rng = np.random.default_rng(args.seed)
@@ -346,6 +321,73 @@ def train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, a
     record["model"] = clf.coef_
     return model, criterion, record
 
+def train_torch(train_loader, val_loader, device, model, nonlinearity, args, record):
+    """
+    Train a linear model using L-BFGS using sklearn
+
+    :param device: the device to train on
+    :param model: the model being trained
+    :param nonlinearity: the nonlinearity used
+    :param args: the arguments
+    :param record: the record to save the metrics
+
+    :return: the trained model
+    """
+    # define loss function (criterion), optimizer, and learning rate scheduler
+    criterion = nn.CrossEntropyLoss().to(device)
+    
+    # if args.weight_decay == 0.0:
+    #     clf = LinearRegression() 
+    # else:
+    #     clf = Ridge(max_iter=1e12, 
+    #                         alpha = args.weight_decay
+    #                             ) 
+
+    # from sklearn.metrics import mean_squared_error
+    def fit(images, target): # linear regression 
+        # X.T @ y
+        XT_at_y = images.T @ target # shape: (num_features, )
+        # X.T @ X
+        XT_at_X = images.T @ images # shape: (num_features, num_features) 
+        XT_at_X_plus_lambdaI = XT_at_X + args.weight_decay * torch.eye(XT_at_X.shape[0]) # shape: (num_features, num_features)
+        # (X.T @ X)^-1 @ (X.T @ y)
+        clf = torch.linalg.solve(XT_at_X_plus_lambdaI, XT_at_y) # shape: (num_features, ) 
+        return clf
+
+    def predict(images, clf):
+        return images @ clf 
+    
+    def mean_squared_error(target, prediction):
+        return torch.mean((target - prediction) ** 2)
+    
+    def score(images, target, clf): 
+        # prediction = predict(images, clf)
+        # return torch.mean((target - prediction) ** 2) 
+        # u is the residual sum of squares ((y_true - y_pred)** 2).sum()
+        u = ((target - predict(images, clf)) ** 2).sum()
+        # v is the total sum of squares ((y_true - y_true.mean()) ** 2).sum()
+        v = ((target - target.mean()) ** 2).sum()
+        return 1 - u / v
+    
+    for i, (images, target) in enumerate(train_loader):
+        print ("images", images.shape, "target", target.shape)
+        images = images# .cpu().numpy()
+        target = target#.cpu().numpy()
+        clf = fit(images, target)
+        print ("clf", clf.shape)
+        record.metrics.train_mse[0] = mean_squared_error(target, predict(images, clf))
+        record.metrics.train_top1[0] = score(images, target, clf)
+         
+    for i, (images, target) in enumerate(val_loader):
+        images = images.cpu().numpy()
+        target = target.cpu().numpy()
+        record.metrics.test_mse[0] = mean_squared_error(target, clf.predict(images))
+        record.metrics.test_top1[0] = clf.score(images, target) 
+    print("train_mse", record.metrics.train_mse[0], "test_mse", record.metrics.test_mse[0], "train_top1", record.metrics.train_top1[0], "test_top1", record.metrics.test_top1[0])
+    record["model"] = clf.coef_
+    return model, criterion, record
+
+
 def main():
     args = parser.parse_args()
     
@@ -379,6 +421,10 @@ def main():
         val_losses, val_top1, val_top5 = validate_lbfgs(val_loader, model, args, nonlinearity, criterion, device)
     elif args.optimizer_type == "sklearn_lbfgs":
         model, criterion, record = train_sklearn_lbfgs(train_loader, val_loader, device, model, nonlinearity, args, record)
+        utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
+        return 
+    elif args.optimizer_type == "torch":
+        model, criterion, record = train_torch(train_loader, val_loader, device, model, nonlinearity, args, record)
         utils.save_checkpoint(record, save_dir = args.save_dir, filename = args.exp_name)
         return 
     else:

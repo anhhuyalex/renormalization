@@ -270,9 +270,17 @@ def get_dataset(args):
     if args.is_shuffle_signal == "True": # shuffling signal 
         rng = np.random.default_rng(args.seed * 2)
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
+            # high_signal_shuffle_column = []
+            # for col in range(high_signal.shape[1]):
+            #     high_signal_shuffle_column.append(rng.permutation(high_signal[:,col]))
+            # high_signal = np.stack(high_signal_shuffle_column, axis=1)
             rng.shuffle(high_signal.T)
         else: # if using high signal (i.e. good coarse graining), shuffle the low signal
-            rng.shuffle(low_signal.T)
+            # low_signal_shuffle_column = []
+            # for col in range(low_signal.shape[1]):
+            #     low_signal_shuffle_column.append(rng.permutation(low_signal[:,col]))
+            # low_signal = np.stack(low_signal_shuffle_column, axis=1) 
+            rng.shuffle(low_signal.T) 
     elif args.is_shuffle_signal == "False": # if not shuffling signal, set signal to zero
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
             high_signal = np.zeros_like(high_signal)
@@ -290,7 +298,11 @@ def get_dataset(args):
             std_low_signal = np.std(low_signal, axis=0) # shape: low_signal.shape[1] i.e. # of low components
             low_signal = [np.random.normal(means_low_signal[i], std_low_signal[i], low_signal.shape[0]) for i in range(low_signal.shape[1])]
             low_signal = np.stack(low_signal, axis=1)
-            print ("low_signal", low_signal.shape)
+            print ("low_signal", low_signal.shape) 
+    elif args.is_shuffle_signal == "ShuffleTogether":
+        pass 
+    else:
+        raise ValueError(f"Invalid shuffle signal: got {args.is_shuffle_signal}")
     Xpca = np.hstack([high_signal, low_signal]) 
     if args.is_inverse_transform == "True":
         X = pca.inverse_transform(Xpca)
@@ -308,8 +320,16 @@ def get_dataset(args):
     if args.is_shuffle_signal == "True": # shuffling signal 
         rng = np.random.default_rng(args.seed * 3)
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
+            # high_test_signal_shuffle_column = []
+            # for col in range(high_test_signal.shape[1]):
+            #     high_test_signal_shuffle_column.append(rng.permutation(high_test_signal[:,col]))
+            # high_test_signal = np.stack(high_test_signal_shuffle_column, axis=1)
             rng.shuffle(high_test_signal.T)
         else: # if using high signal (i.e. good coarse graining), shuffle the low signal
+            # low_test_signal_shuffle_column = []
+            # for col in range(low_test_signal.shape[1]):
+            #     low_test_signal_shuffle_column.append(rng.permutation(low_test_signal[:,col]))
+            # low_test_signal = np.stack(low_test_signal_shuffle_column, axis=1)
             rng.shuffle(low_test_signal.T)
     elif args.is_shuffle_signal == "False":
         if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), set the high signal to zero
@@ -328,7 +348,37 @@ def get_dataset(args):
             std_low_test_signal = np.std(low_test_signal, axis=0) # shape: low_signal.shape[1] i.e. # of low components
             low_test_signal = [np.random.normal(means_low_test_signal[i], std_low_test_signal[i], low_test_signal.shape[0]) for i in range(low_test_signal.shape[1])]
             low_test_signal = np.stack(low_test_signal, axis=1)
-    Xtestpca = np.hstack([high_test_signal, low_test_signal])
+    elif args.is_shuffle_signal == "ShuffleTogether":
+        rng = np.random.default_rng(args.seed * 3)
+        if args.is_high_signal_to_noise == "False": # if not using high signal (i.e. bad coarse graining), shuffle the high signal
+            # high_test_signal_shuffle_column = []
+            # for col in range(high_test_signal.shape[1]):
+            #     high_test_signal_shuffle_column.append(rng.permutation(high_test_signal[:,col]))
+            # high_test_signal = np.stack(high_test_signal_shuffle_column, axis=1)
+            rng.shuffle(high_test_signal.T)
+        elif args.is_high_signal_to_noise == "True": # if using high signal (i.e. good coarse graining), shuffle the low signal
+            # low_test_signal_shuffle_column = []
+            # for col in range(low_test_signal.shape[1]):
+            #     low_test_signal_shuffle_column.append(rng.permutation(low_test_signal[:,col]))
+            # low_test_signal = np.stack(low_test_signal_shuffle_column, axis=1)
+            rng.shuffle(low_test_signal.T)
+
+    else:
+        raise ValueError(f"Invalid shuffle signal: got {args.is_shuffle_signal}")
+    
+    # Random shuffle the dimensions 
+    if (args.is_shuffle_signal == "ShuffleTogether") and (args.is_high_signal_to_noise == "Random"):
+        rng = np.random.default_rng(args.seed * 3)
+        dimension_permutation = np.arange(Xtestpca.shape[1]) # shuffle the dimensions 
+        rng.shuffle(dimension_permutation)
+        unshuffled_dimensions, shuffled_dimensions = dimension_permutation[:highsignal_pca_components_kept], dimension_permutation[highsignal_pca_components_kept:]
+        high_test_signal = Xtestpca[:,unshuffled_dimensions]
+        low_test_signal = Xtestpca[:,shuffled_dimensions].copy() 
+        rng.shuffle(low_test_signal.T) # shuffle the low signal
+        Xtestpca[:,unshuffled_dimensions] = high_test_signal
+        Xtestpca[:,shuffled_dimensions] = low_test_signal 
+    else:
+        Xtestpca = np.hstack([high_test_signal, low_test_signal])
     if args.is_inverse_transform == "True":
         Xtest = pca.inverse_transform(Xtestpca)
     else:

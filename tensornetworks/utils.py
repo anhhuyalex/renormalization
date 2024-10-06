@@ -2032,7 +2032,8 @@ def shuffled_pca(
                hue_variable = "data_rescale",
                max_epoch = 0,
                num_runs_to_analyze=1000,
-               P_list = None
+               P_list = None,
+               signal="high"
 ):
     pd.set_option('display.max_rows', 1000)
     train_pars = defaultdict(list) 
@@ -2067,7 +2068,10 @@ def shuffled_pca(
             # train_pars["target_size"].extend( [record.args.target_size]) 
             # print(record)
             # w
-            train_pars["n_pca_components_kept"].extend( [(record.args.highsignal_pca_components_kept) ])
+            if signal == "Low":
+                train_pars["n_pca_components_kept"].extend( [(1 - record.args.highsignal_pca_components_kept) ])
+            else:
+                train_pars["n_pca_components_kept"].extend( [(record.args.highsignal_pca_components_kept) ])
             # train_pars["weight_norm"].extend( [ torch.linalg.norm(record.model['1.weight'].flatten(), ord=2).item() ])
             # print (record.model)
             if isinstance(record.model, OrderedDict):
@@ -2101,8 +2105,8 @@ def shuffled_pca(
             # train_pars["D"].extend([record.args.target_size]) 
             # N =  record.args.num_train_samples
             # P = record.args.num_hidden_features
-            # train_pars["N"].extend([record["num_train_samples"] ])
-            train_pars["N"].extend([str(record.args.num_train_samples)+", " + record.args.optimizer_type ])
+            train_pars["N"].extend([record.args.num_train_samples ])
+            # train_pars["N"].extend([str(record.args.num_train_samples)+", " + record.args.optimizer_type ])
             # train_pars["P,N"].extend([f'{P},{N}']/) 
             # train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
             # train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
@@ -2142,10 +2146,10 @@ def shuffled_pca(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # plot both points and line 
     sns.scatterplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Train loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2157,9 +2161,9 @@ def shuffled_pca(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+",
-                  palette= "Set3",legend=False)
+                  palette= "Paired",legend=False)
     plt.title(f"Train top1 vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -2170,9 +2174,9 @@ def shuffled_pca(
     
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+",
-                  palette= "Set3",legend=False)
+                  palette= "Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Test loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2184,9 +2188,9 @@ def shuffled_pca(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "log_test_loss", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "log_test_loss", data=train_pars, hue="N", marker="+",
-                  palette= "Set3",legend=False)
+                  palette= "Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Log Test loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2198,9 +2202,9 @@ def shuffled_pca(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+",
-                 palette= "Set3",legend=False)
+                 palette= "Paired",legend=False)
     plt.title(f"Test top1 vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -2209,12 +2213,15 @@ def shuffled_pca(
     plt.ylabel("Test top1")
     plt.show()
 
+    save_df = train_pars[ ["N", "n_pca_components_kept", "test_top1" ] ]
+    save_df.to_csv(f"./shuffled_pca_fashionmnist_top1.csv", index=False)
+
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "weight_norm", data=train_pars, hue="N", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # plot both points and line 
     sns.scatterplot(x="n_pca_components_kept",y= "weight_norm", data=train_pars, hue="N", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Weight norm vs. D")
     plt.legend(loc=(1.04,0))
@@ -2255,10 +2262,10 @@ def shuffled_pca(
     train_pars["n_pca_components_kept"]=train_pars["n_pca_components_kept"].astype('category') 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="N", y="diff_from_full_weight", data=train_pars, hue="n_pca_components_kept", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # # plot both points and line
     sns.scatterplot(x="N", y="diff_from_full_weight", data=train_pars, hue="n_pca_components_kept", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # # # ax.set(  yscale="log")
     plt.title(f"Diff from full weight vs. N")
     plt.legend(loc=(1.04,0))
@@ -2270,10 +2277,10 @@ def shuffled_pca(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept", y="diff_from_full_weight_by_N", data=train_pars, hue="N", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # # plot both points and line
     sns.scatterplot(x="n_pca_components_kept", y="diff_from_full_weight_by_N", data=train_pars, hue="N", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # # # ax.set(  yscale="log")
     plt.title(f"Diff from other runs by N vs. D")
     plt.legend(loc=(1.04,0))
@@ -2401,10 +2408,10 @@ def shuffled_pca_regression(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # plot both points and line 
     sns.scatterplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Train loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2416,9 +2423,9 @@ def shuffled_pca_regression(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "train_top1", data=train_pars, hue="N", marker="+",
-                  palette= "Set3",legend=False)
+                  palette= "Paired",legend=False)
     plt.title(f"Train top1 vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -2429,9 +2436,9 @@ def shuffled_pca_regression(
     
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "test_loss", data=train_pars, hue="N", marker="+",
-                  palette= "Set3",legend=False)
+                  palette= "Paired",legend=False)
     # plt.ylim(0, 1000)
     plt.title(f"Test loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2443,9 +2450,9 @@ def shuffled_pca_regression(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "log_test_loss", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "log_test_loss", data=train_pars, hue="N", marker="+",
-                  palette= "Set3",legend=False)
+                  palette= "Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Log Test loss vs. D")
     plt.legend(loc=(1.04,0))
@@ -2457,10 +2464,10 @@ def shuffled_pca_regression(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+",
-                 palette= "Set3")
+                 palette= "Paired")
     sns.scatterplot(x="n_pca_components_kept",y= "test_top1", data=train_pars, hue="N", marker="+",
-                 palette= "Set3",legend=False)
-    plt.ylim(-1, 1)
+                 palette= "Paired",legend=False)
+    # plt.ylim(-1, 1)
     plt.title(f"Test top1 vs. D")
     plt.legend(loc=(1.04,0))
     # plt.legend([],[], frameon=False)
@@ -2471,10 +2478,10 @@ def shuffled_pca_regression(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept",y= "weight_norm", data=train_pars, hue="N", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # plot both points and line 
     sns.scatterplot(x="n_pca_components_kept",y= "weight_norm", data=train_pars, hue="N", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # ax.set(  yscale="log")
     plt.title(f"Weight norm vs. D")
     plt.legend(loc=(1.04,0))
@@ -2515,10 +2522,10 @@ def shuffled_pca_regression(
     train_pars["n_pca_components_kept"]=train_pars["n_pca_components_kept"].astype('category') 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="N", y="diff_from_full_weight", data=train_pars, hue="n_pca_components_kept", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # # plot both points and line
     sns.scatterplot(x="N", y="diff_from_full_weight", data=train_pars, hue="n_pca_components_kept", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # # # ax.set(  yscale="log")
     plt.title(f"Diff from full weight vs. N")
     plt.legend(loc=(1.04,0))
@@ -2530,10 +2537,10 @@ def shuffled_pca_regression(
 
     fig, ax = plt.subplots(figsize=(12, 8))
     sns.lineplot(x="n_pca_components_kept", y="diff_from_full_weight_by_N", data=train_pars, hue="N", marker="+",
-                 palette="Set3")
+                 palette="Paired")
     # # plot both points and line
     sns.scatterplot(x="n_pca_components_kept", y="diff_from_full_weight_by_N", data=train_pars, hue="N", marker="+",
-                palette="Set3",legend=False)
+                palette="Paired",legend=False)
     # # # ax.set(  yscale="log")
     plt.title(f"Diff from other runs by N vs. D")
     plt.legend(loc=(1.04,0))
@@ -2544,6 +2551,187 @@ def shuffled_pca_regression(
     plt.show()
 
     return train_pars 
+ 
+def shuffled_regression(      
+               outdir = "",
+               exp_name = "",
+               hue_variable = "data_rescale",
+               max_epoch = 0,
+               num_runs_to_analyze=1000,
+               P_list = None,
+               signal="high"
+):
+    pd.set_option('display.max_rows', 1000)
+    train_pars = defaultdict(list) 
+    if isinstance(exp_name, list):
+        record_names = []
+        for exp_name_ in exp_name:
+            record_names.extend(glob.glob(f"{outdir}/{exp_name_}"))
+    else:
+        record_names = glob.glob(f"{outdir}/{exp_name}")
+    print ("P", P_list, "num runs", len(record_names), flush=True)
+    reference_weights={}
+    reference_weights_by_N = {}
+    for _, f in enumerate(record_names[:num_runs_to_analyze]) :
+        try:
+            
+            record = torch.load(f, map_location="cpu") 
+            # plt.hist(record.dataset.y)
+            # plt.hist(record.dataset.y_test)
+            # plt.show()
+            # w
+            
+            # if (P_list is not None) and (record.args.num_hidden_features not in P_list):
+                # continue
+            # if record.args.num_hidden_features > 10000:
+                # continue
+            if record.args.N == 1000:
+                continue
+        except Exception as e: 
+            print(e)
+            continue 
+        try:
+            # print (record)
+            # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"]) 
+            # epoch = max([int(i) for i in record.metrics.train_mse.keys() if i != "default"])  #1900
+            # for epoch in [max_epoch]:
+            # train_pars["target_size"].extend( [record.args.target_size]) 
+            # print(record)
+            # w
+            # if signal == "Low":
+            #     train_pars["n_pca_components_kept"].extend( [(1 - record.args.highsignal_pca_components_kept) ])
+            # else:
+            train_pars["n_pca_components_kept"].extend( [(record.args.D_visible / (record.args.D_visible + record.args.D_hidden)) ])
+            # train_pars["weight_norm"].extend( [ torch.linalg.norm(record.model['1.weight'].flatten(), ord=2).item() ])
+            # print (record.model)
+            # if isinstance(record.model, OrderedDict):
+            #     train_pars["weight_norm"].extend( [ torch.linalg.norm(record.model['1.weight'].flatten(), ord=2).item() ]) 
+            #     train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item() / 100.0 ) )
+            #     train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item() / 100.0 ) ) 
+            # else:
+            #     train_pars["weight_norm"].extend( [ np.linalg.norm(record.model.flatten(), ord=2).item() ])
+            #     train_pars["train_top1"].append( (record.metrics.train_top1[epoch].item()  ) )
+            #     train_pars["test_top1"].append( (record.metrics.test_top1[epoch].item()  ) ) 
+            # print("record.args is_inverse_transform",record.args.is_inverse_transform)
+            # if record.args.highsignal_pca_components_kept == 0.99:
+            # if record.args.num_train_samples == 60000:
+            #     # reference_weights[record.args.highsignal_pca_components_kept ] = record.model['1.weight'].flatten()
+            #     if isinstance(record.model, OrderedDict):
+            #         reference_weights[record.args.highsignal_pca_components_kept ] = record.model['1.weight'].flatten()
+            #     else:
+            #         reference_weights[record.args.highsignal_pca_components_kept ] = record.model.flatten()
+            # if isinstance(record.model, OrderedDict):
+            #     reference_weights_by_N[(record.args.num_train_samples, record.args.highsignal_pca_components_kept)] = record.model['1.weight'].flatten()
+            # else:
+            #     reference_weights_by_N[(record.args.num_train_samples, record.args.highsignal_pca_components_kept)] = record.model.flatten()
+            # train_pars["target_size"].extend( [record["target_size"] ])
+            # train_pars["lr"].append(f'{record.args.lr}') 
+            # train_pars["wd"].append(f'{record.args.weight_decay}') 
+            # print ('lr',record.args.lr)
+            # train_pars["P"].extend([ record.args.num_hidden_features ])
+            
+            # D = record.args.target_size #* record.args.target_size
+            # train_pars["D"].extend([record["target_size"] ])
+            # train_pars["D"].extend([record.args.target_size]) 
+            # N =  record.args.num_train_samples
+            # P = record.args.num_hidden_features
+            # train_pars["N"].extend([record["num_train_samples"] ])
+            train_pars["N"].extend([int(record.args.N) ])
+            train_pars["test_beta_visible"].extend([np.linalg.norm(record.metrics.test_beta_visible) ** 2 ])
+            # train_pars["P,N"].extend([f'{P},{N}']/) 
+            # train_pars["logP+logN"].extend([1/2*np.log(P/D) + 1/2*np.log(N/D) ])
+            # train_pars["logP-logN"].extend([ np.round (np.log(P/D) - np.log(N/D), 1) ])
+            # train_pars["logP/D"].extend([np.log( record.args.num_hidden_features / D) ])
+            # train_pars["logN/D"].extend([np.log( N / D) ])
+            # train_pars["epoch"].append(epoch)
+            train_pars["train_loss"].append( (record.metrics.train_mse ) )
+            # train_pars["train_loss"].append( (record["train_loss"]))
+            train_pars["test_mse"].append( (record.metrics.test_mse   ) )
+            train_pars["log_test_mse"].append( np.log10(record.metrics.test_mse   ) )
+            # train_pars["test_loss"].append ( (record["test_loss"]  ) )
+            # train_pars["train_top5"].append( (record.metrics.train_top5[epoch]  ) )
+            # train_pars["test_top5"].append( (record.metrics.test_top5[epoch].item()  ) )
+            # print ("record.metrics.train_top1", record.metrics.train_top1)
+            # print(record.metrics.test_top1 )
+            
+            # print ('P', record.args.num_hidden_features, "epoch", epoch, "train_loss", record.metrics.train_mse[epoch], "test_loss", record.metrics.test_mse[epoch], "train_top1", record.metrics.train_top1[epoch].item(), "nonlin", record.args.nonlinearity)
+            
+            # train_pars["test_top1"].append( (record["test_score"]  ) )
+            # train_pars["train_top1"].append( (record["train_score"]  ) )
+                
+                
+        except Exception as e: 
+            print(e )
+            raise ValueError
+        
+
+    # pd.set_option('display.max_rows', 2000)
+    train_pars = pd.DataFrame.from_dict(train_pars) 
+    # train_pars = train_pars.sort_values(["N","P","D",'test_loss'], ascending=True)
+    train_pars = train_pars.sort_values(["N", "n_pca_components_kept",'test_mse'], ascending=True)
+    train_pars["N"]=train_pars["N"].astype('category')
+    # display(train_pars)
+    # get unique Ps
+
+    # print ("unique Ps", train_pars["P"].unique()) 
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
+                 palette="Paired")
+    # plot both points and line 
+    sns.scatterplot(x="n_pca_components_kept",y= "train_loss", data=train_pars, hue="N", marker="+",
+                palette="Paired",legend=False)
+    # ax.set(  yscale="log")
+    plt.title(f"Train loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Train loss")
+    plt.show()
+ 
+    
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "test_mse", data=train_pars, hue="N", marker="+",
+                 palette= "Paired")
+    sns.scatterplot(x="n_pca_components_kept",y= "test_mse", data=train_pars, hue="N", marker="+",
+                  palette= "Paired",legend=False)
+    # ax.set(  yscale="log")
+    plt.title(f"Test loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Test loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="n_pca_components_kept",y= "log_test_mse", data=train_pars, hue="N", marker="+",
+                 palette= "Paired")
+    sns.scatterplot(x="n_pca_components_kept",y= "log_test_mse", data=train_pars, hue="N", marker="+",
+                  palette= "Paired",legend=False)
+    # ax.set(  yscale="log")
+    plt.title(f"Log Test loss vs. D")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Log Test loss")
+    plt.show()
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    sns.lineplot(x="test_beta_visible",y= "test_mse", data=train_pars, hue="N", marker="+",
+                 palette= "Paired")
+    sns.scatterplot(x="test_beta_visible",y= "test_mse", data=train_pars, hue="N", marker="+",
+                  palette= "Paired",legend=False)
+    # ax.set(  yscale="log")
+    plt.title(f"Test loss vs. signal retained")
+    plt.legend(loc=(1.04,0))
+    # plt.legend([],[], frameon=False)
+
+    plt.xlabel("D")
+    plt.ylabel("Test loss")
+    plt.show()
  
 
 import torchvision.datasets as datasets         
