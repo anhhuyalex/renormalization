@@ -26,7 +26,7 @@ import torchvision.transforms as transforms
 from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import Subset
 import attention
-import webdataset as wds
+# import webdataset as wds
 
 import datetime
 import utils
@@ -151,7 +151,7 @@ print("args:\n",vars(args))
 if local_rank==0 and args.wandb_log: # only use main process for wandb logging
     print(f"wandb {args.wandb_project} run")
     wandb.login(host='https://stability.wandb.io') # need to configure wandb environment beforehand
-    wandb_model_name = f"{args.fileprefix}_K_{args.K}_num_tasks_{args.num_tasks}"
+    wandb_model_name = f"{args.fileprefix}_K_{args.K}_D_{args.D}_L_{args.len_context}_hidden_{args.num_hidden_features}_coarse_{args.coarse_graining}"
     wandb_config = vars(args)
     
     print("wandb_id:",wandb_model_name)
@@ -187,6 +187,7 @@ class Sequence(torch.utils.data.Dataset):
         self.true_betas = true_betas
         self.K = K 
         self.D = D
+        self.len_data = len_data
         
     def __len__(self):
         return self.len_data
@@ -285,14 +286,16 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
                 # true_beta: shape (B, D)
                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, :args.D_visible] # sort each row of true_beta by absolute value, shape (B, D_visible)
                 test_beta_visible = true_beta[argsort_beta_visible] # take bottom D_visible betas, shape (B, D_visible)
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2))                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5)
+                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
+                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5)
                 x_test_visible = seq[:, -1, :-1].squeeze(1)[argsort_beta_visible] # shape (B, D_visible)
                 # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
                 target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) + torch.randn_like(target) * sigma_test_xi # shape (B, 1)
             elif coarse_graining == "abstop":
                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, -args.D_visible:] # sort each row of true_beta by absolute value, shape (B, D_visible)
                 test_beta_visible = true_beta[argsort_beta_visible] # take top D_visible betas, shape (B, D_visible) 
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2))                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5)
+                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
+                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5)
                 x_test_visible = seq[:, -1, :-1].squeeze(1)[argsort_beta_visible] # shape (B, D_visible)
                 # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
                 target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) + torch.randn_like(target) * sigma_test_xi # shape (B, 1)
