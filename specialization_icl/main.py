@@ -92,12 +92,13 @@ parser.add_argument('--SLURM_ARRAY_TASK_ID', default=1, type=int,
                     help='SLURM_ARRAY_TASK_ID')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')  
-parser.add_argument('--D', default=63, type=int, 
-                    help='number of features in each input')
+parser.add_argument('--D_sum', default=1000, type=int, help='number of visible+ hidden features')
+parser.add_argument('--D_visible_frac', default=1.0, type=float, help='fraction of features visible') 
 parser.add_argument('--K', default=1, type=int, 
                     help='number of tasks')
 parser.add_argument('--coarse_graining', default="abstop", type=str,
                     help='coarse graining method')
+parser.add_argument('--sigma_xi', default=1.0, type=float, help='noise level')
 parser.add_argument(
             '--fileprefix', 
             default="",
@@ -124,6 +125,7 @@ if utils.is_interactive():
 else:
     args = parser.parse_args()
 
+args.D_visible = int(args.D_visible_frac * args.D_sum)
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -151,7 +153,7 @@ print("args:\n",vars(args))
 if local_rank==0 and args.wandb_log: # only use main process for wandb logging
     print(f"wandb {args.wandb_project} run")
     wandb.login(host='https://stability.wandb.io') # need to configure wandb environment beforehand
-    wandb_model_name = f"{args.fileprefix}_K_{args.K}_D_{args.D}_L_{args.len_context}_hidden_{args.num_hidden_features}_coarse_{args.coarse_graining}"
+    wandb_model_name = f"{args.fileprefix}_K_{args.K}_D_{args.D_sum}_L_{args.len_context}_hidden_{args.num_hidden_features}_coarse_{args.coarse_graining}"
     wandb_config = vars(args)
     
     print("wandb_id:",wandb_model_name)
@@ -176,15 +178,16 @@ else:
 class Sequence(torch.utils.data.Dataset):
     def __init__(self, K, D,  
                  len_context = 1,
-                len_data = 60000):
+                len_data = 60000, skip_generating_betas=False):
 
         # if K < 40000:
         self.len_context = len_context
         self.D = D
     
         # x = rng.standard_normal((K, D)) * (1.0 / np.sqrt(D)) # shape: (K, D) 
-        true_betas = torch.randn((K, D)) * (1.0 / np.sqrt(D)) # shape: (K, D)
-        self.true_betas = true_betas
+        if skip_generating_betas == False:
+            true_betas = torch.randn((K, D)) * (10.0 / np.sqrt(D)) # shape: (K, D)
+            self.true_betas = true_betas
         self.K = K 
         self.D = D
         self.len_data = len_data
@@ -194,15 +197,16 @@ class Sequence(torch.utils.data.Dataset):
 
     def __getitem__(self, task: int):
         task_ind = torch.randint(0, self.K, (1,)).item()
-        beta_incontext = self.true_betas[task_ind] # shape: (1, D)
+        beta_incontext = self.true_betas[task_ind].unsqueeze(1) # shape: (D, 1)
         x = torch.randn((self.len_context, self.D)) * (1.0 / np.sqrt(self.D)) # shape: (self.len_context, D) 
-        y = torch.matmul(x, beta_incontext.T) # shape: (self.len_context, 1) 
+        noise = torch.randn((self.len_context, 1)) * args.sigma_xi
+        y = torch.matmul(x, beta_incontext) + noise
+
         # concat x and y 
         samples = torch.cat([x, y], axis = 1) # shape: (self.len_context, D+1)
-        xtest = torch.randn((1, self.D)) * (1.0 / np.sqrt(self.D)) # test x
-        ytest = torch.matmul(xtest, beta_incontext.T) 
-        test_samples = torch.cat([xtest, 0], axis = 1) # test samples, shape (1, D+1)
-        samples = torch.cat([samples, test_samples], axis = 0) # shape: (self.len_context+1, D+1)
+        ytest = samples[-1, -1].clone() 
+        samples[-1, -1] = 0.0 # remove ytest from samples 
+         
           
         return samples.type(torch.float32), ytest.type(torch.float32), beta_incontext.type(torch.float32)  
 
@@ -214,7 +218,7 @@ importlib.reload(attention)
 # define the model, optimizer, and scheduler, and criterion
 if args.arch == "causal_transformer_embed":
     nheads = 1 # np.clip(args.num_hidden_features // 8, 1, 8)
-    model = attention.CausalTransformerOneMinusOneEmbed(x_dim=args.D+1,                   
+    model = attention.CausalTransformerOneMinusOneEmbed(x_dim=args.D_sum+1,                   
                                   mlp_dim=args.num_hidden_features
                                   ).to(device)
 
@@ -248,12 +252,12 @@ if use_cuda:
     train_kwargs.update(cuda_kwargs)
     test_kwargs.update(cuda_kwargs)
 
-train_dataset = Sequence(K=args.K, D=args.D, len_context=args.len_context) 
-# iwl_dataset = Sequence(K=args.K, D=args.D, len_context=args.len_context, len_data = 1000)
+train_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context) 
+# iwl_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000)
 # iwl_dataset.true_betas = train_dataset.true_betas
-icl_test_dataset = Sequence(K=args.K, D=args.D, len_context=args.len_context, len_data = 1000)
+icl_test_dataset = Sequence(K=1000, D=args.D_sum, len_context=args.len_context, len_data = 1000)
 
-iwl_test_dataset = Sequence(K=args.K, D=args.D, len_context=args.len_context, len_data = 1000)
+iwl_test_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000, skip_generating_betas = True)
 iwl_test_dataset.true_betas = train_dataset.true_betas
 
 train_sampler = None
@@ -280,28 +284,42 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
     model.eval() # switch to eval mode
     
     with torch.no_grad():
-        for i, (seq, target, true_beta) in enumerate(val_loader):
-            seq, target = seq.to(device), target.to(device)
+        for i, (seq, target, _true_beta) in enumerate(val_loader):
+            seq, target, _true_beta = seq.to(device), target.to(device), _true_beta.to(device)
             if coarse_graining == "absbot":
                 # true_beta: shape (B, D)
+                true_beta = _true_beta.squeeze(2)
                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, :args.D_visible] # sort each row of true_beta by absolute value, shape (B, D_visible)
-                test_beta_visible = true_beta[argsort_beta_visible] # take bottom D_visible betas, shape (B, D_visible)
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
-                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5)
-                x_test_visible = seq[:, -1, :-1].squeeze(1)[argsort_beta_visible] # shape (B, D_visible)
-                # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
-                target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) + torch.randn_like(target) * sigma_test_xi # shape (B, 1)
+                test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
+                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)).squeeze(2).squeeze(1) \
+                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2).squeeze(1), 0.5)
+                x_test_visible = torch.gather(seq[:, -1, :-1].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible)
+                target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
+                target = target.squeeze(1)
+                target += torch.randn(target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+                
             elif coarse_graining == "abstop":
+                true_beta = _true_beta.squeeze(2) # shape (B, D)
+                # print ("true_beta", true_beta.shape)
                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, -args.D_visible:] # sort each row of true_beta by absolute value, shape (B, D_visible)
-                test_beta_visible = true_beta[argsort_beta_visible] # take top D_visible betas, shape (B, D_visible) 
+                
+                # test_beta_visible = true_beta[argsort_beta_visible] # take top D_visible betas, shape (B, D_visible) 
+                test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
+                # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
                 sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
-                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5)
-                x_test_visible = seq[:, -1, :-1].squeeze(1)[argsort_beta_visible] # shape (B, D_visible)
+                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5).squeeze(2).squeeze(1) # shape (B)
+                # x_test_visible = seq[:, -1, :-1].squeeze(1)[argsort_beta_visible] # shape (B, D_visible)
+                x_test_visible = torch.gather(seq[:, -1, :-1].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
+                
                 # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
-                target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) + torch.randn_like(target) * sigma_test_xi # shape (B, 1)
+                target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
+                target = target.squeeze(1)
+                target += torch.randn(target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+                
             elif coarse_graining == "standard":
                 pass
-            output = model(seq)  
+            output = model(seq).squeeze(1)
+            # print ("coarse_graining", coarse_graining, "output", output.shape, "target", target.shape)
             loss = criterion(output, target)
             test_losses.update(loss.item(), target.size(0))
             # acc1 = utils.accuracy(output, seq_target, topk=[1])
@@ -317,8 +335,13 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
 
 import pickle
 # import matplotlib.pyplot as plt
-exp_name = f"./cache/{args.wandb_group_name}_K_{args.K}_{time.time()}.pkl"
+exp_name = f"./cache/{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_D_{args.D_sum}_L_{args.len_context}_hidden_{args.num_hidden_features}_coarse_{args.coarse_graining}_{time.time()}.pkl"
 for epoch in range(args.epochs):
+    icl_indistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining="standard")
+    icl_outdistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
+    iwl_indistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining="standard")
+    iwl_outdistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
+    
     model.train() # switch to train mode
     losses = utils.AverageMeter('Loss', ':.4e')
     top1 = utils.AverageMeter('Acc@1', ':6.2f')
@@ -327,8 +350,9 @@ for epoch in range(args.epochs):
     for i, (seq, target, _) in enumerate(train_loader):
         optimizer.zero_grad()
         seq, target = seq.to(device), target.to(device)
-        output = model(seq) 
+        output = model(seq).squeeze(1)
         loss = criterion(output, target)
+        # print ("output", output.shape, target.shape, loss)
         loss.backward()
         optimizer.step()
         losses.update(loss.item(), target.size(0)) 
@@ -345,10 +369,6 @@ for epoch in range(args.epochs):
     # print("output",  torch.argsort(output, dim=-1), "target", target )
     # print("Current average loss", losses.avg, top1.avg, "epoch", epoch) 
     # seen_val_losses, seen_val_top1 = validate_gradient_descent(icl_loader, seen_projs_permutations_loader, model, args, criterion, device)
-    icl_indistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining="standard")
-    icl_outdistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
-    iwl_indistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining="standard")
-    iwl_outdistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
     
     # Compute unseen val loss
     # unseen_val_losses, unseen_val_top1 = validate_gradient_descent(icl_loader, seen_projs_permutations_loader, model, args, criterion, device)
