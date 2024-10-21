@@ -223,20 +223,23 @@ class CausalTransformerOneMinusOneEmbed(nn.Module):
         super().__init__()    
         if is_layer_norm == "True":
             self.to_embedding = nn.Sequential(
-                nn.LayerNorm(x_dim),
+                nn.LayerNorm(x_dim), 
+                nn.Linear(x_dim, mlp_dim),
+                nn.LayerNorm(mlp_dim),
+
             )
         else:
             self.to_embedding = nn.Identity()
         # self.qkv = nn.Linear(model_size, model_size * 3)
-        self.qkv = nn.Linear(x_dim, x_dim * 3, bias = False)
+        self.qkv = nn.Linear(mlp_dim, mlp_dim * 3, bias = False)
          
         self.mlp_dim = mlp_dim 
         if self.mlp_dim < 0:
             self.mlp = nn.Identity()
         else:
             self.mlp = nn.Sequential(
-                # nn.LayerNorm(x_dim),
-                nn.Linear(x_dim, mlp_dim),
+                nn.LayerNorm(mlp_dim),
+                nn.Linear(mlp_dim, mlp_dim),
                 nn.ReLU(),
                 nn.Linear(mlp_dim, mlp_dim),
                 nn.ReLU(),
@@ -254,5 +257,63 @@ class CausalTransformerOneMinusOneEmbed(nn.Module):
         sa = torch.matmul(attn, v) # shape: (B, 1, D)
         output = self.mlp(x[:, -1, :] + sa[:, -1, :]) # shape: (B, 1)
         # print ("output", output.shape, output)
+        return output 
+ 
+class MultiLayerTransformer(nn.Module):
+    def __init__(self, x_dim,  mlp_dim,  
+                 is_layer_norm = "True",
+                 num_layers = 12,
+                 device=None, dtype=None) -> None:
+
+        super().__init__()    
+        if is_layer_norm == "True":
+            self.to_x_embedding = nn.Sequential(
+                nn.LayerNorm(x_dim), 
+                nn.Linear(x_dim, mlp_dim),
+            )
+            self.to_y_embedding = nn.Sequential(
+                nn.Linear(1, mlp_dim),
+            )
+        else:
+            self.to_embedding = nn.Identity()
+        self.qkv_dim = mlp_dim * 2
+        self.num_layers = num_layers
+        self.mlp_dim_layernorm = nn.LayerNorm(self.qkv_dim)
+        self.qkvs = nn.ModuleList([nn.Linear(self.qkv_dim, self.qkv_dim * 3, bias = False) for _ in range(num_layers)])
+        self.mlps = nn.ModuleList([nn.Sequential(
+                nn.LayerNorm(self.qkv_dim),
+                nn.Linear(self.qkv_dim, self.qkv_dim),
+                nn.ReLU(),
+                nn.Linear(self.qkv_dim, self.qkv_dim),
+            ) for _ in range(num_layers)])
+    
+        self.output = nn.Linear(self.qkv_dim, 1)
+ 
+
+    def forward(self, x: torch.Tensor,
+                target: torch.Tensor = None) -> torch.Tensor:
+        x = self.to_x_embedding(x) # shape: (B, N, D)
+        new_target = target.clone()
+        new_target[:, -1, :] = 0
+        new_target = self.to_y_embedding(new_target) # shape: (B, 1, D) 
+        # zero out the last element of the target
+        
+        x = torch.cat((x, new_target), dim=-1) # shape: (B, N, 2*D)
+        for lay in range(self.num_layers):
+            q, k, v = self.qkvs[lay](self.mlp_dim_layernorm(x)).chunk(3, dim=-1) # for head: Q = W_q @ x, K = W_k @ x, V = W_v @ x
+            sa = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+            x = x + sa 
+            mlp_output = self.mlps[lay](self.mlp_dim_layernorm(x))
+            x = x + mlp_output
+        # q, k, v = self.qkv(x).chunk(3, dim=-1) # for head: Q = W_q @ x, K = W_k @ x, V = W_v @ x
+        # scale_factor = 1.0 / (q.size(1) ** 0.5)
+        # # sa = F.scaled_dot_product_attention(q, k, v, is_causal=True, scale=1.0) 
+        # qlast_dot_kT = torch.matmul(q[:, [-1], :], k.transpose(-2, -1)) * scale_factor # shape: (B, 1, N)
+        # attn = F.softmax(qlast_dot_kT, dim=-1) # shape: (B, 1, N)
+        # sa = torch.matmul(attn, v) # shape: (B, 1, D)
+        # output = self.mlp(x[:, -1, :] + sa[:, -1, :]) # shape: (B, 1)
+        # print ("output", output.shape, output)
+        output = self.output(self.mlp_dim_layernorm(x[:, -1, :]))
+
         return output 
  

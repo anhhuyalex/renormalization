@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[108]:
 
 
 import argparse
@@ -41,7 +41,7 @@ import sys
 import glob
 
 
-# In[ ]:
+# In[109]:
 
 
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
@@ -86,6 +86,8 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='mlp',
                     help='model architecture (default: mlp)')
 parser.add_argument('--num_hidden_features', default=1, type=int,
                     help='num_hidden_features')
+parser.add_argument('--num_layers', default=1, type=int,
+                    help='num_layers in transformer')
 parser.add_argument('--len_context', default=1, type=int,
                     help='number of in-context images in sequence')
 parser.add_argument('--SLURM_ARRAY_TASK_ID', default=1, type=int,
@@ -110,7 +112,7 @@ parser.add_argument(
 if utils.is_interactive():
     arch = "pytorch_transformer"
     # arch = "transformer"
-    jupyter_args = f"--data ./cache --fileprefix transformer1layer_lr_0.01_no_posenc --position_encoding False --SLURM_ARRAY_TASK_ID 5 --batch-size 128 --optimizer SGD --lr 0.01 --wd 1e-10 --epsilon 0.0 --burstiness 1 --init_scale_qkv 1.0 --scale_target 1.0 --is_all_tasks_seen True --is_equalize_classes True --L 2  --epochs 1000 --arch causal_transformer_embed --is_layer_norm True --num_hidden_features 512 --is_train_random_length_seqs False --len_context 100 --wandb_log --wandb_project l2l --is_temperature_fixed False --wandb_group_name gmm_sep19_exp5_equalize0s1"
+    jupyter_args = f"--data ./cache --fileprefix transformer1layer  --SLURM_ARRAY_TASK_ID 5 --batch-size 128 --optimizer SGD --lr 1e-2 --wd 1e-10  --epochs 200 --arch gpt --num_hidden_features 256 --num_layers 1 --len_context 16 --K 100 --D_sum 8 --D_visible_frac 3 --sigma_xi 0.5 --coarse_graining abstop --no-wandb_log --wandb_project renormalization --wandb_group_name t"
     
     print(jupyter_args)
     jupyter_args = jupyter_args.split()
@@ -125,7 +127,7 @@ if utils.is_interactive():
 else:
     args = parser.parse_args()
 
-args.D_visible = int(args.D_visible_frac * args.D_sum)
+args.D_visible = int(args.D_visible_frac) # just using D=8 max(int(args.D_visible_frac * args.D_sum),1)
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -172,12 +174,13 @@ else:
     }
 
 
-# In[ ]:
+# In[103]:
 
 
 class Sequence(torch.utils.data.Dataset):
     def __init__(self, K, D,  
                  len_context = 1,
+                 scale=0.5,
                 len_data = 60000, skip_generating_betas=False):
 
         # if K < 40000:
@@ -185,8 +188,9 @@ class Sequence(torch.utils.data.Dataset):
         self.D = D
     
         # x = rng.standard_normal((K, D)) * (1.0 / np.sqrt(D)) # shape: (K, D) 
+        self.scale = scale
         if skip_generating_betas == False:
-            true_betas = torch.randn((K, D)) * (10.0 / np.sqrt(D)) # shape: (K, D)
+            true_betas = torch.randn((K, D)) * scale #* (1.0 / np.sqrt(D)) # shape: (K, D)
             self.true_betas = true_betas
         self.K = K 
         self.D = D
@@ -198,29 +202,39 @@ class Sequence(torch.utils.data.Dataset):
     def __getitem__(self, task: int):
         task_ind = torch.randint(0, self.K, (1,)).item()
         beta_incontext = self.true_betas[task_ind].unsqueeze(1) # shape: (D, 1)
-        x = torch.randn((self.len_context, self.D)) * (1.0 / np.sqrt(self.D)) # shape: (self.len_context, D) 
+        x = torch.randn((self.len_context, self.D)) * self.scale  # shape: (self.len_context, D) * (1.0 / np.sqrt(self.D))
         noise = torch.randn((self.len_context, 1)) * args.sigma_xi
         y = torch.matmul(x, beta_incontext) + noise
 
         # concat x and y 
-        samples = torch.cat([x, y], axis = 1) # shape: (self.len_context, D+1)
-        ytest = samples[-1, -1].clone() 
-        samples[-1, -1] = 0.0 # remove ytest from samples 
+        samples = x#torch.cat([x, y], axis = 1) # shape: (self.len_context, D+1)
+        # ytest = samples[-1, -1].clone() 
+        # samples[-1, -1] = 0.0 # remove ytest from samples 
          
           
-        return samples.type(torch.float32), ytest.type(torch.float32), beta_incontext.type(torch.float32)  
+        return samples.type(torch.float32), y.type(torch.float32), beta_incontext.type(torch.float32)  
 
 
-# In[ ]:
+# In[104]:
 
 
-importlib.reload(attention)
+# importlib.reload(gpt)
+import gpt
+criterion = nn.MSELoss().to(device)
 # define the model, optimizer, and scheduler, and criterion
 if args.arch == "causal_transformer_embed":
     nheads = 1 # np.clip(args.num_hidden_features // 8, 1, 8)
-    model = attention.CausalTransformerOneMinusOneEmbed(x_dim=args.D_sum+1,                   
-                                  mlp_dim=args.num_hidden_features
+    model = attention.MultiLayerTransformer(x_dim=args.D_sum,                   
+                                  mlp_dim=args.num_hidden_features, 
+                                  num_layers = args.num_layers
                                   ).to(device)
+if args.arch == "gpt":
+    import gpt 
+    config = gpt.GPTConfig(
+        block_size = args.len_context,
+        input_size = args.D_sum,
+    )
+    model = gpt.GPT(config, criterion).to(device)
 
 if args.optimizer == 'SGD': 
     optimizer = torch.optim.SGD(model.parameters(),  
@@ -235,10 +249,9 @@ elif args.optimizer == 'Adam':
 else:
     raise ValueError("optimizer not recognized")
 
-criterion = nn.MSELoss().to(device)
 
 
-# In[ ]:
+# In[105]:
 
 
 # define the dataset
@@ -273,7 +286,7 @@ iwl_test_loader = torch.utils.data.DataLoader(iwl_test_dataset,
                                             **test_kwargs)
 
 
-# In[ ]:
+# In[106]:
 
 
 def validate_gradient_descent(epoch, val_loader, model, args, criterion, device, coarse_graining="standard"):
@@ -293,34 +306,41 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
                 test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
                 sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)).squeeze(2).squeeze(1) \
                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2).squeeze(1), 0.5)
-                x_test_visible = torch.gather(seq[:, -1, :-1].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible)
-                target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
-                target = target.squeeze(1)
-                target += torch.randn(target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+                x_test_visible = torch.gather(seq[:, -1, :].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible)
+                new_target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
+                new_target = new_target.squeeze(1)
+                new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+                target[:, -1, 0] = new_target
                 
             elif coarse_graining == "abstop":
                 true_beta = _true_beta.squeeze(2) # shape (B, D)
                 # print ("true_beta", true_beta.shape)
                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, -args.D_visible:] # sort each row of true_beta by absolute value, shape (B, D_visible)
-                
                 # test_beta_visible = true_beta[argsort_beta_visible] # take top D_visible betas, shape (B, D_visible) 
                 test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
                 # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
                 sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)), 0.5).squeeze(2).squeeze(1) # shape (B)
                 # x_test_visible = seq[:, -1, :-1].squeeze(1)[argsort_beta_visible] # shape (B, D_visible)
-                x_test_visible = torch.gather(seq[:, -1, :-1].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
+                x_test_visible = torch.gather(seq[:, -1, :].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
                 
                 # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
-                target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
-                target = target.squeeze(1)
-                target += torch.randn(target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+                new_target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
+                new_target = new_target.squeeze(1)
+                new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+                # print ("new_target", new_target, "sigma_test_xi", sigma_test_xi )
+                target[:, -1, 0] = new_target
+
                 
             elif coarse_graining == "standard":
                 pass
-            output = model(seq).squeeze(1)
-            # print ("coarse_graining", coarse_graining, "output", output.shape, "target", target.shape)
-            loss = criterion(output, target)
+            seq, target = seq.to(device), target.to(device)
+            # print ("seq", seq.shape, "target", target.shape)
+            output = model(seq, target) 
+            # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
+            preds = output[:, 0::2, :]
+            # print ("preds", preds.shape, "target", target[:, :, :].shape)
+            loss = criterion(preds, target)
             test_losses.update(loss.item(), target.size(0))
             # acc1 = utils.accuracy(output, seq_target, topk=[1])
             # test_top1[seq_len].update(acc1[0], target.size(0))
@@ -330,7 +350,7 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
     return test_losses 
 
 
-# In[ ]:
+# In[107]:
 
 
 import pickle
@@ -344,15 +364,30 @@ for epoch in range(args.epochs):
     
     model.train() # switch to train mode
     losses = utils.AverageMeter('Loss', ':.4e')
+    ridge_losses = utils.AverageMeter('Ridge Loss', ':.4e')
     top1 = utils.AverageMeter('Acc@1', ':6.2f')
 
  
     for i, (seq, target, _) in enumerate(train_loader):
         optimizer.zero_grad()
         seq, target = seq.to(device), target.to(device)
-        output = model(seq).squeeze(1)
-        loss = criterion(output, target)
-        # print ("output", output.shape, target.shape, loss)
+        # print ("seq", seq.shape, "target", target.shape)
+        output = model(seq, target) 
+        # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
+        preds = output[:, 0::2, :]
+        # print ("preds", preds.shape, "target", target[:, :, :].shape)
+        loss = criterion(preds, target)
+        
+        # batch_first_seq, batch_first_target = seq[0, :-1, :], target[0, :-1, 0]
+        # print ("batch_first_seq", batch_first_seq.shape, "batch_first_target", batch_first_target.shape)
+        # ridge = utils.Ridge(alpha=1e-9,fit_intercept=True) 
+        # ridge.fit(batch_first_seq, batch_first_target)
+        # val_loss = criterion(ridge.predict(seq[0, [-1], :]), target[0, -1, 0])
+        # print ("loss", loss, "ridge loss", val_loss, "pred", ridge.predict(seq[0, [-1], :]).shape)
+        # ridge_losses.update(val_loss.item(), 1) 
+        # compute ridge loss on first sequence
+        
+        
         loss.backward()
         optimizer.step()
         losses.update(loss.item(), target.size(0)) 
@@ -361,7 +396,7 @@ for epoch in range(args.epochs):
         # top1.update(acc1[0], target.size(0))
         # acc1 = torch.mean(((output.squeeze(1) * (seq_target*2-1)) > 0).float()).item()
         # top1.update(acc1, target.size(0))
- 
+    print ("loss" , loss)
     # step scheduler
     # scheduler.step()
 
@@ -390,15 +425,23 @@ for epoch in range(args.epochs):
  
     # save phi_xt_list_epoch 
 
-    # if epoch % 10 == 0:
-    #     if args.arch == "phenomenologicalcausal_transformer":
-    #         with open(f"./cache/{args.wandb_group_name}_betastd_{args.beta_std}_{time.time()}.pkl", "wb") as f:
-    #             pickle.dump(record, f)
-    #     else:
-    #         with open(exp_name, "wb") as f:
-    #             pickle.dump(record, f)
+    if epoch % 10 == 0 and args.wandb_log != True:
+        with open(exp_name, "wb") as f:
+            pickle.dump(record, f)
   
 if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
+
+
+# In[ ]:
+
+
+
+
+
+# In[ ]:
+
+
+
 
