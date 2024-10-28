@@ -189,15 +189,16 @@ class GPT(nn.Module):
         self.config = config
         self.criterion = criterion
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Linear(config.input_size, config.n_embd),
-            target_emb = nn.Linear(config.output_size, config.n_embd),
+            wte = nn.Linear(config.input_size+1, # +1 for the label dimension
+                            config.n_embd, bias=config.bias),
+            # target_emb = nn.Linear(config.output_size, config.n_embd, bias=config.bias),
             # wpe = PositionalEncoding1D(config.n_embd),#, config.dropout, config.block_size),
             wpe = nn.Embedding(2*config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
-        self.lm_head = nn.Linear(config.n_embd, config.output_size, bias=False)
+        self.lm_head = nn.Linear(config.n_embd, config.output_size, bias=config.bias)
         # with weight tying when using torch.compile() some warnings get generated:
         # "UserWarning: functional_call was passed multiple values for tied weights.
         # This behavior is deprecated and will be an error in future versions"
@@ -234,32 +235,48 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def to_seq(self, idx, targets):
+        """
+        Convert the input and target tensors into a single sequence for the transformer.
+        Copied from https://github.com/mansheej/icl-task-diversity/blob/7c35803e68c49f94ac2e618ce4e1bc14470b771b/icl/utils.py#L25
+        """
+        batch_size, seq_len, n_dims = idx.shape
+        dtype = idx.dtype
+        # data = jnp.concatenate([jnp.zeros((batch_size, seq_len, 1), dtype=dtype), data], axis=2)
+        data = torch.cat([torch.zeros((batch_size, seq_len, 1), dtype=dtype, device=idx.device), idx], axis=2)
+        # targets = jnp.concatenate([targets[:, :, None], jnp.zeros((batch_size, seq_len, n_dims), dtype=dtype)], axis=2)
+        targets = torch.cat([targets, torch.zeros((batch_size, seq_len, n_dims), dtype=dtype, device=idx.device)], axis=2)
+        # seq = jnp.stack([data, targets], axis=2).reshape(batch_size, 2 * seq_len, n_dims + 1) 
+        idx = torch.stack([data, targets], axis=2).reshape(batch_size, 2 * seq_len, n_dims + 1)
+        return idx
+
     def forward(self, idx, targets):
         # import matplotlib.pyplot as plt
         device = idx.device
         b, t, d = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
+        idx = self.to_seq(idx, targets)
         pos = torch.arange(0, 2*t, dtype=torch.long, device=device) # shape (t)
 
         # forward the GPT model itself
         tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        target_embs = self.transformer.target_emb(targets[:,:-1,:]) # target embeddings of shape (b, t-1, n_embd) 
+        # target_embs = self.transformer.target_emb(targets[:,:-1,:]) # target embeddings of shape (b, t-1, n_embd) 
         # interleave the token embeddings and the target embeddings
-        emb = torch.zeros((b, 2*t, self.config.n_embd
-                           ), device=device) # shape (b, 2t-1, n_embd)
+        # emb = torch.zeros((b, 2*t, self.config.n_embd
+                        #    ), device=device) # shape (b, 2t-1, n_embd)
         # interleave the token embeddings and the target embeddings
-        emb[:,::2,:] = tok_emb
-        emb[:,1:(2*t-1):2,:] = target_embs
+        # emb[:,::2,:] = tok_emb
+        # emb[:,1:(2*t-1):2,:] = target_embs
         # print ("tok_emb", tok_emb.shape, "target_embs", target_embs.shape,emb [0,-1,:])
         # plt.imshow (tok_emb[0,:40,:30].detach().cpu().numpy())
         # plt.show()
         # plt.scatter (target_embs[0,:,0].detach().cpu().numpy(),target_embs[1,:,0].detach().cpu().numpy())
         # plt.show()
-        pos_emb = self.transformer.wpe(pos).unsqueeze(0) # position embeddings of shape (t, n_embd)
+        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
         # print ("pos_emb", pos_emb[:,:,-3], pos_emb[:,:,-1] )
         # plt.imshow (pos_emb[0].detach().cpu().numpy())
         # plt.show()
-        x = self.transformer.drop(emb + pos_emb)
+        x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
         x = self.transformer.ln_f(x)

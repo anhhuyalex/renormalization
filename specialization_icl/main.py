@@ -23,7 +23,7 @@ import torch.utils.data
 import torchvision.datasets as datasets
 import torchvision.models as models
 import torchvision.transforms as transforms
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, OneCycleLR
 from torch.utils.data import Subset
 import attention
 # import webdataset as wds
@@ -84,6 +84,8 @@ parser.add_argument('--wd', '--weight-decay', default=1e-5, type=float,
                     dest='weight_decay')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='mlp',
                     help='model architecture (default: mlp)')
+parser.add_argument('--gpt_bias', default="True", type=str,
+                    help='whether to include bias in GPT')
 parser.add_argument('--num_hidden_features', default=1, type=int,
                     help='num_hidden_features')
 parser.add_argument('--num_layers', default=1, type=int,
@@ -233,6 +235,9 @@ if args.arch == "gpt":
     config = gpt.GPTConfig(
         block_size = args.len_context,
         input_size = args.D_sum,
+        n_embd=args.num_hidden_features,
+        n_layer=args.num_layers,
+        bias = args.gpt_bias == "True"
     )
     model = gpt.GPT(config, criterion).to(device)
 
@@ -248,7 +253,12 @@ elif args.optimizer == 'Adam':
                             )
 else:
     raise ValueError("optimizer not recognized")
-
+iters_per_epoch = 1000
+# scheduler = StepLR(optimizer, step_size=50, gamma=0.7)
+scheduler = OneCycleLR(optimizer, max_lr=args.lr, 
+                       total_steps=args.epochs * iters_per_epoch, 
+                       pct_start=0.5,
+                       steps_per_epoch=iters_per_epoch, epochs=args.epochs)
 
 
 # In[105]:
@@ -264,8 +274,7 @@ if use_cuda:
                     'pin_memory': True}
     train_kwargs.update(cuda_kwargs)
     test_kwargs.update(cuda_kwargs)
-
-train_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context) 
+train_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = args.batch_size * iters_per_epoch)
 # iwl_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000)
 # iwl_dataset.true_betas = train_dataset.true_betas
 icl_test_dataset = Sequence(K=1000, D=args.D_sum, len_context=args.len_context, len_data = 1000)
@@ -292,13 +301,14 @@ iwl_test_loader = torch.utils.data.DataLoader(iwl_test_dataset,
 def validate_gradient_descent(epoch, val_loader, model, args, criterion, device, coarse_graining="standard"):
     # seq_lens = list(range(1, args.len_context+1, 5)) 
    
-    test_losses = utils.AverageMeter('Loss', ':.4e') 
+    test_losses = [utils.AverageMeter('Loss', ':.4e') for _ in range(args.len_context)]
     
     model.eval() # switch to eval mode
     
     with torch.no_grad():
         for i, (seq, target, _true_beta) in enumerate(val_loader):
             seq, target, _true_beta = seq.to(device), target.to(device), _true_beta.to(device)
+            B, N, D = seq.size()
             if coarse_graining == "absbot":
                 # true_beta: shape (B, D)
                 true_beta = _true_beta.squeeze(2)
@@ -339,9 +349,10 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
             output = model(seq, target) 
             # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
             preds = output[:, 0::2, :]
-            # print ("preds", preds.shape, "target", target[:, :, :].shape)
-            loss = criterion(preds, target)
-            test_losses.update(loss.item(), target.size(0))
+            
+            loss = (preds - target).pow(2).squeeze(-1).mean(dim=1) 
+            # print ("test preds", preds.shape, "test target", target.shape, "test loss", loss.shape)
+            [test_losses[_].update(loss[_].item(), target.size(0)) for _ in range(N)]
             # acc1 = utils.accuracy(output, seq_target, topk=[1])
             # test_top1[seq_len].update(acc1[0], target.size(0))
             # acc1 = torch.mean(((output.squeeze(1) * (seq_target*2-1)) > 0).float()).item()
@@ -374,8 +385,7 @@ for epoch in range(args.epochs):
         # print ("seq", seq.shape, "target", target.shape)
         output = model(seq, target) 
         # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
-        preds = output[:, 0::2, :]
-        # print ("preds", preds.shape, "target", target[:, :, :].shape)
+        preds = output[:, 0::2, :] # shape: (B, L, 1)
         loss = criterion(preds, target)
         
         # batch_first_seq, batch_first_target = seq[0, :-1, :], target[0, :-1, 0]
@@ -396,9 +406,10 @@ for epoch in range(args.epochs):
         # top1.update(acc1[0], target.size(0))
         # acc1 = torch.mean(((output.squeeze(1) * (seq_target*2-1)) > 0).float()).item()
         # top1.update(acc1, target.size(0))
-    print ("loss" , loss)
-    # step scheduler
-    # scheduler.step()
+        # step scheduler
+        scheduler.step()
+    print ("loss" , loss, "preds", preds.shape, "target", target.shape)
+    
 
     # save metrics
     # print("output",  torch.argsort(output, dim=-1), "target", target )
@@ -410,13 +421,19 @@ for epoch in range(args.epochs):
     logs = {
             "train_loss": losses.avg,
             "epoch": epoch,
-            "icl_indistribution_loss": icl_indistribution_losses.avg,
-            "icl_outdistribution_loss": icl_outdistribution_losses.avg,
-            "iwl_indistribution_loss": iwl_indistribution_losses.avg,
-            "iwl_outdistribution_loss": iwl_outdistribution_losses.avg,
+            "lr": optimizer.param_groups[0]['lr'],
+            # "icl_indistribution_loss": icl_indistribution_losses.avg,
+            # "icl_outdistribution_loss": icl_outdistribution_losses.avg,
+            # "iwl_indistribution_loss": iwl_indistribution_losses.avg,
+            # "iwl_outdistribution_loss": iwl_outdistribution_losses.avg,
         }
+    for _ in range(args.len_context):
+        logs[f"icl_indistribution_loss_{_}"] = icl_indistribution_losses[_].avg
+        logs[f"icl_outdistribution_loss_{_}"] = icl_outdistribution_losses[_].avg
+        logs[f"iwl_indistribution_loss_{_}"] = iwl_indistribution_losses[_].avg
+        logs[f"iwl_outdistribution_loss_{_}"] = iwl_outdistribution_losses[_].avg
     
-    print(logs) 
+    # print(logs) 
     if args.wandb_log:
         wandb.log(logs)
     else:
