@@ -30,7 +30,7 @@ len_context=${len_context_vals[$SLURM_ARRAY_TASK_ID / ${#D_visible_frac_vals[@]}
 
 
 echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
-gpt_bias=True
+gpt_bias=False
 lr=1e-4
 
 # for run in {0..0}; do WANDB_MODE=offline python -u main.py --data ./cache --fileprefix transformer1layer  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 128 --optimizer SGD --lr 1e-3 --wd 1e-10  --epochs 200 --arch causal_transformer_embed --num_hidden_features 256 --num_layers 1 --len_context $j --K 100000 --D_sum 50 --D_visible_frac $i --sigma_xi 0.0 --coarse_graining abstop --wandb_log --wandb_project renormalization --wandb_group_name linreg_oct14_specgen ; done 
