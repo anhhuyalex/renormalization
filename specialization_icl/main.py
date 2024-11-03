@@ -1,9 +1,18 @@
-#!/usr/bin/env python
-# coding: utf-8
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.15.2
+#   kernelspec:
+#     display_name: Python (l2l)
+#     language: python
+#     name: l2l
+# ---
 
-# In[108]:
-
-
+# +
 import argparse
 import os
 import copy
@@ -41,9 +50,7 @@ import sys
 import glob
 
 
-# In[109]:
-
-
+# +
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
 parser.add_argument('--data', metavar='DIR', nargs='?', default='./data',
                     help='path to dataset (default: imagenet)')
@@ -120,9 +127,9 @@ if utils.is_interactive():
     jupyter_args = jupyter_args.split()
     
     from IPython.display import clear_output # function to clear print outputs in cell
-    get_ipython().run_line_magic('load_ext', 'autoreload')
+    # %load_ext autoreload 
     # this allows you to change functions in models.py or utils.py and have this notebook automatically update with your revisions
-    get_ipython().run_line_magic('autoreload', '2')
+    # %autoreload 2 
 
 if utils.is_interactive():
     args = parser.parse_args(jupyter_args)
@@ -175,9 +182,7 @@ else:
         "logs": []
     }
 
-
-# In[103]:
-
+# -
 
 class Sequence(torch.utils.data.Dataset):
     def __init__(self, K, D,  
@@ -217,9 +222,7 @@ class Sequence(torch.utils.data.Dataset):
         return samples.type(torch.float32), y.type(torch.float32), beta_incontext.type(torch.float32)  
 
 
-# In[104]:
-
-
+# +
 # importlib.reload(gpt)
 import gpt
 criterion = nn.MSELoss().to(device)
@@ -260,10 +263,7 @@ scheduler = OneCycleLR(optimizer, max_lr=args.lr,
                        pct_start=0.5,
                        steps_per_epoch=iters_per_epoch, epochs=args.epochs)
 
-
-# In[105]:
-
-
+# +
 # define the dataset
 train_kwargs = {'batch_size': args.batch_size}
 test_kwargs = {'batch_size': args.batch_size}
@@ -274,12 +274,16 @@ if use_cuda:
                     'pin_memory': True}
     train_kwargs.update(cuda_kwargs)
     test_kwargs.update(cuda_kwargs)
-train_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = args.batch_size * iters_per_epoch)
+train_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = args.batch_size * iters_per_epoch,
+                         scale =1.0
+                         )
 # iwl_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000)
 # iwl_dataset.true_betas = train_dataset.true_betas
-icl_test_dataset = Sequence(K=1000, D=args.D_sum, len_context=args.len_context, len_data = 1000)
+icl_test_dataset = Sequence(K=1000, D=args.D_sum, len_context=args.len_context, len_data = 1000,
+                            scale = 1.0)
 
-iwl_test_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000, skip_generating_betas = True)
+iwl_test_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000, skip_generating_betas = True,
+                            scale = 1.0)
 iwl_test_dataset.true_betas = train_dataset.true_betas
 
 train_sampler = None
@@ -295,8 +299,7 @@ iwl_test_loader = torch.utils.data.DataLoader(iwl_test_dataset,
                                             **test_kwargs)
 
 
-# In[106]:
-
+# -
 
 def validate_gradient_descent(epoch, val_loader, model, args, criterion, device, coarse_graining="standard"):
     # seq_lens = list(range(1, args.len_context+1, 5)) 
@@ -360,10 +363,7 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
 
     return test_losses 
 
-
-# In[107]:
-
-
+# +
 import pickle
 # import matplotlib.pyplot as plt
 exp_name = f"./cache/{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_D_{args.D_sum}_L_{args.len_context}_hidden_{args.num_hidden_features}_coarse_{args.coarse_graining}_{time.time()}.pkl"
@@ -449,15 +449,7 @@ for epoch in range(args.epochs):
 if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
+# -
 
 
 
