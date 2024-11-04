@@ -6,7 +6,7 @@
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/%j.out
 #SBATCH --gres=gpu:1
-# SBATCH --partition=mig
+#SBATCH --partition=mig
 # source activate renormalization
 source ../../learning_to_learn/l2l/bin/activate
 
@@ -30,9 +30,10 @@ len_context=${len_context_vals[$SLURM_ARRAY_TASK_ID / ${#D_visible_frac_vals[@]}
 
 echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
 gpt_bias=True
-lr=1e-3
+lr=1e-4
 optimizer="Adam"
+epochs=500
 
 # for run in {0..0}; do WANDB_MODE=offline python -u main.py --data ./cache --fileprefix transformer1layer  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 128 --optimizer SGD --lr 1e-3 --wd 1e-10  --epochs 200 --arch causal_transformer_embed --num_hidden_features 256 --num_layers 1 --len_context $j --K 100000 --D_sum 50 --D_visible_frac $i --sigma_xi 0.0 --coarse_graining abstop --wandb_log --wandb_project renormalization --wandb_group_name linreg_oct14_specgen ; done 
-for run in {0..0}; do WANDB_MODE=online ../../learning_to_learn/l2l/bin/python -u main.py --data ./cache --fileprefix layernorm_input_opt_${optimizer}_lr_${lr}_gpt_bias_${gpt_bias}_5000epochs  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --epochs 5000 --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 128 --num_layers 8 --len_context $len_context --K 1048576 --D_sum 8 --D_visible_frac $D_visible_frac --sigma_xi 0.0 --coarse_graining abstop --wandb_log --wandb_project renormalization --wandb_group_name linreg_nov3_specgen_bias_${gpt_bias}  ; done 
+for run in {0..0}; do WANDB_MODE=offline ../../learning_to_learn/l2l/bin/python -u main.py --data ./cache --fileprefix no_layernorm_input_opt_${optimizer}_lr_${lr}_gpt_bias_${gpt_bias}_epochs_${epochs}  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --epochs ${epochs} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 128 --num_layers 8 --len_context $len_context --K 1048576 --D_sum 8 --D_visible_frac $D_visible_frac --sigma_xi 0.0 --coarse_graining abstop --wandb_log --wandb_project renormalization --wandb_group_name linreg_nov4_specgen_bias_${gpt_bias}  ; done 
  

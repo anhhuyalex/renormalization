@@ -257,7 +257,7 @@ class GPT(nn.Module):
         b, t, d = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of length {t}, block size is only {self.config.block_size}"
         idx = self.to_seq(idx, targets) 
-        idx = self.transformer.ln_input(idx)
+        # idx = self.transformer.ln_input(idx)
         pos = torch.arange(0, 2*t, dtype=torch.long, device=device) # shape (t)
 
         # forward the GPT model itself
