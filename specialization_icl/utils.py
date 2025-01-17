@@ -12,6 +12,7 @@ import numpy as np
 import pickle
 import functools
 import shutil
+import io
 
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
@@ -323,173 +324,7 @@ class ShuffledCIFAR10:
             inputs = inputs.view(IMAGE_CHANNELS, self.image_width * self.image_width)
             inputs = inputs[:, self.perm].view(IMAGE_CHANNELS, self.image_width, self.image_width)
         return inputs, labels
-    
-########### TRAINERS ##################################################
-class BaseTrainer:
-    def __init__(self, data_params = dict(),
-                       train_params = dict(),
-                       model_optim_params = dict(),
-                       save_params = dict()):
-        
-        self.data_params = data_params
-        self.train_params = train_params
-        self.model_optim_params = model_optim_params
-        self.save_params = save_params
-        self.setup()
-        
-    def setup(self):
-        self.build_data_loader()
-        self.build_model_optimizer()
-        self.initialize_record()
-        
-    def save_record(self):
-        # Save record
-        fname = f"{self.save_params['save_dir']}/{self.save_params['exp_name']}"
-        save_file_pickle(fname, self.record)
-        
-class CIFAR_trainer(BaseTrainer):
-    def build_data_loader(self):
-        batch_size = self.train_params['batch_size']
-        
-        trainset = ShuffledCIFAR10(train=True, **self.data_params) 
-        self.trainloader = torch.utils.data.DataLoader(trainset, batch_size=batch_size,
-                                              shuffle=True, num_workers=2)
 
-        testset = ShuffledCIFAR10(train=False, **self.data_params) 
-        
-        if self.data_params["pixel_shuffled"] == True:
-            if self.data_params["fix_permutation"] == True:
-                try:
-                    trainset.perm = torch.load(f"{self.save_params['save_dir']}/{self.model_optim_params['model_name']}_quenched_permutation.pt")
-                except:
-                    torch.save(trainset.perm, f"{self.save_params['save_dir']}/{self.model_optim_params['model_name']}_quenched_permutation.pt")
-            testset.perm = trainset.perm
-
-        self.testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size,
-                                              shuffle=True, num_workers=2)
-
-    def build_model_optimizer(self):
-        self.model = self.model_optim_params["model"]
-        self.criterion = self.model_optim_params["criterion"]
-        self.optimizer = self.model_optim_params["optimizer"]
-        
-    def initialize_record(self):
-        self.record = dict(
-            metrics = dict(
-                train_loss_prog = [],
-                train_acc_prog = [],
-                test_loss_prog = [],
-                test_acc_prog = [],
-                test_loss = 0.0,
-                test_accuracy = 0.0
-            ),    
-            print_interval = 5000 // self.train_params['batch_size'],
-            data_params = self.data_params,
-            train_params = self.train_params,
-            model_optim_params = self.model_optim_params,
-            save_params = self.save_params,
-            model = None
-        )
-        
-    def before_train_epoch(self):
-        # after a certain epoch, freeze convolutional layers if desired
-        if self.epoch > self.train_params["freeze_params"]["epoch"]:
-            freeze_layer(self.model, *self.train_params["freeze_params"]["epoch"])
-            for n, param in self.model.named_parameters():         
-                print(n, param.requires_grad)
-    def after_train_iter(self, running_loss, running_accuracy, outputs, labels):
-        self.loss.backward()
-        self.optimizer.step()
-        
-        # get top-1 accuracy
-        pred_class = torch.argmax(outputs, dim=1)
-        running_accuracy += torch.mean((pred_class == labels).float()).item()
-
-        # print statistics
-        running_loss += self.loss.item()
-        if self.iter % self.record["print_interval"] == self.record["print_interval"] - 1:    # print every self.record["print_interval"] mini-batches
-            running_loss /= self.record["print_interval"]
-            running_accuracy /= self.record["print_interval"]
-            self.record["metrics"]["train_loss_prog"].append(running_loss)
-            self.record["metrics"]["train_acc_prog"].append(running_accuracy)
-            print(f'[{self.epoch + 1}, {self.iter + 1:5d}] loss: {running_loss:.3f}, accuracy:  {running_accuracy:.3f}')
-            running_loss = 0.0
-            running_accuracy = 0.0
-        return running_loss, running_accuracy
-    
-    def after_train_epoch(self):
-        # get test loss and accuracy
-        test_loss, test_accuracy = self.test()
-        self.record["metrics"]["test_loss_prog"].append(test_loss)
-        self.record["metrics"]["test_acc_prog"].append(test_accuracy)
-        
-        # put model back into train mode
-        self.model.train()
-        
-        
-    def train(self):
-        num_epochs = self.train_params['num_epochs']
-        for self.epoch in range(num_epochs):  # loop over the dataset multiple times
-            self.before_train_epoch()
-            running_loss, running_accuracy = 0.0, 0.0
-            for self.iter, data in enumerate(self.trainloader, 0):
-
-                # get the inputs; data is a list of [inputs, labels]
-                inputs, labels = data
-                inputs = inputs.cuda()
-                labels = labels.cuda()
-
-                # zero the parameter gradients
-                self.optimizer.zero_grad()
-
-                # forward + backward + optimize
-                outputs = self.model(inputs)
-                self.loss = self.criterion(outputs, labels)
-                
-                running_loss, running_accuracy = self.after_train_iter(running_loss, running_accuracy, outputs, labels)
-
-            self.after_train_epoch()
-
-        print('Finished Training')
-        self.after_run()
-        
-    def test(self):
-        running_loss, running_accuracy = 0.0, 0.0
-        self.model.eval()
-        for i, data in enumerate(self.testloader, 0):
-            # get the inputs; data is a list of [inputs, labels]
-            inputs, labels = data
-            inputs = inputs.cuda()
-            labels = labels.cuda()
-
-            # forward and evaluate
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, labels)
-            running_loss += loss.item()
-            
-            # get top-1 accuracy
-            pred_class = torch.argmax(outputs, dim=1)
-            running_accuracy += torch.mean((pred_class == labels).float()).item()
-
-        # print loss
-        running_loss /= len(self.testloader)
-        running_accuracy /= len(self.testloader)
-        print(f'Test loss: {running_loss:.3f}, accuracy: {running_accuracy:.3f}')
-        return running_loss, running_accuracy
-    
-    def after_run(self):
-        # Get final test loss and accuracy
-        test_loss, test_accuracy = self.test()
-        self.record["metrics"]["test_loss"] = test_loss
-        self.record["metrics"]["test_accuracy"] = test_accuracy
-        
-        # Save model
-        self.record["model"] = list(self.model.named_parameters())
-        
-        # Save record
-        self.save_record()
-
-        
 
 ################# METERS ########################
 from enum import Enum
@@ -570,9 +405,25 @@ class ProgressMeter(object):
         fmt = '{:' + str(num_digits) + 'd}'
         return '[' + fmt + '/' + fmt.format(num_batches) + ']'
 
-
+################# SCHEDULERS ########################
+class EmptyScheduler:
+    def __init__(self):
+        pass
+    def step(self):
+        pass
+    def state_dict(self):
+        return {}
+    def load_state_dict(self, state_dict):
+        pass
 
 ################# SAVING FILES ########################
+class CPU_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+        else:
+            return super().find_class(module, name)
+        
 def save_file_pickle(fname, file):
     with open(f"{fname}.pkl", 'wb') as f:
         pickle.dump(file, f)
@@ -582,8 +433,12 @@ def save_checkpoint(state, save_dir = "./", filename='checkpoint.pth.tar'):
     
                                
 def load_file_pickle(fname):
-    with open(fname, 'rb') as f:
-        return pickle.load(f)
+    try:
+        with open(fname, 'rb') as f:
+            return pickle.load(f)
+    except:
+        with open(fname, 'rb') as f:
+            return CPU_Unpickler(f).load()
                                
 def find_free_port():
     """ https://stackoverflow.com/questions/1365265/on-localhost-how-do-i-pick-a-free-port-number """

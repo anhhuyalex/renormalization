@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[108]:
+# In[ ]:
 
 
 import argparse
@@ -41,7 +41,7 @@ import sys
 import glob
 
 
-# In[109]:
+# In[ ]:
 
 
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
@@ -75,6 +75,8 @@ parser.add_argument('-j', '--workers', default=4, type=int, metavar='N',
 parser.add_argument('--optimizer', default='SGD', type=str, 
                     choices = ['SGD', 'Adam'],
                     help='optimizer')
+parser.add_argument('--scheduler', default='OneCycleLR', type=str, 
+                    help='scheduler')
 parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
                     metavar='LR', help='initial learning rate', dest='lr')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
@@ -217,7 +219,7 @@ class Sequence(torch.utils.data.Dataset):
         return samples.type(torch.float32), y.type(torch.float32), beta_incontext.type(torch.float32)  
 
 
-# In[104]:
+# In[ ]:
 
 
 # importlib.reload(gpt)
@@ -255,10 +257,31 @@ else:
     raise ValueError("optimizer not recognized")
 iters_per_epoch = 1000
 # scheduler = StepLR(optimizer, step_size=50, gamma=0.7)
-scheduler = OneCycleLR(optimizer, max_lr=args.lr, 
-                       total_steps=args.epochs * iters_per_epoch, 
-                       pct_start=0.5,
-                       steps_per_epoch=iters_per_epoch, epochs=args.epochs)
+if args.scheduler == 'CosineOneCycleLR':
+    scheduler = OneCycleLR(optimizer, max_lr=args.lr, 
+                        total_steps=args.epochs * iters_per_epoch, 
+                        pct_start=0.5,
+                        steps_per_epoch=iters_per_epoch, epochs=args.epochs)
+elif args.scheduler == 'None':
+    scheduler = utils.EmptyScheduler()
+elif args.scheduler == 'Triangle':
+    scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, 
+                               base_lr=args.lr/10,
+                               max_lr=args.lr, 
+                        step_size_up=args.epochs * iters_per_epoch / 2,
+                        step_size_down= args.epochs * iters_per_epoch / 2,
+                        mode = "triangular",
+                        cycle_momentum=False
+                        )
+elif args.scheduler == 'LinearWarmUpCosineDecay':
+    scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 
+                                                    max_lr=args.lr,
+    epochs=args.epochs,
+    steps_per_epoch= iters_per_epoch,
+    pct_start=0.01,
+    anneal_strategy='cos',
+    three_phase=False)
+    
 
 
 # In[105]:
@@ -325,7 +348,7 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
     test_losses = [utils.AverageMeter('Loss', ':.4e') for _ in range(args.len_context)]
     
     model.eval() # switch to eval mode
-    eps = 1e-6
+    eps = 1e-5
     
     with torch.no_grad():
         for i, (seq, target, _true_beta) in enumerate(val_loader):
@@ -396,7 +419,7 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
     return test_losses 
 
 
-# In[107]:
+# In[ ]:
 
 
 import pickle
@@ -476,11 +499,14 @@ for epoch in range(args.epochs):
     
  
     # save phi_xt_list_epoch 
-
+    
+    
     if epoch % 10 == 0 and args.wandb_log != True:
+        record["model"] = copy.deepcopy(model.state_dict())  
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
-  
+        print (record["model"])
+record["model"] = copy.deepcopy(model.state_dict())  
 if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
