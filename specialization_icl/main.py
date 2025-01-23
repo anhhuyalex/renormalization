@@ -366,8 +366,7 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
                 new_target = new_target.squeeze(1)
                 # if args.sigma_xi > 1e-5:
                     # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
-                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
+                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2))                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
                 # print ("sigma_test_xi", sigma_test_xi)
                 new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
                 target[:, -1, 0] = new_target
@@ -385,8 +384,7 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
                 new_target = new_target.squeeze(1)
                 # if args.sigma_xi > 1e-5:
                     # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
-                                        - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
+                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2))                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
                 # print ("sigma_test_xi", sigma_test_xi)
                 new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
                 # print ("new_target", new_target, "sigma_test_xi", sigma_test_xi )
