@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# In[ ]:
+# In[1]:
 
 
 import argparse
@@ -41,7 +41,7 @@ import sys
 import glob
 
 
-# In[ ]:
+# In[5]:
 
 
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
@@ -105,6 +105,9 @@ parser.add_argument('--K', default=1, type=int,
 parser.add_argument('--coarse_graining', default="abstop", type=str,
                     help='coarse graining method')
 parser.add_argument('--sigma_xi', default=1.0, type=float, help='noise level')
+parser.add_argument('--data_scale', default=1.0, type=float, help='data scale')
+parser.add_argument('--is_iso', default="True", type=str, 
+                    help='whether to use isotropic data')
 parser.add_argument(
             '--fileprefix', 
             default="",
@@ -116,8 +119,18 @@ parser.add_argument(
 if utils.is_interactive():
     arch = "pytorch_transformer"
     # arch = "transformer"
-    jupyter_args = f"--data ./cache --fileprefix transformer1layer  --SLURM_ARRAY_TASK_ID 5 --batch-size 128 --optimizer SGD --lr 1e-2 --wd 1e-10  --epochs 200 --arch gpt --num_hidden_features 256 --num_layers 1 --len_context 16 --K 100 --D_sum 8 --D_visible_frac 3 --sigma_xi 0.5 --coarse_graining abstop --no-wandb_log --wandb_project renormalization --wandb_group_name t"
+    SLURM_ARRAY_TASK_ID = 0
+    optimizer = "SGD"
+    lr = 0.1
+    epochs = 90
+    gpt_bias = "True"
+    len_context = 100
+    K = 1
+    D_sum = 64 
     
+    jupyter_args = f"--data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --scheduler None --lr ${lr} --wd 0.0  --epochs ${epochs} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 128 --num_layers 8 --len_context ${len_context} --K ${K} --D_sum ${D_sum} --sigma_xi 0.5 --coarse_graining abstop --no-wandb_log --wandb_project renormalization --is_iso False --wandb_group_name test"
+    # remove $ from string 
+    jupyter_args = jupyter_args.replace("$","")
     print(jupyter_args)
     jupyter_args = jupyter_args.split()
     
@@ -178,14 +191,16 @@ else:
     }
 
 
-# In[103]:
+# In[6]:
 
 
 class Sequence(torch.utils.data.Dataset):
     def __init__(self, K, D,  
                  len_context = 1,
                  scale=0.5,
-                len_data = 60000, skip_generating_betas=False):
+                len_data = 60000, skip_generating_betas=False,
+                input_covariance = None, is_iso = "True"
+                ):
 
         # if K < 40000:
         self.len_context = len_context
@@ -199,6 +214,37 @@ class Sequence(torch.utils.data.Dataset):
         self.K = K 
         self.D = D
         self.len_data = len_data
+        if is_iso == "True":
+            self.input_covariance_L = None
+        else:
+            print ("anisotropic case")
+            sminus = 0.1
+            splus = 1.0
+            # The proportion of eigenvalues at s₋ should be ρ₋
+            rho_minus = 0.5
+            # The proportion of eigenvalues at s₊ should be 1-ρ₋
+            input_covariance = torch.eye(D)
+            
+            # Calculate number of eigenvalues for each mode 
+            num_minus = int(D * rho_minus)
+            num_plus = D - num_minus
+            
+            # Create diagonal matrix of eigenvalues
+            eigenvalues = np.concatenate([
+                np.ones(num_plus) * splus,
+                np.ones(num_minus) * sminus
+            ])
+            
+            # Generate random orthogonal matrix
+            # Q = np.linalg.qr(np.random.randn(D_sum, D_sum))[0]
+            
+            # Construct covariance matrix 
+            # input_covariance = torch.tensor(Q @ np.diag(eigenvalues) @ Q.T, dtype=torch.float32) 
+            input_covariance = torch.tensor(np.diag(eigenvalues), dtype=torch.float32) 
+            # self.input_covariance_L = torch.linalg.cholesky(input_covariance)  
+            # self.input_covariance = input_covariance.to(device)  
+            self.input_covariance_L = torch.sqrt(torch.tensor(eigenvalues, dtype=torch.float32))
+            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] * (np.sqrt(10)) 
         
     def __len__(self):
         return self.len_data
@@ -206,7 +252,11 @@ class Sequence(torch.utils.data.Dataset):
     def __getitem__(self, task: int):
         task_ind = torch.randint(0, self.K, (1,)).item()
         beta_incontext = self.true_betas[task_ind].unsqueeze(1) # shape: (D, 1)
-        x = torch.randn((self.len_context, self.D)) * self.scale  # shape: (self.len_context, D) * (1.0 / np.sqrt(self.D))
+        if self.input_covariance_L is None:
+            x = torch.randn((self.len_context, self.D)) * self.scale  # shape: (self.len_context, D) * (1.0 / np.sqrt(self.D))
+        else: 
+            x = torch.randn((self.len_context, self.D)) * self.input_covariance_L  
+            # x = torch.matmul(x, self.input_covariance_L.T) 
         noise = torch.randn((self.len_context, 1)) * args.sigma_xi
         y = torch.matmul(x, beta_incontext) + noise
 
@@ -219,19 +269,20 @@ class Sequence(torch.utils.data.Dataset):
         return samples.type(torch.float32), y.type(torch.float32), beta_incontext.type(torch.float32)  
 
 
-# In[ ]:
+# In[7]:
+
+
+1
+
+
+# In[9]:
 
 
 # importlib.reload(gpt)
 import gpt
 criterion = nn.MSELoss().to(device)
 # define the model, optimizer, and scheduler, and criterion
-if args.arch == "causal_transformer_embed":
-    nheads = 1 # np.clip(args.num_hidden_features // 8, 1, 8)
-    model = attention.MultiLayerTransformer(x_dim=args.D_sum,                   
-                                  mlp_dim=args.num_hidden_features, 
-                                  num_layers = args.num_layers
-                                  ).to(device)
+ 
 if args.arch == "gpt":
     import gpt 
     config = gpt.GPTConfig(
@@ -273,6 +324,7 @@ elif args.scheduler == 'Triangle':
                         mode = "triangular",
                         cycle_momentum=False
                         )
+    
 elif args.scheduler == 'LinearWarmUpCosineDecay':
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, 
                                                     max_lr=args.lr,
@@ -284,7 +336,7 @@ elif args.scheduler == 'LinearWarmUpCosineDecay':
     
 
 
-# In[105]:
+# In[ ]:
 
 
 # define the dataset
@@ -298,123 +350,147 @@ if use_cuda:
     train_kwargs.update(cuda_kwargs)
     test_kwargs.update(cuda_kwargs)
 train_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = args.batch_size * iters_per_epoch,
-                         scale =1.0
+                         scale = args.data_scale, is_iso = args.is_iso 
                          )
 # iwl_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000)
 # iwl_dataset.true_betas = train_dataset.true_betas
-icl_test_dataset = Sequence(K=1000, D=args.D_sum, len_context=args.len_context, len_data = 1000,
-                            scale = 1.0)
+# icl_test_dataset = Sequence(K=1000, D=args.D_sum, len_context=args.len_context, len_data = 1000,
+#                             scale = 1.0)
 
-iwl_test_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000, skip_generating_betas = True,
-                            scale = 1.0)
-iwl_test_dataset.true_betas = train_dataset.true_betas
+# iwl_test_dataset = Sequence(K=args.K, D=args.D_sum, len_context=args.len_context, len_data = 1000, skip_generating_betas = True,
+#                             scale = 1.0)
+# iwl_test_dataset.true_betas = train_dataset.true_betas
 
 train_sampler = None
 val_sampler = None 
 train_loader = torch.utils.data.DataLoader(train_dataset, 
                                             sampler=train_sampler, 
                                             **train_kwargs) 
-icl_test_loader = torch.utils.data.DataLoader(icl_test_dataset,
-                                            sampler=val_sampler,
-                                            **test_kwargs)  
-iwl_test_loader = torch.utils.data.DataLoader(iwl_test_dataset,
-                                            sampler=val_sampler,
-                                            **test_kwargs)
+# icl_test_loader = torch.utils.data.DataLoader(icl_test_dataset,
+#                                             sampler=val_sampler,
+#                                             **test_kwargs)  
+# iwl_test_loader = torch.utils.data.DataLoader(iwl_test_dataset,
+#                                             sampler=val_sampler,
+#                                             **test_kwargs)
+
+
+# In[39]:
+
+
+# # x, y, b = train_dataset[0]
+# # print (x.shape, y.shape, b.shape)
+# plt.hist (b[:32].flatten().cpu().numpy(), bins = 5, alpha = 0.5)
+# plt.hist (b[32:].flatten().cpu().numpy(), bins = 5, alpha = 0.5)
+# plt.show()
+
 
 
 # In[ ]:
 
 
-def get_ridge_preds(seq, target, xtest, lam=1e-5):
-    seqT = seq.permute(0, 2, 1) # batch_size x D x len_context
-    ridge_matrix = torch.matmul(seqT, seq) # batch_size x D x D
-    ridge_matrix += torch.eye(ridge_matrix.size(1), device=ridge_matrix.device) * lam
-    seqT_Y = torch.matmul(seqT, target) # batch_size x D x 1
-    w_ridge = torch.linalg.solve(ridge_matrix, seqT_Y) # batch_size x D x 1
-    preds = torch.matmul(xtest, w_ridge).squeeze(-1) # batch_size x 1 x 1
-    return preds 
+# # torch.allclose(torch.matmul(x, b), y, atol = 1e-3)
+# import matplotlib.pyplot as plt
+# plt.scatter(torch.matmul(x, b).detach().cpu(), y.detach().cpu())
+# plt.show()
+# print (torch.matmul(x, b))
+# print (y)
 
-def get_ridge_preds_seq(seq, target):
-    B, N, D = seq.size() 
-    preds = []
-    for _i in range(1, N):
-        preds.append(get_ridge_preds(seq[:, :_i, :], target[:, :_i, :], seq[:, _i: _i + 1, :]))
-    return torch.stack(preds, dim=1)
+
+# In[ ]:
+
+
+# def get_ridge_preds(seq, target, xtest, lam=1e-5):
+#     seqT = seq.permute(0, 2, 1) # batch_size x D x len_context
+#     ridge_matrix = torch.matmul(seqT, seq) # batch_size x D x D
+#     ridge_matrix += torch.eye(ridge_matrix.size(1), device=ridge_matrix.device) * lam
+#     seqT_Y = torch.matmul(seqT, target) # batch_size x D x 1
+#     w_ridge = torch.linalg.solve(ridge_matrix, seqT_Y) # batch_size x D x 1
+#     preds = torch.matmul(xtest, w_ridge).squeeze(-1) # batch_size x 1 x 1
+#     return preds 
+
+# def get_ridge_preds_seq(seq, target):
+#     B, N, D = seq.size() 
+#     preds = []
+#     for _i in range(1, N):
+#         preds.append(get_ridge_preds(seq[:, :_i, :], target[:, :_i, :], seq[:, _i: _i + 1, :]))
+#     return torch.stack(preds, dim=1)
         
         
-def validate_gradient_descent(epoch, val_loader, model, args, criterion, device, coarse_graining="standard"):
-    # seq_lens = list(range(1, args.len_context+1, 5)) 
+# def validate_gradient_descent(epoch, val_loader, model, args, criterion, device, coarse_graining="standard"):
+#     # seq_lens = list(range(1, args.len_context+1, 5)) 
    
-    test_losses = [utils.AverageMeter('Loss', ':.4e') for _ in range(args.len_context)]
+#     test_losses = [utils.AverageMeter('Loss', ':.4e') for _ in range(args.len_context)]
     
-    model.eval() # switch to eval mode
-    eps = 1e-5
+#     model.eval() # switch to eval mode
+#     eps = 1e-5
     
-    with torch.no_grad():
-        for i, (seq, target, _true_beta) in enumerate(val_loader):
-            seq, target, _true_beta = seq.to(device), target.to(device), _true_beta.to(device)
+#     with torch.no_grad():
+#         for i, (seq, target, _true_beta) in enumerate(val_loader):
+#             seq, target, _true_beta = seq.to(device), target.to(device), _true_beta.to(device)
             
-            B, N, D = seq.size()
-            if coarse_graining == "absbot":
-                # true_beta: shape (B, D)
-                true_beta = _true_beta.squeeze(2)
-                argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, :args.D_visible] # sort each row of true_beta by absolute value, shape (B, D_visible)
-                test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
-                x_test_visible = torch.gather(seq[:, -1, :].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
+#             B, N, D = seq.size()
+#             if coarse_graining == "absbot":
+#                 # true_beta: shape (B, D)
+#                 true_beta = _true_beta.squeeze(2)
+#                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, :args.D_visible] # sort each row of true_beta by absolute value, shape (B, D_visible)
+#                 test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
+#                 x_test_visible = torch.gather(seq[:, -1, :].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
                 
-                new_target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
-                new_target = new_target.squeeze(1)
-                # if args.sigma_xi > 1e-5:
-                    # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2))                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
-                # print ("sigma_test_xi", sigma_test_xi)
-                new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
-                target[:, -1, 0] = new_target
+#                 new_target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
+#                 new_target = new_target.squeeze(1)
+#                 # if args.sigma_xi > 1e-5:
+#                     # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
+#                 sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
+#                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
+#                 # print ("sigma_test_xi", sigma_test_xi)
+#                 new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+#                 target[:, -1, 0] = new_target
                 
-            elif coarse_graining == "abstop":
-                true_beta = _true_beta.squeeze(2) # shape (B, D)
-                # print ("true_beta", true_beta.shape)
-                argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, -args.D_visible:] # sort each row of true_beta by absolute value, shape (B, D_visible)
-                # test_beta_visible = true_beta[argsort_beta_visible] # take top D_visible betas, shape (B, D_visible) 
-                test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
-                x_test_visible = torch.gather(seq[:, -1, :].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
+#             elif coarse_graining == "abstop":
+#                 true_beta = _true_beta.squeeze(2) # shape (B, D)
+#                 # print ("true_beta", true_beta.shape)
+#                 argsort_beta_visible = torch.argsort(torch.abs(true_beta), dim=-1)[:, -args.D_visible:] # sort each row of true_beta by absolute value, shape (B, D_visible)
+#                 # test_beta_visible = true_beta[argsort_beta_visible] # take top D_visible betas, shape (B, D_visible) 
+#                 test_beta_visible = torch.gather(true_beta, dim=1, index=argsort_beta_visible) # shape (B, D_visible)
+#                 x_test_visible = torch.gather(seq[:, -1, :].squeeze(1), dim=1, index=argsort_beta_visible) # shape (B, D_visible) 
                 
-                # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
-                new_target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
-                new_target = new_target.squeeze(1)
-                # if args.sigma_xi > 1e-5:
-                    # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
-                sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2))                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
-                # print ("sigma_test_xi", sigma_test_xi)
-                new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
-                # print ("new_target", new_target, "sigma_test_xi", sigma_test_xi )
-                target[:, -1, 0] = new_target
+#                 # target = x_test_visible  @ test_beta_visible + np.random.randn(N_test) * sigma_test_xi
+#                 new_target = torch.matmul(x_test_visible.unsqueeze(1), test_beta_visible.unsqueeze(2)).squeeze(2) 
+#                 new_target = new_target.squeeze(1)
+#                 # if args.sigma_xi > 1e-5:
+#                     # print  ("-args.D_visible", -args.D_visible, "argsort_beta_visible", argsort_beta_visible.shape, "test_beta_visible", test_beta_visible.shape)
+#                 sigma_test_xi = torch.pow(args.sigma_xi ** 2 + torch.matmul(true_beta.unsqueeze(1), true_beta.unsqueeze(2)) \
+#                                         - torch.matmul(test_beta_visible.unsqueeze(1), test_beta_visible.unsqueeze(2))+eps, 0.5).squeeze(2).squeeze(1) # shape (B)
+#                 # print ("sigma_test_xi", sigma_test_xi)
+#                 new_target += torch.randn(new_target.size(0), device=device) * sigma_test_xi # shape (B, 1) 
+#                 # print ("new_target", new_target, "sigma_test_xi", sigma_test_xi )
+#                 target[:, -1, 0] = new_target
 
                 
             
 
             
-            # print ("seq", seq.shape, "target", target.shape)
-            output = model(seq, target) 
-            # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
-            preds = output[:, ::2, :]
-            # distance to ridge_preds 
-            # if coarse_graining == "standard":
-            #     ridge_preds = get_ridge_preds_seq(seq, target) # shape: (B, N-1, 1)
-            #     ridge_loss = (ridge_preds - target[:, 1:, :]).pow(2).mean(dim=0)
-            #     dist_to_ridge = (preds[:,1:, :] - ridge_preds).pow(2).mean(dim=0)
-            #     print ("ridge_loss", ridge_loss, "dist_to_ridge", dist_to_ridge.shape, dist_to_ridge)
+#             # print ("seq", seq.shape, "target", target.shape)
+#             output = model(seq, target) 
+#             # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
+#             preds = output[:, ::2, :]
+#             # distance to ridge_preds 
+#             # if coarse_graining == "standard":
+#             #     ridge_preds = get_ridge_preds_seq(seq, target) # shape: (B, N-1, 1)
+#             #     ridge_loss = (ridge_preds - target[:, 1:, :]).pow(2).mean(dim=0)
+#             #     dist_to_ridge = (preds[:,1:, :] - ridge_preds).pow(2).mean(dim=0)
+#             #     print ("ridge_loss", ridge_loss, "dist_to_ridge", dist_to_ridge.shape, dist_to_ridge)
                 
-            loss = (preds - target).pow(2).squeeze(-1).mean(dim=0) 
-            print ("test preds", preds.shape, "test target", target.shape, "test loss", loss.shape)
+#             loss = (preds - target).pow(2).squeeze(-1).mean(dim=0) 
+#             print ("test preds", preds.shape, "test target", target.shape, "test loss", loss.shape)
             
-            [test_losses[_].update(loss[_].item(), target.size(0)) for _ in range(N)]
-            # acc1 = utils.accuracy(output, seq_target, topk=[1])
-            # test_top1[seq_len].update(acc1[0], target.size(0))
-            # acc1 = torch.mean(((output.squeeze(1) * (seq_target*2-1)) > 0).float()).item()
-            # test_top1[seq_len].update(acc1, target.size(0))
+#             [test_losses[_].update(loss[_].item(), target.size(0)) for _ in range(N)]
+#             # acc1 = utils.accuracy(output, seq_target, topk=[1])
+#             # test_top1[seq_len].update(acc1[0], target.size(0))
+#             # acc1 = torch.mean(((output.squeeze(1) * (seq_target*2-1)) > 0).float()).item()
+#             # test_top1[seq_len].update(acc1, target.size(0))
 
-    return test_losses 
+#     return test_losses 
 
 
 # In[ ]:
@@ -422,12 +498,12 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device,
 
 import pickle
 # import matplotlib.pyplot as plt
-exp_name = f"./cache/{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_D_{args.D_sum}_L_{args.len_context}_hidden_{args.num_hidden_features}_coarse_{args.coarse_graining}_{time.time()}.pkl"
+exp_name = f"./cache/{args.wandb_group_name}_{args.fileprefix}_{time.time()}.pkl"
 for epoch in range(args.epochs):
-    icl_indistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining="standard")
-    icl_outdistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
-    iwl_indistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining="standard")
-    iwl_outdistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
+    # icl_indistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining="standard")
+    # icl_outdistribution_losses = validate_gradient_descent(epoch, icl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
+    # iwl_indistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining="standard")
+    # iwl_outdistribution_losses = validate_gradient_descent(epoch, iwl_test_loader, model, args, criterion, device, coarse_graining=args.coarse_graining)
     
     model.train() # switch to train mode
     losses = utils.AverageMeter('Loss', ':.4e')
@@ -440,7 +516,7 @@ for epoch in range(args.epochs):
         seq, target = seq.to(device), target.to(device)
         # print ("seq", seq.shape, "target", target.shape)
         output = model(seq, target) 
-        # print ("seq", seq.shape, "target", target.shape, "output", output.shape )
+        # print ("seq", seq.shape, "target", target, "output", output )
         preds = output[:, ::2, :] # shape: (B, L, 1)
         loss = criterion(preds, target)
         
@@ -449,7 +525,7 @@ for epoch in range(args.epochs):
         # ridge = utils.Ridge(alpha=1e-9,fit_intercept=True) 
         # ridge.fit(batch_first_seq, batch_first_target)
         # val_loss = criterion(ridge.predict(seq[0, [-1], :]), target[0, -1, 0])
-        # print ("loss", loss, "ridge loss", val_loss, "pred", ridge.predict(seq[0, [-1], :]).shape)
+        # print ("loss", loss)
         # ridge_losses.update(val_loss.item(), 1) 
         # compute ridge loss on first sequence
         
@@ -483,11 +559,11 @@ for epoch in range(args.epochs):
             # "iwl_indistribution_loss": iwl_indistribution_losses.avg,
             # "iwl_outdistribution_loss": iwl_outdistribution_losses.avg,
         }
-    for _ in range(args.len_context):
-        logs[f"icl_indistribution_loss_{_}"] = icl_indistribution_losses[_].avg
-        logs[f"icl_outdistribution_loss_{_}"] = icl_outdistribution_losses[_].avg
-        logs[f"iwl_indistribution_loss_{_}"] = iwl_indistribution_losses[_].avg
-        logs[f"iwl_outdistribution_loss_{_}"] = iwl_outdistribution_losses[_].avg
+    # for _ in range(args.len_context):
+    #     logs[f"icl_indistribution_loss_{_}"] = icl_indistribution_losses[_].avg
+    #     logs[f"icl_outdistribution_loss_{_}"] = icl_outdistribution_losses[_].avg
+    #     logs[f"iwl_indistribution_loss_{_}"] = iwl_indistribution_losses[_].avg
+    #     logs[f"iwl_outdistribution_loss_{_}"] = iwl_outdistribution_losses[_].avg
     
     # print(logs) 
     if args.wandb_log:
@@ -503,7 +579,7 @@ for epoch in range(args.epochs):
         record["model"] = copy.deepcopy(model.state_dict())  
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
-        print (record["model"])
+        # print (record["model"])
 record["model"] = copy.deepcopy(model.state_dict())  
 if args.wandb_log != True:
     with open(exp_name, "wb") as f:
