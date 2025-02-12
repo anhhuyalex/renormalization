@@ -1,9 +1,18 @@
-#!/usr/bin/env python
-# coding: utf-8
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.16.6
+#   kernelspec:
+#     display_name: Python (l2l)
+#     language: python
+#     name: l2l
+# ---
 
-# In[1]:
-
-
+# +
 import argparse
 import os
 import copy
@@ -41,9 +50,7 @@ import sys
 import glob
 
 
-# In[5]:
-
-
+# +
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
 parser.add_argument('--data', metavar='DIR', nargs='?', default='./data',
                     help='path to dataset (default: imagenet)')
@@ -135,9 +142,9 @@ if utils.is_interactive():
     jupyter_args = jupyter_args.split()
     
     from IPython.display import clear_output # function to clear print outputs in cell
-    get_ipython().run_line_magic('load_ext', 'autoreload')
+    # %load_ext autoreload 
     # this allows you to change functions in models.py or utils.py and have this notebook automatically update with your revisions
-    get_ipython().run_line_magic('autoreload', '2')
+    # %autoreload 2 
 
 if utils.is_interactive():
     args = parser.parse_args(jupyter_args)
@@ -190,9 +197,7 @@ else:
         "logs": []
     }
 
-
-# In[6]:
-
+# -
 
 class Sequence(torch.utils.data.Dataset):
     def __init__(self, K, D,  
@@ -208,18 +213,20 @@ class Sequence(torch.utils.data.Dataset):
     
         # x = rng.standard_normal((K, D)) * (1.0 / np.sqrt(D)) # shape: (K, D) 
         self.scale = scale
-        if skip_generating_betas == False:
-            true_betas = torch.randn((K, D)) * scale #* (1.0 / np.sqrt(D)) # shape: (K, D)
-            self.true_betas = true_betas
+        
         self.K = K 
         self.D = D
         self.len_data = len_data
         if is_iso == "True":
             self.input_covariance_L = None
+            if skip_generating_betas == False:
+                true_betas = torch.randn((K, D)) * scale #* (1.0 / np.sqrt(D)) # shape: (K, D)
+                self.true_betas = true_betas
         else:
             print ("anisotropic case")
             sminus = 0.1
             splus = 1.0
+            data_scale = 1.0 / D
             # The proportion of eigenvalues at s₋ should be ρ₋
             rho_minus = 0.5
             # The proportion of eigenvalues at s₊ should be 1-ρ₋
@@ -233,19 +240,25 @@ class Sequence(torch.utils.data.Dataset):
             eigenvalues = np.concatenate([
                 np.ones(num_plus) * splus,
                 np.ones(num_minus) * sminus
-            ])
+            ]) * data_scale
             
             # Generate random orthogonal matrix
             # Q = np.linalg.qr(np.random.randn(D_sum, D_sum))[0]
             
             # Construct covariance matrix 
             # input_covariance = torch.tensor(Q @ np.diag(eigenvalues) @ Q.T, dtype=torch.float32) 
-            input_covariance = torch.tensor(np.diag(eigenvalues), dtype=torch.float32) 
+            # input_covariance = torch.tensor(np.diag(eigenvalues), dtype=torch.float32) 
             # self.input_covariance_L = torch.linalg.cholesky(input_covariance)  
             # self.input_covariance = input_covariance.to(device)  
             self.input_covariance_L = torch.sqrt(torch.tensor(eigenvalues, dtype=torch.float32))
-            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] * (np.sqrt(10)) 
-        
+            if skip_generating_betas == False:
+                true_betas = torch.randn((K, D)) #* (1.0 / np.sqrt(D)) # shape: (K, D)
+                self.true_betas = true_betas
+            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] * np.sqrt(splus / sminus)
+            self.permute_input_dimensions = True # whether to permute input dimensions
+            print ("self.input_covariance_L", self.input_covariance_L.shape, self.input_covariance_L) 
+            args.sigma_xi = np.sqrt(D * data_scale) 
+            
     def __len__(self):
         return self.len_data
 
@@ -255,7 +268,14 @@ class Sequence(torch.utils.data.Dataset):
         if self.input_covariance_L is None:
             x = torch.randn((self.len_context, self.D)) * self.scale  # shape: (self.len_context, D) * (1.0 / np.sqrt(self.D))
         else: 
-            x = torch.randn((self.len_context, self.D)) * self.input_covariance_L  
+            if self.permute_input_dimensions == True: 
+                input_features_permutation = torch.randperm(self.D)
+                input_covariance_L = self.input_covariance_L[input_features_permutation]
+                beta_incontext = beta_incontext[input_features_permutation] 
+            else:
+                input_covariance_L = self.input_covariance_L
+            x = torch.randn((self.len_context, self.D)) * input_covariance_L  
+            
             # x = torch.matmul(x, self.input_covariance_L.T) 
         noise = torch.randn((self.len_context, 1)) * args.sigma_xi
         y = torch.matmul(x, beta_incontext) + noise
@@ -269,15 +289,9 @@ class Sequence(torch.utils.data.Dataset):
         return samples.type(torch.float32), y.type(torch.float32), beta_incontext.type(torch.float32)  
 
 
-# In[7]:
-
-
 1
 
-
-# In[9]:
-
-
+# +
 # importlib.reload(gpt)
 import gpt
 criterion = nn.MSELoss().to(device)
@@ -335,10 +349,7 @@ elif args.scheduler == 'LinearWarmUpCosineDecay':
     three_phase=False)
     
 
-
-# In[ ]:
-
-
+# +
 # define the dataset
 train_kwargs = {'batch_size': args.batch_size}
 test_kwargs = {'batch_size': args.batch_size}
@@ -373,10 +384,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
 #                                             sampler=val_sampler,
 #                                             **test_kwargs)
 
-
-# In[39]:
-
-
+# +
 # # x, y, b = train_dataset[0]
 # # print (x.shape, y.shape, b.shape)
 # plt.hist (b[:32].flatten().cpu().numpy(), bins = 5, alpha = 0.5)
@@ -385,9 +393,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
 
 
 
-# In[ ]:
-
-
+# +
 # # torch.allclose(torch.matmul(x, b), y, atol = 1e-3)
 # import matplotlib.pyplot as plt
 # plt.scatter(torch.matmul(x, b).detach().cpu(), y.detach().cpu())
@@ -395,10 +401,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
 # print (torch.matmul(x, b))
 # print (y)
 
-
-# In[ ]:
-
-
+# +
 # def get_ridge_preds(seq, target, xtest, lam=1e-5):
 #     seqT = seq.permute(0, 2, 1) # batch_size x D x len_context
 #     ridge_matrix = torch.matmul(seqT, seq) # batch_size x D x D
@@ -491,10 +494,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
 #             # test_top1[seq_len].update(acc1, target.size(0))
 
 #     return test_losses 
-
-
-# In[ ]:
-
+# -
 
 import pickle
 # import matplotlib.pyplot as plt
@@ -584,15 +584,6 @@ record["model"] = copy.deepcopy(model.state_dict())
 if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
-
-
-# In[ ]:
-
-
-
-
-
-# In[ ]:
 
 
 
