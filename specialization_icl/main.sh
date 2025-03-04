@@ -6,7 +6,7 @@
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/abstop%j.out
 #SBATCH --gres=gpu:1
-# SBATCH --partition=mig
+#SBATCH --partition=mig
 # source activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 # conda activate renormalization
 source ../../learning_to_learn/l2l/bin/activate
