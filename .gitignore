@@ -4,6 +4,7 @@
 .DS_Store
 events.out.tf*
 *.pyc
+*/.ipynb_checkpoints/
 .ipynb_checkpoints/
 runs/
 *.pl
@@ -17,3 +18,6 @@ jupyter-notebook*
 *.log
 tensornetworks/data
 hipp.sh
+icl_memorization/cache 
+icl_memorization/slurms
+icl_memorization/wandb

@@ -29,16 +29,16 @@ source ../../learning_to_learn/l2l/bin/activate
  
 len_context=100 # 6
 gpt_bias=True
-lr=1e-4
+lr=1e-3
 optimizer="Adam"
-epochs=1000
+epochs=10000
 D_sum=32
 K=1048576
 data_scale=1.0
 resume="./cache/linreg_nov19_specgen_bias_Dsum__scheduler_None_K_1024_no_layernorm_input_opt_Adam_lr_1e-4_gpt_bias_True_epochs_500_visible_32_K_1024_D_64_L_100_hidden_128_coarse_abstop_1732079333.0764203.pkl" 
 coarse_graining="shrink_norm"
-fileprefix="feb_11" # "jan17_2pm"
-wandb_group_name="linreg_feb_11_aniso_datascale_${data_scale}_lr_${lr}_epochs_${epochs}_permute_input_dims"
+fileprefix="feb_15" # "jan17_2pm"
+wandb_group_name="linreg_mar4_aniso_datascale_${data_scale}_lr_${lr}_epochs_${epochs}_nopermute_forcesnr_1"
 scheduler="None"
 # coarse_graining="aniso_highvariance_shift"
 # input_covariance="anisotropic"
@@ -55,7 +55,7 @@ jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline ../../le
 # resume="./cache/linreg_nov19_specgen_bias_Dsum__scheduler_None_K_1048576_no_layernorm_input_opt_Adam_lr_1e-4_gpt_bias_True_epochs_500_visible_32_K_1048576_D_64_L_100_hidden_128_coarse_abstop_1732079442.9435685.pkl"
 # resume="./cache/linreg_nov19_specgen_bias_Dsum__scheduler_None_K_32768_no_layernorm_input_opt_Adam_lr_1e-4_gpt_bias_True_epochs_500_visible_32_K_32768_D_64_L_100_hidden_128_coarse_abstop_1732079299.9278684.pkl"
 # resume="./cache/linreg_nov19_specgen_bias_Dsum__scheduler_None_K_32_no_layernorm_input_opt_Adam_lr_1e-4_gpt_bias_True_epochs_500_visible_32_K_32_D_64_L_100_hidden_128_coarse_abstop_1732079383.3274248.pkl"
-# jupytext --to py analysis2.ipynb && WANDB_MODE=offline python -u analysis2.py --data ./cache --fileprefix ${fileprefix}  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 512 --optimizer Adam --lr 0.01 --wd 0.0  --epochs 1 --arch gpt --gpt_bias True --num_hidden_features 128 --num_layers 8 --len_context ${len_context} --K 1048576 --D_sum 64 --D_visible_frac 1 --sigma_xi 0.5   --no-wandb_log --wandb_project renormalization --wandb_group_name linreg_nov13_specgen_bias_Dsum_32 
+# jupytext --to py analysis2.ipynb && WANDB_MODE=offline python -u analysis2.py --data ./cache --fileprefix jan29_2pm  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 512 --optimizer Adam --lr 0.01 --wd 0.0  --epochs 1 --arch gpt --gpt_bias True --num_hidden_features 128 --num_layers 8 --len_context ${len_context} --K 1048576 --D_sum 64 --D_visible_frac 1 --sigma_xi 0.5   --no-wandb_log --wandb_project renormalization --wandb_group_name linreg_nov13_specgen_bias_Dsum_32 
 # SLURM_ARRAY_TASK_ID=5
 # which python
 # jupytext --to py analysis_scale_alignment_heatmap.ipynb && WANDB_MODE=offline python -u analysis_scale_alignment_heatmap.py --data ./cache --fileprefix ${fileprefix}  --SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID --batch-size 512 --optimizer Adam --lr 0.01 --wd 0.0  --epochs 1 --arch gpt --gpt_bias True --num_hidden_features 128 --num_layers 8 --len_context ${len_context} --K 1048576 --D_sum 32 --D_visible_frac 1 --sigma_xi 0.5   --no-wandb_log --wandb_project renormalization --wandb_group_name linreg_nov13_specgen_bias_Dsum_32 
