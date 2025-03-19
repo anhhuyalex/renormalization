@@ -2,16 +2,16 @@
 #SBATCH --job-name=specialization_icl
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=10G
-#SBATCH --time=24:00:00
+#SBATCH --time=36:00:00
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/abstop%j.out
 #SBATCH --gres=gpu:1
 # SBATCH --partition=mig
 # source activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 # conda activate renormalization
-# source ../../learning_to_learn/l2l/bin/activate
-source ~/.bashrc
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+source ../../learning_to_learn/l2l/bin/activate
+# source ~/.bashrc
+# conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
 # wandb login --relogin --host=https://stability.wandb.io
 # srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
@@ -28,7 +28,7 @@ conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 # D_visible_frac=${D_visible_frac_vals[$SLURM_ARRAY_TASK_ID % ${#D_visible_frac_vals[@]}]}
 # len_context=${len_context_vals[$SLURM_ARRAY_TASK_ID / ${#D_visible_frac_vals[@]}]}
  
-len_context=100 # 6
+len_context=200 # 6
 gpt_bias=True
 lr=1e-5
 optimizer="Adam"
@@ -39,7 +39,7 @@ data_scale=1.0
 resume="./cache/linreg_nov19_specgen_bias_Dsum__scheduler_None_K_1024_no_layernorm_input_opt_Adam_lr_1e-4_gpt_bias_True_epochs_500_visible_32_K_1024_D_64_L_100_hidden_128_coarse_abstop_1732079333.0764203.pkl" 
 coarse_graining="shrink_norm"
 fileprefix="feb_15" # "jan17_2pm"
-wandb_group_name="linreg_mar4_aniso_datascale_${data_scale}_lr_${lr}_epochs_${epochs}_nopermute_forcesnr_1"
+wandb_group_name="linreg_mar12_aniso_datascale_${data_scale}_lr_${lr}_epochs_${epochs}_nopermute_forcesnr_1"
 scheduler="None"
 # coarse_graining="aniso_highvariance_shift"
 # input_covariance="anisotropic"
