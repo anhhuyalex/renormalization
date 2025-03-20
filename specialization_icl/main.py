@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.2
+#       jupytext_version: 1.16.6
 #   kernelspec:
 #     display_name: Python (l2l)
 #     language: python
@@ -342,13 +342,14 @@ class Sequence(torch.utils.data.Dataset):
             # self.input_covariance_L = torch.linalg.cholesky(input_covariance)  
             # self.input_covariance = input_covariance.to(device)  
             self.input_covariance_L = (torch.tensor(eigenvalues, dtype=torch.float32))
+            
             if skip_generating_betas == False:
                 true_betas = torch.randn((K, D)) #* (1.0 / np.sqrt(D)) # shape: (K, D)
                 true_betas = true_betas 
                 self.true_betas = true_betas 
             
-            self.true_betas[:, :num_plus] = self.true_betas[:, :num_plus] / torch.linalg.norm(self.true_betas[:, :num_plus], dim=1).unsqueeze(1) * norm_wplus / np.sqrt(2)
-            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] / torch.linalg.norm(self.true_betas[:,num_plus:], dim=1).unsqueeze(1) * norm_wminus/ np.sqrt(2)
+            self.true_betas[:, :num_plus] = self.true_betas[:, :num_plus] / torch.linalg.norm(self.true_betas[:, :num_plus], dim=1).unsqueeze(1) * norm_wplus/  np.sqrt(2)
+            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] / torch.linalg.norm(self.true_betas[:,num_plus:], dim=1).unsqueeze(1) * norm_wminus / np.sqrt(2)
             
             # normalize weights separately
             
@@ -502,7 +503,7 @@ ys = []
 pi_pluses = []
 pi_minuses = []
 # train_dataset.input_covariance_L = torch.ones_like(train_dataset.input_covariance_L) 
-print ("args.sigma_xi", args.sigma_xi)
+print ("args.sigma_xi", args.sigma_xi, "args.is_iso", args.is_iso)
 for i in range(10000):
     x, y, b = train_dataset[i]
     ys.extend(y.flatten().cpu().numpy())
@@ -512,7 +513,8 @@ for i in range(10000):
         # shuffle x and b according to perm 
         # x = x[:, perm] 
         # b = b[perm]
-        print ("norm plus", torch.linalg.norm(b[:16]), "norm minus", torch.linalg.norm(b[16:]))
+        print ("norm plus", torch.linalg.norm(b[:16]), 1/(np.sqrt(np.sqrt(10))), "norm minus", torch.linalg.norm(b[16:]))
+        print ("b plus", b[:16].flatten(), "b minus", b[16:].flatten())
         plt.hist (b[:16].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "positive")
         plt.hist (b[16:].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "negative")
         plt.title("b, positive and negative components")
