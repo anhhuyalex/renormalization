@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 import argparse
 from collections import defaultdict
-
+import utils
 # Import configuration
 from config import (
     FIGURE_OUTPUT_DIR, 
@@ -99,7 +99,7 @@ def load_experiment_data(run_paths: List[str]) -> List[Dict[str, Any]]:
         print(f"Loading: {run_path}")
         try:
             with open(run_path, "rb") as f:
-                record = pickle.load(f)
+                record = utils.CPU_Unpickler(f).load()
             print(f"Loaded record with {len(record['logs'])} logs")
             records.append(record)
         except Exception as e:
@@ -262,7 +262,6 @@ def create_visualization(metrics_df: pd.DataFrame,
     # Number of unique categories for coloring
     n_categories = len(df[hue_column].unique())
     color_palette = sns.color_palette(PLOT_CONFIG["color_palette"], n_categories)
-    display(df)
     # Plot 1: Loss vs Presentations (line)
     plt.figure(figsize=PLOT_CONFIG["figsize"])
     sns.lineplot(
@@ -513,6 +512,3 @@ def main(args: argparse.Namespace = None) -> None:
         )
 if __name__ == "__main__":
     main()
-
-
- 

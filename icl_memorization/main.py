@@ -155,28 +155,24 @@ if args.wandb_group_name == "memo_feb26_uniformdist_modelsize":
     args.num_layers = num_layers[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
     print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
     args.sequence_sampling_distribution = "uniform"
-elif args.wandb_group_name == "memo_feb26_zipf_num_heads_8_num_layers_12":
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_8_num_layers_12":
     args.num_heads = 8
     args.num_layers = 12
     set_zipf_exp_params(args)
-elif args.wandb_group_name == "memo_feb26_zipf_num_heads_16_num_layers_24":
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_16_num_layers_24":
     args.num_heads = 16
     args.num_layers = 24
     set_zipf_exp_params(args)
-elif args.wandb_group_name == "memo_feb26_zipf_num_heads_24_num_layers_36":
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36":
     args.num_heads = 24
     args.num_layers = 36
     set_zipf_exp_params(args)
-elif args.wandb_group_name == "memo_feb26_zipf_num_heads_24_num_layers_36_lr_1e-4":
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4":
     args.num_heads = 24
     args.num_layers = 36
     args.lr = 1e-4
     set_zipf_exp_params(args)
-elif args.wandb_group_name == "memo_feb26_zipf_num_heads_24_num_layers_36_rope_embedding":
-    args.num_heads = 24
-    args.num_layers = 36
-    args.rope_embedding = True
-    set_zipf_exp_params(args)
+
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -489,7 +485,7 @@ if os.path.exists(f"./cache/{args.wandb_group_name}") == False:
     os.makedirs(f"./cache/{args.wandb_group_name}", exist_ok=True)
 exp_name = f"./cache/{args.wandb_group_name}/{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_L_{args.len_context}_hidden_{args.num_hidden_features}_nheads_{args.num_heads}_nlayers_{args.num_layers}_{time.time()}.pkl"
 print("Saving to", exp_name)
-num_iters_per_epoch = 1000
+num_iters_per_epoch = 50
 num_apppearances = np.zeros(args.K)
 test_every = np.log10(args.K).astype(int) * 2
 for iter in range(args.num_iters // num_iters_per_epoch):
@@ -560,6 +556,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
     # save phi_xt_list_epoch 
 
     if iter % 10 == 0 and args.wandb_log != True:
+        record["model"] = model.state_dict()
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
         # use json
