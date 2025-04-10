@@ -1,15 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=specialization_icl
-#SBATCH --cpus-per-task=2
-#SBATCH --mem-per-cpu=20G
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=40G
 #SBATCH --time=36:00:00
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/%j.out
 #SBATCH --gres=gpu:1
 # SBATCH --partition=mig
 # source activate renormalization
-source ../../learning_to_learn/l2l/bin/activate
-
+source ~/.bashrc
+cd /jukebox/norman/qanguyen/patdiff_seq
+conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
 # wandb login --relogin --host=https://stability.wandb.io
 # srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
