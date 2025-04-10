@@ -8,9 +8,10 @@
 #SBATCH --gres=gpu:1
 # SBATCH --partition=mig
 # source activate renormalization
-source ~/.bashrc
-cd /jukebox/norman/qanguyen/patdiff_seq
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+source ../../learning_to_learn/l2l/bin/activate
+# source ~/.bashrc
+# cd /jukebox/norman/qanguyen/patdiff_seq
+# conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
 # wandb login --relogin --host=https://stability.wandb.io
 # srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
@@ -36,7 +37,7 @@ num_iters=5000000
 K=1000
 sequence_sampling_distribution="uniform"
 # SLURM_ARRAY_TASK_ID=0
-wandb_group_name=memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4  # memo_dec20_uniformdist_modelsize # memo_feb24_zipf
+wandb_group_name=memo_apr10_zipf_num_heads_24_num_layers_36_resample_lr_1e-4 # memo_dec20_uniformdist_modelsize # memo_feb24_zipf
 jupyter nbconvert --to python main.ipynb && for run in {0..0}; do WANDB_MODE=offline ../../learning_to_learn/l2l/bin/python -u main.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 8 --num_layers 4 --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name}  ; done 
 # jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline ../../learning_to_learn/l2l/bin/python -u analysis.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 8 --num_layers 4 --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name}  ; done 
  

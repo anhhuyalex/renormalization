@@ -108,11 +108,15 @@ parser.add_argument('--sequence_sampling_distribution', type=str,
                     default="uniform", 
                     choices = ["uniform", "zipf"],
                     help='sequence_sampling_distribution')
+parser.add_argument('--is_resample_tasks', default="False", type=str,
+                    help='whether to resample tasks')
 parser.add_argument(
             '--fileprefix', 
             default="",
             type=str, 
             action='store') 
+parser.add_argument('--resume', type=str, default=None,
+                    help='resume from checkpoint')
     
 
 # if running this interactively, can specify jupyter_args here for argparser to use
@@ -159,10 +163,22 @@ elif args.wandb_group_name == "memo_apr6_zipf_num_heads_8_num_layers_12":
     args.num_heads = 8
     args.num_layers = 12
     set_zipf_exp_params(args)
+    # args.resume = './cache/memo_apr6_zipf_num_heads_8_num_layers_12/memo_apr6_zipf_num_heads_8_num_layers_12_transformer_K_100000_L_100_hidden_8_nheads_8_nlayers_12_1744050810.647857.pkl'
+elif args.wandb_group_name == "memo_apr10_zipf_num_heads_8_num_layers_12_resample":
+    args.num_heads = 8
+    args.num_layers = 12
+    set_zipf_exp_params(args)
+    args.is_resample_tasks = "True"
 elif args.wandb_group_name == "memo_apr6_zipf_num_heads_16_num_layers_24":
     args.num_heads = 16
     args.num_layers = 24
     set_zipf_exp_params(args)
+    # args.resume = './cache/memo_apr6_zipf_num_heads_16_num_layers_24/memo_apr6_zipf_num_heads_16_num_layers_24_transformer_K_100000_L_100_hidden_8_nheads_16_nlayers_24_1744134825.3819082.pkl'
+elif args.wandb_group_name == "memo_apr10_zipf_num_heads_16_num_layers_24_resample":
+    args.num_heads = 16
+    args.num_layers = 24
+    set_zipf_exp_params(args)
+    args.is_resample_tasks = "True"
 elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36":
     args.num_heads = 24
     args.num_layers = 36
@@ -172,7 +188,14 @@ elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4
     args.num_layers = 36
     args.lr = 1e-4
     set_zipf_exp_params(args)
-
+    # args.resume = './cache/memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4/memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4_transformer_K_100000_L_100_hidden_8_nheads_24_nlayers_36_1744050810.8180943.pkl'
+elif args.wandb_group_name == "memo_apr10_zipf_num_heads_24_num_layers_36_resample_lr_1e-4":
+    args.num_heads = 24
+    args.num_layers = 36
+    set_zipf_exp_params(args)
+    args.is_resample_tasks = "True"
+    args.lr = 1e-4
+    
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -218,6 +241,11 @@ else:
         "args": vars(args),
         "logs": []
     }
+if args.resume is not None:
+    with open(args.resume, 'rb') as f:
+        record = pickle.load(f)
+    args = record['args']
+    
 
 
 # In[11]:
@@ -235,13 +263,16 @@ class Sequence(torch.utils.data.Dataset):
         self.len_data = len_data
         self.sequence_sampling_distribution = sequence_sampling_distribution
         if skip == False:
-            self.sequences = torch.randint(0, 2, (self.K, self.len_context)) 
+            self.generate_sequences()
         if args.sequence_sampling_distribution == "zipf":
             self.p = 1.0 / np.arange(1, self.K + 1)
             self.p /= np.sum(self.p)
         else:
             assert self.sequence_sampling_distribution == "uniform", f"sequence_sampling_distribution must be uniform or zipf, got {self.sequence_sampling_distribution}"
         self.skip = skip
+    def generate_sequences(self):
+        self.sequences = torch.randint(0, 2, (self.K, self.len_context)) 
+        
     def __len__(self):
         return self.len_data
 
@@ -489,6 +520,9 @@ num_iters_per_epoch = 50
 num_apppearances = np.zeros(args.K)
 test_every = np.log10(args.K).astype(int) * 2
 for iter in range(args.num_iters // num_iters_per_epoch):
+    if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
+        train_dataset.generate_sequences()
+        num_apppearances = np.zeros(args.K)
     logs = {
         "num_apppearances": copy.deepcopy(num_apppearances),
     }
@@ -567,299 +601,4 @@ if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
 sys.exit(0)
-
-
-# In[ ]:
-
-
-import pickle
-import traceback
-import wandb
-import seaborn as sns
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from glob import glob
- 
-wandb_group_name = "memo_dec20_uniformdist_modelsize"
-# Filter runs by group name
-# Initialize lists to store data for the heatmap
-n_heads_list = []
-n_layers_list = []
-accuracy_list = []
-loss_list = []
-item=0
-runs = glob(f"./cache/{wandb_group_name}/{wandb_group_name}_*.pkl")
-
-import json
-from collections import defaultdict
-for run in runs :
-    # Extract model configurations
-    print(run)
-    try: 
-        with open(run, "rb") as f:
-            record = pickle.load(f)
-    except Exception as e:
-        print(traceback.format_exc()) 
-        continue 
-    # record = json.loads(run)
-    print(record.keys(), len(record["logs"]), record["logs"][0].keys())
-    n_heads_list.append(record["args"]["num_heads"]) 
-    n_layers_list.append(record["args"]["num_layers"])
-    loss_across_positions = [v for k, v in record["logs"][-1].items() if "test_loss_" in k] 
-    loss_list.append(np.mean(loss_across_positions))
-    for k, v in record["logs"][-1].items():
-        if "test_top1_" in k:
-            try: 
-                accuracy_across_positions += [v.item()] 
-            except: 
-                accuracy_across_positions += [v]
-    accuracy_list.append(np.mean(accuracy_across_positions)) 
-    print ("loss_across_positions", loss_across_positions)
-
-
-# In[ ]:
-
-
-import json
-for run in runs[0:1]:
-    # Extract model configurations
-    print(run)
-    # try: 
-    with open(run, "rb") as f:
-        record = pickle.load(f)
-    # record = json.loads(run)
-    print(record.keys(), len(record["logs"]), record["logs"][0].keys())
-    # except Exception as e: 
-    #     print (traceback.format_exc())
-    #     continue
-    
-    # Extract model configurations
-    for i, l in enumerate(record["logs"]):
-        test = l.get("test_metrics")
-        if len(test) > 0:
-            print(test.keys())
-            test = pd.DataFrame(test)
-            #display(test)
-            pivot = test.pivot_table(index="length", columns="sequence_rank", values="logsoftmaxloss")
-            #display(pivot)
-            # plt.figure(figsize=(12,8))
-            # sns.heatmap(pivot, annot=False, vmin=0, vmax=1)
-            # plt.show()
-            pivot = test.pivot_table(index="length", columns="sequence_rank", values="accuracy")
-            #display(pivot)
-            # plt.figure(figsize=(12,8))
-            # sns.heatmap(pivot, annot=False)
-            # plt.show()
-            K = record["args"]["K"]
-            p = np.array([1/(i+1) for i in range(K)])
-            p /= np.sum(p)
-            expected_number_of_presentations = p * record["args"]["num_iter_per_epoch"] * len(record["logs"])
-            # print ("expected_number_of_presentations", expected_number_of_presentations)
-            loss_at_20 = test[test["length"] == 20]["logsoftmaxloss"] 
-            display (loss_at_20)
-        else:
-            print ("epoch", i, "no test_metrics")
-            
-
-
-# In[ ]:
-
-
-import pickle
-import traceback
-import wandb
-import seaborn as sns
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from glob import glob
- 
-wandb_group_name = "memo_feb17_zipf"
-# Filter runs by group name
-# Initialize lists to store data for the heatmap
-n_heads_list = []
-n_layers_list = []
-accuracy_list = []
-train_loss_list = [[], [], []]
-test_loss_list = []
-item=0
-runs = glob(f"./cache/{wandb_group_name}/{wandb_group_name}_*.pkl")
-
-import json
-from collections import defaultdict
-# runs=['./cache/memo_feb26_zipf_num_heads_8_num_layers_12/memo_feb26_zipf_num_heads_8_num_layers_12_transformer_K_100000_L_100_hidden_8_nheads_8_nlayers_12_1741157493.041445.pkl']
-# runs=['./cache/memo_feb26_zipf_num_heads_16_num_layers_24/memo_feb26_zipf_num_heads_16_num_layers_24_transformer_K_100000_L_100_hidden_8_nheads_16_nlayers_24_1740632142.5650826.pkl']
-# runs=['./cache/memo_feb26_zipf_num_heads_24_num_layers_36_rope_embedding/memo_feb26_zipf_num_heads_24_num_layers_36_rope_embedding_transformer_K_100000_L_100_hidden_8_nheads_24_nlayers_36_1740632491.7617574.pkl']
-# runs=['./cache/memo_feb26_zipf_num_heads_24_num_layers_36_lr_1e-4/memo_feb26_zipf_num_heads_24_num_layers_36_lr_1e-4_transformer_K_100000_L_100_hidden_8_nheads_24_nlayers_36_1741161215.594898.pkl']
-
-runs = ['./cache/memo_feb26_zipf_num_heads_8_num_layers_12/memo_feb26_zipf_num_heads_8_num_layers_12_transformer_K_100000_L_100_hidden_8_nheads_8_nlayers_12_1741157493.041445.pkl',
-        './cache/memo_feb26_zipf_num_heads_16_num_layers_24/memo_feb26_zipf_num_heads_16_num_layers_24_transformer_K_100000_L_100_hidden_8_nheads_16_nlayers_24_1740632142.5650826.pkl',
-        './cache/memo_feb26_zipf_num_heads_24_num_layers_36_rope_embedding/memo_feb26_zipf_num_heads_24_num_layers_36_rope_embedding_transformer_K_100000_L_100_hidden_8_nheads_24_nlayers_36_1740632491.7617574.pkl',
-        './cache/memo_feb26_zipf_num_heads_24_num_layers_36_lr_1e-4/memo_feb26_zipf_num_heads_24_num_layers_36_lr_1e-4_transformer_K_100000_L_100_hidden_8_nheads_24_nlayers_36_1741161215.594898.pkl']
-        
-        
-
-for run in runs :
-    # Extract model configurations
-    print(run)
-    # try: 
-    with open(run, "rb") as f:
-        record = pickle.load(f)
-    # record = json.loads(run)
-    print(record.keys(), len(record["logs"]), record["logs"][0].keys())
-    # except Exception as e: 
-    #     print (traceback.format_exc())
-    #     continue
-    
-    # Extract model configurations
-    acc_vs_presentations = defaultdict(list)
-    for i, l in enumerate(record["logs"]):
-        train_loss_list[0].append(i) # epoch 
-        train_loss_list[1].append(l["train_loss"])
-        train_loss_list[2].append(record["args"]["wandb_group_name"])
-        test = l.get("test_metrics")
-        if len(test) > 0:
-            print(test.keys())
-            test = pd.DataFrame(test)
-            #display(test)
-            pivot = test.pivot_table(index="length", columns="sequence_rank", values="logsoftmaxloss")
-            #display(pivot)
-            # plt.figure(figsize=(12,8))
-            # sns.heatmap(pivot, annot=False, vmin=0, vmax=1)
-            # plt.xlabel("Sequence Rank")
-            # plt.ylabel("Position in Sequence")
-            # plt.title("Log Softmax Loss vs. Sequence Rank vs. Position in Sequence")
-            # plt.tight_layout()
-            # plt.savefig(f"./cache/zipf_figs/logsoftmaxloss_vs_sequence_rank_vs_position_in_sequence_epoch_{i}.png")
-            # plt.show()
-            pivot = test.pivot_table(index="length", columns="sequence_rank", values="accuracy")
-            #display(pivot)
-            # plt.figure(figsize=(12,8))
-            # sns.heatmap(pivot, annot=False)
-            # plt.xlabel("Sequence Rank")
-            # plt.ylabel("Position in Sequence")
-            # plt.title("Accuracy vs. Sequence Rank vs. Position in Sequence")
-            # plt.savefig(f"./cache/zipf_figs/accuracy_vs_sequence_rank_vs_position_in_sequence_epoch_{i}.png")
-            # plt.show()
-            K = record["args"]["K"]
-            p = np.array([1/(i+1) for i in range(K)])
-            p /= np.sum(p)
-            expected_number_of_presentations = l.get ("num_apppearances") 
-            print("num_apppearances", l.get ("num_apppearances") )
-            expected_number_of_presentations += (np.zeros_like(expected_number_of_presentations)+1e-10)
-            
-            # display (expected_number_of_presentations)
-            # average over sequence rank, and plot logsoftmaxloss vs. expected number of presentations 
-            avg_test = test.groupby("sequence_rank").mean()
-             
-            # loss_at_20 = test[test["length"] == 20]["logsoftmaxloss"] 
-            avg_loss = avg_test["logsoftmaxloss"]
-            accuracy_vs_presentations = test.groupby("sequence_rank").mean()["accuracy"].to_list()
-             
-            # print(accuracy_at_20)
-            # display (loss_at_20)
-            loss_vs_expected_number_of_presentations = pd.DataFrame({
-                "expected_number_of_presentations": expected_number_of_presentations,
-                "logsoftmaxloss": avg_loss,
-                "accuracy_vs_presentations": accuracy_vs_presentations, 
-            })
-            acc_vs_presentations["number_of_presentations"].extend(expected_number_of_presentations)
-            acc_vs_presentations["logsoftmaxloss"].extend(avg_loss)
-            acc_vs_presentations["accuracy_vs_presentations"].extend(accuracy_vs_presentations)
-            acc_vs_presentations["rank"].extend(range(K))
-            # sns.scatterplot (x = "expected_number_of_presentations", y = "logsoftmaxloss", data = loss_vs_expected_number_of_presentations)
-            # plt.yscale("log")
-            # plt.xscale("log")
-            # plt.xlabel("Expected Number of Presentations")
-            # plt.ylabel("Log Loss")
-            # plt.tight_layout()
-            # plt.savefig(f"./cache/zipf_figs/logsoftmaxloss_vs_expected_number_of_presentations_epoch_{i}.png")
-            # plt.show()
-            # sns.scatterplot (x = "expected_number_of_presentations", y = "accuracy_vs_presentations", data = loss_vs_expected_number_of_presentations)
-            # plt.xscale("log")
-            # plt.xlabel("Expected Number of Presentations")
-            # plt.ylabel("Accuracy")
-            # plt.ylim(0, 1)
-            # plt.tight_layout()
-            # plt.savefig(f"./cache/zipf_figs/accuracy_vs_expected_number_of_presentations_epoch_{i}.png")
-            # plt.show()
-        else:
-            print ("epoch", i, "no test_metrics")
-
-    # plt.figure(figsize=(12,8))
-    # # plot logsoftmaxloss vs. number of presentations
-    # sns.lineplot(x = "number_of_presentations", y = "logsoftmaxloss", hue = "rank", data = acc_vs_presentations)
-    # plt.yscale("log")
-    # plt.xscale("log")
-    # plt.xlabel("Expected Number of Presentations")
-    # plt.ylabel("Log Loss")
-    # plt.tight_layout()
-    # plt.savefig(f"./cache/zipf_figs/logsoftmaxloss_vs_number_of_presentations_per_rank.png")
-    # plt.show()
-    # plt.figure(figsize=(12,8))
-    # # plot accuracy vs. number of presentations
-    # sns.lineplot(x = "number_of_presentations", y = "accuracy_vs_presentations", hue = "rank", data = acc_vs_presentations)
-    # plt.xscale("log")
-    # plt.xlabel("Expected Number of Presentations")
-    # plt.ylabel("Accuracy")
-    # plt.ylim(0, 1)
-    # plt.tight_layout()
-    # plt.savefig(f"./cache/zipf_figs/accuracy_vs_number_of_presentations_per_rank.png")
-    # plt.show()
-
-
-# In[ ]:
-
-
-_train_loss = pd.DataFrame({
-    "epoch": train_loss_list[0],
-    "train_loss": train_loss_list[1],
-    "wandb_group_name": train_loss_list[2]
-})
-sns.lineplot(x = "epoch", y = "train_loss", hue = "wandb_group_name", data = _train_loss)
-plt.xlabel("Epoch = 1000 iterations")
-plt.ylabel("Train Loss")
-plt.title("Train Loss vs. Epoch") 
-plt.yscale("log")
-plt.show()
-
-
-# In[ ]:
-
-
-# Plot line of test top-1 accuracy vs model size for each number of heads and number of layers
-fig, ax = plt.subplots(figsize=(10, 8))
-sns.lineplot(data=df, x="num_params_list", y="accuracy", hue="n_heads", marker="o", palette="tab10")
-plt.title("Test Top-1 Accuracy vs Model Size")
-plt.xlabel("Number of Parameters")
-plt.ylabel(f"Test Top-1 Accuracy @ {item}th item")
-plt.legend(title="Number of Heads")
-ax.semilogx()
-plt.show()
-fig, ax = plt.subplots(figsize=(10, 8))
-sns.lineplot(data=df, x="num_params_list", y="accuracy", hue="n_layers", marker="o", palette="tab10")
-plt.title("Test Top-1 Accuracy vs Model Size")
-plt.xlabel("Number of Parameters")
-plt.ylabel(f"Test Top-1 Accuracy @ {item}th item")
-plt.legend(title="Number of Heads")
-ax.semilogx()
-plt.show()
-# Plot line of test loss vs model size for each number of heads and number of layers
-fig, ax = plt.subplots(figsize=(10, 8))
-sns.lineplot(data=df, x="num_params_list", y="test_loss", hue="n_heads", marker="o", palette="tab10")
-plt.title("Test Top-1 Accuracy vs Model Size")
-plt.xlabel("Number of Parameters")
-plt.ylabel(f"Test Top-1 Accuracy @ {item}th item")
-plt.legend(title="Number of Heads")
-ax.semilogx()
-plt.show()
-fig, ax = plt.subplots(figsize=(10, 8))
-sns.lineplot(data=df, x="num_params_list", y="test_loss", hue="n_layers", marker="o", palette="tab10")
-plt.title("Test Top-1 Accuracy vs Model Size")
-plt.xlabel("Number of Parameters")
-plt.ylabel(f"Test Top-1 Accuracy @ {item}th item")
-plt.legend(title="Number of Heads")
-ax.semilogx()
-plt.show()
 
