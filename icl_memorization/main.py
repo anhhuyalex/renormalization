@@ -1,9 +1,18 @@
-#!/usr/bin/env python
-# coding: utf-8
+# ---
+# jupyter:
+#   jupytext:
+#     text_representation:
+#       extension: .py
+#       format_name: light
+#       format_version: '1.5'
+#       jupytext_version: 1.16.2
+#   kernelspec:
+#     display_name: Python (l2l)
+#     language: python
+#     name: l2l
+# ---
 
-# In[1]:
-
-
+# +
 import argparse
 import os
 import copy
@@ -41,10 +50,7 @@ import sys
 import glob
 from collections import defaultdict
 
-
-# In[ ]:
-
-
+# +
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
 parser.add_argument('--data', metavar='DIR', nargs='?', default='./data',
                     help='path to dataset (default: imagenet)')
@@ -138,9 +144,9 @@ if utils.is_interactive():
     jupyter_args = jupyter_args.split()
     
     from IPython.display import clear_output # function to clear print outputs in cell
-    get_ipython().run_line_magic('load_ext', 'autoreload')
+    # %load_ext autoreload 
     # this allows you to change functions in models.py or utils.py and have this notebook automatically update with your revisions
-    get_ipython().run_line_magic('autoreload', '2')
+    # %autoreload 2 
 
 if utils.is_interactive():
     args = parser.parse_args(jupyter_args)
@@ -150,7 +156,7 @@ else:
 def set_zipf_exp_params(args):
     args.sequence_sampling_distribution = "zipf"
     args.K = 100000
-    args.num_iters = 5000000
+    args.num_iters = 10000
 
 if args.wandb_group_name == "memo_feb26_uniformdist_modelsize":
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
@@ -247,9 +253,7 @@ if args.resume is not None:
     args = record['args']
     
 
-
-# In[11]:
-
+# +
 
 class Sequence(torch.utils.data.Dataset):
     def __init__(self, K,   
@@ -286,9 +290,8 @@ class Sequence(torch.utils.data.Dataset):
         return samples.type(torch.long), i 
 
 
-# In[ ]:
 
-
+# +
 # importlib.reload(gpt)
 import gpt
 criterion = nn.CrossEntropyLoss()
@@ -322,10 +325,7 @@ iters_per_epoch = 1000
 #                        total_steps=args.epochs * iters_per_epoch, 
 #                        pct_start=0.5,
 #                        steps_per_epoch=iters_per_epoch, epochs=args.epochs)
-
-
-# In[13]:
-
+# -
 
 # define the dataset
 train_kwargs = {'batch_size': args.batch_size}
@@ -360,9 +360,7 @@ iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
                                         'pin_memory': True})
 
 
-# In[14]:
-
-
+# +
 # # test dataset construction 
 # ihistogram = []
 # for _, (seq, i) in enumerate(train_loader):
@@ -383,9 +381,7 @@ iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
 # plt.ylabel("freq")
 # plt.show()
 
-
-# In[18]:
-
+# +
 
 def validate_gradient_descent(epoch, val_loader, model, args, criterion, device):
     # seq_lens = list(range(1, args.len_context+1, 5)) 
@@ -506,9 +502,7 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
  
 
 
-# In[ ]:
-
-
+# +
 import json
 import pickle
 # import matplotlib.pyplot as plt
@@ -601,4 +595,3 @@ if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
 sys.exit(0)
-
