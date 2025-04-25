@@ -7,9 +7,9 @@
 #       format_version: '1.5'
 #       jupytext_version: 1.16.2
 #   kernelspec:
-#     display_name: Python (l2l)
+#     display_name: Python (fmri)
 #     language: python
-#     name: l2l
+#     name: fmri
 # ---
 
 # +
@@ -156,7 +156,17 @@ else:
 def set_zipf_exp_params(args):
     args.sequence_sampling_distribution = "zipf"
     args.K = 100000
-    args.num_iters = 10000
+    args.num_iters = 40000
+    
+def set_zipf_exp_params_resample(args): 
+    set_zipf_exp_params(args)
+    args.is_resample_tasks = "True"
+    args.num_iters = 20000
+
+def set_zipf_exp_params_forget(args):
+    set_zipf_exp_params(args)
+    args.is_resample_tasks = "Forget"
+    args.num_iters = 40000
 
 if args.wandb_group_name == "memo_feb26_uniformdist_modelsize":
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
@@ -173,8 +183,11 @@ elif args.wandb_group_name == "memo_apr6_zipf_num_heads_8_num_layers_12":
 elif args.wandb_group_name == "memo_apr10_zipf_num_heads_8_num_layers_12_resample":
     args.num_heads = 8
     args.num_layers = 12
-    set_zipf_exp_params(args)
-    args.is_resample_tasks = "True"
+    set_zipf_exp_params_resample(args)
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_8_num_layers_12_forget":
+    args.num_heads = 8
+    args.num_layers = 12
+    set_zipf_exp_params_forget(args)
 elif args.wandb_group_name == "memo_apr6_zipf_num_heads_16_num_layers_24":
     args.num_heads = 16
     args.num_layers = 24
@@ -183,8 +196,11 @@ elif args.wandb_group_name == "memo_apr6_zipf_num_heads_16_num_layers_24":
 elif args.wandb_group_name == "memo_apr10_zipf_num_heads_16_num_layers_24_resample":
     args.num_heads = 16
     args.num_layers = 24
-    set_zipf_exp_params(args)
-    args.is_resample_tasks = "True"
+    set_zipf_exp_params_resample(args)
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_16_num_layers_24_forget":
+    args.num_heads = 16
+    args.num_layers = 24
+    set_zipf_exp_params_forget(args)
 elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36":
     args.num_heads = 24
     args.num_layers = 36
@@ -195,11 +211,20 @@ elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4
     args.lr = 1e-4
     set_zipf_exp_params(args)
     # args.resume = './cache/memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4/memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4_transformer_K_100000_L_100_hidden_8_nheads_24_nlayers_36_1744050810.8180943.pkl'
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-5":
+    args.num_heads = 24
+    args.num_layers = 36
+    args.lr = 1e-5
+    set_zipf_exp_params(args)
+elif args.wandb_group_name == "memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-4_forget":
+    args.num_heads = 24
+    args.num_layers = 36
+    args.lr = 1e-4
+    set_zipf_exp_params_forget(args)
 elif args.wandb_group_name == "memo_apr10_zipf_num_heads_24_num_layers_36_resample_lr_1e-4":
     args.num_heads = 24
     args.num_layers = 36
-    set_zipf_exp_params(args)
-    args.is_resample_tasks = "True"
+    set_zipf_exp_params_resample(args)
     args.lr = 1e-4
     
 # assert args.K % args.L == 0, "K must be divisible by L"
@@ -294,7 +319,7 @@ class Sequence(torch.utils.data.Dataset):
 # +
 # importlib.reload(gpt)
 import gpt
-criterion = nn.CrossEntropyLoss()
+criterion = nn.NLLLoss(reduction="none")
 # define the model, optimizer, and scheduler, and criterion
 if args.arch == "gpt":
     import gpt 
@@ -343,9 +368,9 @@ train_dataset = Sequence(K=args.K,
                          sequence_sampling_distribution = args.sequence_sampling_distribution
                          )
 iwl_dataset = Sequence(K=args.K, len_context=args.len_context,  skip=True, 
-                       len_data = args.K,
+                       len_data = args.K // 10,
                        sequence_sampling_distribution = "uniform")
-iwl_dataset.sequences = train_dataset.sequences
+iwl_dataset.sequences = train_dataset.sequences[::10] # take every 10th sequence from train_dataset
 print ("sequences.sequence_sampling_distribution", iwl_dataset.sequence_sampling_distribution)
 train_sampler = None
 val_sampler = None 
@@ -459,45 +484,13 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
                 sequence_ranks[task, i_seq] = task 
                 lengths[task, i_seq] = i_seq + 1 
                 logsoftmaxlosses[task, i_seq] = logsoftmaxloss 
-                accuracys[task, i_seq] = is_correct.float()
-                # test_metrics["length"].append([i_seq+1] * logsoftmaxloss.shape[0])
-                # test_metrics["logsoftmaxloss"].append(logsoftmaxloss.detach().cpu().numpy())
-                
-                # test_metrics["accuracy"].append(is_correct.detach().cpu().numpy())
-                # else: 
+                accuracys[task, i_seq] = is_correct.float() 
 
-                # print ("i_seq", i_seq, "logsoftmaxloss", logsoftmaxloss.shape )
-                
-    # for c in test_metrics:
-    #     # test_metrics[c] = np.concatenate(test_metrics[c]) 
-    #     try: 
-    #         print("test", c,  [_.shape for _ in test_metrics[c]])
-    #     except:
-    #         pass
-    # print ("sequence_ranks", sequence_ranks.shape)
-    # print ("lengths", lengths.shape)
-    # print ("logsoftmaxlosses", logsoftmaxlosses.shape)
-    # print ("accuracys", accuracys.shape)
-    if args.K < 10000: # for small K, we can save the whole tensor 
-        test_metrics["sequence_rank"] = sequence_ranks.detach().cpu().numpy()
-        test_metrics["length"] = lengths.detach().cpu().numpy()
-        test_metrics["logsoftmaxloss"] = logsoftmaxlosses.detach().cpu().numpy()
-        test_metrics["accuracy"] = accuracys.detach().cpu().numpy()
-    else:
-        test_metrics["sequence_rank"] = sequence_ranks[:,0].detach().cpu().numpy() # average over positions
-        test_metrics["length"] = 50
-        test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
-        test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
-    
-    # test_metrics = pd.DataFrame(test_metrics)
-    # df = test_metrics.groupby(["sequence_rank", "length"]).mean()
-    # pivot = test_metrics.pivot_table(index="length", columns="sequence_rank", values="logsoftmaxloss")
-    # import pandas as pd 
-    # import seaborn as sns
-    # import matplotlib.pyplot as plt
-    # plt.figure(figsize=(12, 8))
-    # sns.heatmap(pivot, annot=False)
-    # plt.show()
+    test_metrics["sequence_rank"] = sequence_ranks[:,0].detach().cpu().numpy() # average over positions
+    test_metrics["length"] = 50
+    test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
+    test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
+     
     return test_metrics
  
 
@@ -512,11 +505,43 @@ exp_name = f"./cache/{args.wandb_group_name}/{args.wandb_group_name}_{args.filep
 print("Saving to", exp_name)
 num_iters_per_epoch = 50
 num_apppearances = np.zeros(args.K)
-test_every = np.log10(args.K).astype(int) * 2
+test_every = 1 # np.log10(args.K).astype(int) * 2
+all_sequences_across_switches = {
+    "sequences": [],
+    "switch_start_iter": [],
+}
 for iter in range(args.num_iters // num_iters_per_epoch):
+    # Switch the sequences half way through the training
     if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
+        all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
+        all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences))
         train_dataset.generate_sequences()
+        if args.sequence_sampling_distribution == "zipf":
+            iwl_dataset.sequences = train_dataset.sequences[::10] # take every 10th sequence from train_dataset
+            iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
+                                            sampler=val_sampler,
+                                            **{'batch_size': args.batch_size, 'num_workers': args.workers,
+                                        "shuffle": False,
+                                        'pin_memory': True})
         num_apppearances = np.zeros(args.K)
+        
+    # Switch the sequences several times throughout the training
+    # Save the sequences and the start iter of the switch, so that
+    # we can plot forgetting curves across different switches
+    elif args.is_resample_tasks == "Forget" and iter % 100 == 0:
+        train_dataset.generate_sequences()
+        all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences[::50]))
+        all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences[::50]))
+        num_apppearances = np.zeros(args.K)
+        if args.sequence_sampling_distribution == "zipf":
+            iwl_dataset.sequences = torch.cat(all_sequences_across_switches["sequences"], dim=0)
+            iwl_dataset.len_data = len(iwl_dataset.sequences)
+            print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
+            iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
+                                            sampler=val_sampler,
+                                            **{'batch_size': args.batch_size, 'num_workers': args.workers,
+                                        "shuffle": False,
+                                        'pin_memory': True})
     logs = {
         "num_apppearances": copy.deepcopy(num_apppearances),
     }
@@ -536,19 +561,30 @@ for iter in range(args.num_iters // num_iters_per_epoch):
     
     model.train() # switch to train mode
     # train iteration
-    
+    appearances = []
+    loss_per_appearance = []
     for i, (seq, task) in enumerate(train_loader):
         optimizer.zero_grad()
         seq, task = seq.to(device), task.to(device)
         batch_num_appearances = torch.bincount(task, minlength=args.K).detach().cpu().numpy()
         num_apppearances += batch_num_appearances # update the number of appearances of each task
+        
         # print ("seq", seq.shape, "task", task.shape, batch_num_appearances[:20])
         output = model(seq, task)
         B, N, D = output.shape
         preds = output # shape: (B, L, 2)
         # loss function: cross-entropy loss
         # output at position i should be the input at position i+1
-        loss = criterion(preds[:,:-1,:].reshape(B * (N-1), D), seq[:,1:].reshape(B * (N-1)))
+        
+        # Write a function to compute the binary cross-entropy for each position in the sequence
+        # But don't compute the mean, keep the vector dimension
+        # loss = criterion(preds[:,:-1,:].reshape(B * (N-1), D), seq[:,1:].reshape(B * (N-1)))
+        logsoftmax = F.log_softmax(preds[:,:-1,:], dim=-1).reshape(B * (N-1), D)
+        logsoftmaxloss = criterion(logsoftmax, seq[:,1:].reshape(B * (N-1)))
+        logsoftmaxloss = logsoftmaxloss.reshape(B, N-1).mean(dim=-1) # shape: (B,)
+        appearances.append(task.detach().cpu().numpy())
+        loss_per_appearance.append(logsoftmaxloss.detach().cpu().numpy())
+        loss = logsoftmaxloss.mean()
         loss.backward()
         optimizer.step()
         losses.update(loss.item(), seq.size(0)) 
@@ -560,6 +596,8 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             "train_loss": losses.avg,
             "epoch": iter,
             "lr": optimizer.param_groups[0]['lr'],  
+            "loss_per_appearance": (loss_per_appearance),
+            "appearances": (appearances),
         })
     print("iter", iter, "loss", losses.avg, logs)
     if iter == args.num_iters - 1: 
