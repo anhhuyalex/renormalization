@@ -156,7 +156,7 @@ else:
 def set_zipf_exp_params(args):
     args.sequence_sampling_distribution = "zipf"
     args.K = 100000
-    args.num_iters = 40000
+    args.num_iters = 80000
     
 def set_zipf_exp_params_resample(args): 
     set_zipf_exp_params(args)
@@ -510,6 +510,9 @@ all_sequences_across_switches = {
     "sequences": [],
     "switch_start_iter": [],
 }
+# save all sequences in pickle file
+with open(f"{exp_name[:-4]}_all_sequences.pkl", "wb") as f:
+    pickle.dump(train_dataset.sequences, f)
 for iter in range(args.num_iters // num_iters_per_epoch):
     # Switch the sequences half way through the training
     if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
