@@ -310,15 +310,17 @@ class Sequence(torch.utils.data.Dataset):
         if is_iso == "True":
             self.input_covariance_L = None
             if skip_generating_betas == False:
-                true_betas = torch.randn((K, D)) * scale #* (1.0 / np.sqrt(D)) # shape: (K, D)
+                true_betas = torch.randn((K, D)) #* scale #* (1.0 / np.sqrt(D)) # shape: (K, D)
+                true_betas = true_betas / torch.linalg.norm(true_betas, dim=1).unsqueeze(1)
                 self.true_betas = true_betas
+            args.sigma_xi = 1.0
         else:
             print ("anisotropic case")
-            sminus = 1 / np.sqrt(10.0)
-            splus = np.sqrt(10.0)
-            data_scale = 1.0 / D
-            norm_wplus = 1.0 / np.sqrt(splus)
-            norm_wminus = 1.0 / np.sqrt(sminus)
+            sminus = 0.55 # 1 / np.sqrt(10.0)
+            splus = 5.5 # np.sqrt(10.0)
+            # data_scale = 1.0 / D
+            norm_wplus = 1.0 / np.sqrt(splus * 2)
+            norm_wminus = 1.0 / np.sqrt(sminus * 2)
             # The proportion of eigenvalues at s₋ should be ρ₋
             rho_minus = 0.5
             # The proportion of eigenvalues at s₊ should be 1-ρ₋
@@ -348,8 +350,8 @@ class Sequence(torch.utils.data.Dataset):
                 true_betas = true_betas 
                 self.true_betas = true_betas 
             
-            self.true_betas[:, :num_plus] = self.true_betas[:, :num_plus] / torch.linalg.norm(self.true_betas[:, :num_plus], dim=1).unsqueeze(1) * norm_wplus/  np.sqrt(2)
-            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] / torch.linalg.norm(self.true_betas[:,num_plus:], dim=1).unsqueeze(1) * norm_wminus / np.sqrt(2)
+            self.true_betas[:, :num_plus] = self.true_betas[:, :num_plus] / torch.linalg.norm(self.true_betas[:, :num_plus], dim=1).unsqueeze(1) * norm_wplus 
+            self.true_betas[:,num_plus:] = self.true_betas[:,num_plus:] / torch.linalg.norm(self.true_betas[:,num_plus:], dim=1).unsqueeze(1) * norm_wminus  
             
             # normalize weights separately
             
@@ -365,7 +367,7 @@ class Sequence(torch.utils.data.Dataset):
         task_ind = torch.randint(0, self.K, (1,)).item()
         beta_incontext = self.true_betas[task_ind].unsqueeze(1) # shape: (D, 1)
         if self.input_covariance_L is None:
-            x = torch.randn((self.len_context, self.D)) * self.scale  # shape: (self.len_context, D) * (1.0 / np.sqrt(self.D))
+            x = torch.randn((self.len_context, self.D)) #* self.scale  # shape: (self.len_context, D) * (1.0 / np.sqrt(self.D))
         else: 
             x = torch.randn((self.len_context, self.D)) * self.input_covariance_L 
              
@@ -380,28 +382,28 @@ class Sequence(torch.utils.data.Dataset):
           
         return samples.type(torch.float32), y.type(torch.float32), beta_incontext.type(torch.float32)#, torch.randperm(self.D)
 
-# -
-
-P1=P2=16
-S1 = np.sqrt(10) 
-S2 = 1 / np.sqrt(10)
-norm_wplus = 1.0 / np.sqrt(S1)
-norm_wminus = 1.0 / np.sqrt(S2)
-D = 32
-SNR = P1*S1*norm_wplus**2/32 + P2*S2*norm_wminus**2/32
-print("SNR", SNR)
 
 # +
-beta = np.zeros(32)
-beta[:16] = norm_wplus
-beta[16:] = norm_wminus
+# P1=P2=16
+# S1 = np.sqrt(10) 
+# S2 = 1 / np.sqrt(10)
+# norm_wplus = 1.0 / np.sqrt(S1)
+# norm_wminus = 1.0 / np.sqrt(S2)
+# D = 32
+# SNR = P1*S1*norm_wplus**2/32 + P2*S2*norm_wminus**2/32
+# print("SNR", SNR)
 
-beta
-eigenvalues = np.concatenate([
-                np.ones(16) * np.sqrt(S1),
-                np.ones(16) * np.sqrt(S2)
-            ]) 
-eigenvalues
+# +
+# beta = np.zeros(32)
+# beta[:16] = norm_wplus
+# beta[16:] = norm_wminus
+
+# beta
+# eigenvalues = np.concatenate([
+#                 np.ones(16) * np.sqrt(S1),
+#                 np.ones(16) * np.sqrt(S2)
+#             ]) 
+# eigenvalues
 
 # +
 # importlib.reload(gpt)
@@ -497,86 +499,86 @@ train_loader = torch.utils.data.DataLoader(train_dataset,
 #                                             **test_kwargs)
 
 # +
-import matplotlib.pyplot as plt
-SNRs = []
-ys = []
-pi_pluses = []
-pi_minuses = []
-# train_dataset.input_covariance_L = torch.ones_like(train_dataset.input_covariance_L) 
-print ("args.sigma_xi", args.sigma_xi, "args.is_iso", args.is_iso)
-for i in range(10000):
-    x, y, b = train_dataset[i]
-    ys.extend(y.flatten().cpu().numpy())
-    
-    if i == 1:
-        # print ("x", x.shape, "y", y.shape, "b", b.shape, "perm", perm.shape, perm)
-        # shuffle x and b according to perm 
-        # x = x[:, perm] 
-        # b = b[perm]
-        print ("norm plus", torch.linalg.norm(b[:16]), 1/(np.sqrt(np.sqrt(10))), "norm minus", torch.linalg.norm(b[16:]))
-        print ("b plus", b[:16].flatten(), "b minus", b[16:].flatten())
-        plt.hist (b[:16].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "positive")
-        plt.hist (b[16:].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "negative")
-        plt.title("b, positive and negative components")
-        plt.legend()
-        plt.show()
-        # print("x", x.shape, "y", y.shape, "b", b.shape)
-        plt.hist (x[:,:16].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "positive")
-        plt.hist (x[:,16:].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "negative")
-        plt.title("x, positive and negative components")
-        plt.legend()
-
-        plt.show()
-    # compute projection of beta onto positive component 
-    beta_plus = b.clone() 
-    beta_plus[16:] = 0.0 
-    # compute projection of beta onto negative component
-    beta_minus = b.clone()
-    beta_minus[:16] = 0.0
-    # compute signal to noise ratio
-     
-    SNR =  torch.matmul(b.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * b.squeeze(1) ).unsqueeze(1)) / (args.sigma_xi**2)
-    # print( "b", b.T.shape, "train_dataset.input_covariance_L",  (train_dataset.input_covariance_L * train_dataset.input_covariance_L * b.squeeze(1) ).unsqueeze(1).shape)
-    # w
-    # print(b.flatten()[:10])
-    SNRs.append(SNR.item())
-
-    denom = torch.matmul(b.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * b.squeeze(1) ).unsqueeze(1)).item()
-    pi_plus = torch.matmul (beta_plus.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * beta_plus.squeeze(1) ).unsqueeze(1)) / denom
-    # pi minus =
-    pi_minus = torch.matmul (beta_minus.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * beta_minus.squeeze(1) ).unsqueeze(1)) / denom
-    pi_pluses.append(pi_plus.item())
-    pi_minuses.append(pi_minus.item())
-    # print ("(b * train_dataset.input_covariance_L * train_dataset.input_covariance_L * b).sum()", (b * train_dataset.input_covariance_L * train_dataset.input_covariance_L * b).sum()) 
-
-plt.hist(SNRs, bins = 100)
-print ("SNR", SNRs[:100])
-plt.title("SNR distribution")
-plt.xlim(0, 4)
-plt.show()
-# print(train_dataset.input_covariance_L * train_dataset.input_covariance_L * 32)
-print("mean SNR", np.mean(SNRs))
-# print (16*(10 / (32 * np.sqrt(1)
-plt.hist(ys, bins = 100)
-plt.title("y distribution")
-plt.show()
-plt.hist(pi_pluses, bins = 100)
-
-plt.title("pi plus distribution")
-print ("pi plus", pi_pluses[:100])
-plt.show()
-plt.hist(pi_minuses, bins = 100)
-plt.title("pi minus distribution")
-print ("pi minus", pi_minuses[:100])
-plt.show()
-# -
-
-# # torch.allclose(torch.matmul(x, b), y, atol = 1e-3)
 # import matplotlib.pyplot as plt
-plt.scatter(torch.matmul(x, b).detach().cpu(), y.detach().cpu())
-plt.show()
-print (torch.matmul(x, b))
-print (y)
+# SNRs = []
+# ys = []
+# pi_pluses = []
+# pi_minuses = []
+# # train_dataset.input_covariance_L = torch.ones_like(train_dataset.input_covariance_L) 
+# print ("args.sigma_xi", args.sigma_xi, "args.is_iso", args.is_iso)
+# for i in range(10000):
+#     x, y, b = train_dataset[i]
+#     ys.extend(y.flatten().cpu().numpy())
+    
+#     if i == 1:
+#         # print ("x", x.shape, "y", y.shape, "b", b.shape, "perm", perm.shape, perm)
+#         # shuffle x and b according to perm 
+#         # x = x[:, perm] 
+#         # b = b[perm]
+#         print ("norm plus", torch.linalg.norm(b[:16]), 1/(np.sqrt(np.sqrt(10))), "norm minus", torch.linalg.norm(b[16:]))
+#         print ("b plus", b[:16].flatten(), "b minus", b[16:].flatten())
+#         plt.hist (b[:16].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "positive")
+#         plt.hist (b[16:].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "negative")
+#         plt.title("b, positive and negative components")
+#         plt.legend()
+#         plt.show()
+#         # print("x", x.shape, "y", y.shape, "b", b.shape)
+#         plt.hist (x[:,:16].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "positive")
+#         plt.hist (x[:,16:].flatten().cpu().numpy(), bins = 5, alpha = 0.5, label = "negative")
+#         plt.title("x, positive and negative components")
+#         plt.legend()
+
+#         plt.show()
+#     # compute projection of beta onto positive component 
+#     beta_plus = b.clone() 
+#     beta_plus[16:] = 0.0 
+#     # compute projection of beta onto negative component
+#     beta_minus = b.clone()
+#     beta_minus[:16] = 0.0
+#     # compute signal to noise ratio
+     
+#     SNR =  torch.matmul(b.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * b.squeeze(1) ).unsqueeze(1)) / (args.sigma_xi**2)
+#     # print( "b", b.T.shape, "train_dataset.input_covariance_L",  (train_dataset.input_covariance_L * train_dataset.input_covariance_L * b.squeeze(1) ).unsqueeze(1).shape)
+#     # w
+#     # print(b.flatten()[:10])
+#     SNRs.append(SNR.item())
+
+#     denom = torch.matmul(b.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * b.squeeze(1) ).unsqueeze(1)).item()
+#     pi_plus = torch.matmul (beta_plus.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * beta_plus.squeeze(1) ).unsqueeze(1)) / denom
+#     # pi minus =
+#     pi_minus = torch.matmul (beta_minus.T, (train_dataset.input_covariance_L * train_dataset.input_covariance_L * beta_minus.squeeze(1) ).unsqueeze(1)) / denom
+#     pi_pluses.append(pi_plus.item())
+#     pi_minuses.append(pi_minus.item())
+#     # print ("(b * train_dataset.input_covariance_L * train_dataset.input_covariance_L * b).sum()", (b * train_dataset.input_covariance_L * train_dataset.input_covariance_L * b).sum()) 
+
+# plt.hist(SNRs, bins = 100)
+# print ("SNR", SNRs[:100])
+# plt.title("SNR distribution")
+# plt.xlim(0, 4)
+# plt.show()
+# # print(train_dataset.input_covariance_L * train_dataset.input_covariance_L * 32)
+# print("mean SNR", np.mean(SNRs))
+# # print (16*(10 / (32 * np.sqrt(1)
+# plt.hist(ys, bins = 100)
+# plt.title("y distribution")
+# plt.show()
+# plt.hist(pi_pluses, bins = 100)
+
+# plt.title("pi plus distribution")
+# print ("pi plus", pi_pluses[:100])
+# plt.show()
+# plt.hist(pi_minuses, bins = 100)
+# plt.title("pi minus distribution")
+# print ("pi minus", pi_minuses[:100])
+# plt.show()
+
+# +
+# # # torch.allclose(torch.matmul(x, b), y, atol = 1e-3)
+# # import matplotlib.pyplot as plt
+# plt.scatter(torch.matmul(x, b).detach().cpu(), y.detach().cpu())
+# plt.show()
+# print (torch.matmul(x, b))
+# print (y)
 
 # +
 # sminus = 0.1
