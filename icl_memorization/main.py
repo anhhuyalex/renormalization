@@ -95,12 +95,16 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='mlp',
                     help='model architecture (default: mlp)')
 parser.add_argument('--gpt_bias', default="True", type=str,
                     help='whether to include bias in GPT')
+parser.add_argument('--is_initialize_attention_weights_to_zero', default="False", type=str,
+                    help='whether to initialize attention weights to zero')
 parser.add_argument('--num_hidden_features', default=1, type=int,
                     help='num_hidden_features')
 parser.add_argument('--num_layers', default=1, type=int,
                     help='num_layers in transformer')
 parser.add_argument('--num_heads', default=1, type=int,
                     help='num_heads in transformer')
+parser.add_argument('--num_mlp_layers', default=3, type=int,
+                    help='num_mlp_layers in transformer')
 parser.add_argument('--len_context', default=1, type=int,
                     help='number of in-context images in sequence')
 parser.add_argument('--SLURM_ARRAY_TASK_ID', default=1, type=int,
@@ -168,6 +172,35 @@ def set_zipf_exp_params_forget(args):
     args.is_resample_tasks = "Forget"
     args.num_iters = 40000
 
+def set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero):
+    args.sequence_sampling_distribution = "zipf"
+    args.K = 100000
+    args.num_iters = 20000
+    args.is_initialize_attention_weights_to_zero = is_initialize_attention_weights_to_zero
+
+def set_num_heads_and_layers_and_lr(args, nheads, nlayers, lr):
+    args.num_heads = nheads 
+    args.num_layers = nlayers
+    args.lr = lr
+    
+def set_zipf_exp_one_layer_attention(args, lr, num_hidden_features, num_heads, vocab_size):
+    args.arch = "OneLayerAttention"
+    args.len_context = 100
+    args.num_hidden_features = num_hidden_features
+    args.num_heads = num_heads
+    args.vocab_size = vocab_size
+    
+    args.is_resample_tasks = "True"
+    args.num_iters = 40000 
+    args.sequence_sampling_distribution = "zipf"
+    args.K = 100000
+    
+    args.lr = lr
+    
+    
+    
+    
+
 if args.wandb_group_name == "memo_feb26_uniformdist_modelsize":
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
     num_layers = [1] + list(range(2, 17, 2)) # len: 9 
@@ -226,7 +259,39 @@ elif args.wandb_group_name == "memo_apr10_zipf_num_heads_24_num_layers_36_resamp
     args.num_layers = 36
     set_zipf_exp_params_resample(args)
     args.lr = 1e-4
-    
+elif args.wandb_group_name == "memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_weights":
+    set_num_heads_and_layers_and_lr(args, 8, 12, 1e-3)
+    set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero="zero_all_attn_weights")
+elif args.wandb_group_name == "memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_weights":
+    set_num_heads_and_layers_and_lr(args, 24, 36, 1e-4)
+    set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero="zero_all_attn_weights")
+elif args.wandb_group_name == "memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_except_cproj_weights":
+    set_num_heads_and_layers_and_lr(args, 8, 12, 1e-3)
+    set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero="zero_all_attn_except_cproj_weights")
+elif args.wandb_group_name == "memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_except_cproj_weights":
+    set_num_heads_and_layers_and_lr(args, 24, 36, 1e-4)
+    set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero="zero_all_attn_except_cproj_weights")
+elif args.wandb_group_name == "memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_allow_learning":
+    set_num_heads_and_layers_and_lr(args, 24, 36, 1e-4)
+    set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero="zero_all_attn_allow_learning")
+elif args.wandb_group_name == "memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_allow_learning_debug":
+    set_num_heads_and_layers_and_lr(args, 24, 36, 1e-4)
+    set_zipf_exp_params_zero_all_attn_weights(args, is_initialize_attention_weights_to_zero="zero_all_attn_allow_learning_debug")
+elif args.wandb_group_name == "memo_may26_zipf_onelayerattention_lr_1e-3_vary_num_hidden_features_num_heads":
+    # num_hidden_features is log spaced from 2 to 512
+    num_hidden_features_list = 2 ** np.linspace(0, 9, 10)
+    num_hidden_features = int(num_hidden_features_list[args.SLURM_ARRAY_TASK_ID % len(num_hidden_features_list)])
+    num_heads_list = [1] + list(np.arange(2, 24, 4)) # length: 7
+    num_heads = int(num_heads_list[args.SLURM_ARRAY_TASK_ID // len(num_hidden_features_list)])
+    set_zipf_exp_one_layer_attention(args, 1e-3, num_hidden_features, num_heads, int(2))  
+elif args.wandb_group_name == "memo_may26_zipf_onelayerattention_lr_1e-4_vary_num_hidden_features_num_heads":
+    # num_hidden_features is log spaced from 2 to 512
+    num_hidden_features_list = 2 ** np.linspace(0, 9, 10)
+    num_hidden_features = int(num_hidden_features_list[args.SLURM_ARRAY_TASK_ID % len(num_hidden_features_list)])
+    num_heads_list = [1] + list(np.arange(2, 24, 4)) # length: 7
+    num_heads = int(num_heads_list[args.SLURM_ARRAY_TASK_ID // len(num_hidden_features_list)])
+    set_zipf_exp_one_layer_attention(args, 1e-4, num_hidden_features, num_heads, int(2))  
+
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -316,7 +381,8 @@ class Sequence(torch.utils.data.Dataset):
 
 
 
-# +
+# -
+
 # importlib.reload(gpt)
 import gpt
 criterion = nn.NLLLoss(reduction="none")
@@ -328,10 +394,19 @@ if args.arch == "gpt":
         n_embd=args.num_heads * args.num_hidden_features,
         n_layer=args.num_layers,
         n_head=args.num_heads,
-        bias = args.gpt_bias == "True"
+        bias = args.gpt_bias == "True",
+        is_initialize_attention_weights_to_zero = args.is_initialize_attention_weights_to_zero 
     )
     model = gpt.GPT(config, criterion).to(device)
-
+elif args.arch == "OneLayerAttention":
+    import gpt
+    # /jukebox/norman/qanguyen/renormalization/icl_memorization/gpt.py
+    # arguments: len_context, num_heads, num_hidden_features, vocab_size, num_mlp_layers)
+    model = gpt.OneLayerAttention(args.len_context, 
+                                  args.num_heads, 
+                                  args.num_hidden_features, 
+                                  args.vocab_size, 
+                                  args.num_mlp_layers).to(device)
 if args.optimizer == 'SGD': 
     optimizer = torch.optim.SGD(model.parameters(),  
                             lr=args.lr, 
@@ -350,7 +425,6 @@ iters_per_epoch = 1000
 #                        total_steps=args.epochs * iters_per_epoch, 
 #                        pct_start=0.5,
 #                        steps_per_epoch=iters_per_epoch, epochs=args.epochs)
-# -
 
 # define the dataset
 train_kwargs = {'batch_size': args.batch_size}
@@ -501,7 +575,11 @@ import pickle
 # import matplotlib.pyplot as plt
 if os.path.exists(f"./cache/{args.wandb_group_name}") == False:
     os.makedirs(f"./cache/{args.wandb_group_name}", exist_ok=True)
-exp_name = f"./cache/{args.wandb_group_name}/{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_L_{args.len_context}_hidden_{args.num_hidden_features}_nheads_{args.num_heads}_nlayers_{args.num_layers}_{time.time()}.pkl"
+fileprefix = f"{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_L_{args.len_context}_hidden_{args.num_hidden_features}_nheads_{args.num_heads}_nlayers_{args.num_layers}_{time.time()}"
+dirprefix = f"./cache/{args.wandb_group_name}/{fileprefix}"
+if os.path.exists(dirprefix) == False:
+    os.makedirs(dirprefix, exist_ok=True)
+exp_name = f"{dirprefix}/{fileprefix}.pkl"
 print("Saving to", exp_name)
 num_iters_per_epoch = 50
 num_apppearances = np.zeros(args.K)
@@ -511,14 +589,19 @@ all_sequences_across_switches = {
     "switch_start_iter": [],
 }
 # save all sequences in pickle file
-with open(f"{exp_name[:-4]}_all_sequences.pkl", "wb") as f:
-    pickle.dump(train_dataset.sequences, f)
+all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
+all_sequences_across_switches["switch_start_iter"].append([0] * len(train_dataset.sequences))
+with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+    pickle.dump(all_sequences_across_switches, f)
 for iter in range(args.num_iters // num_iters_per_epoch):
     # Switch the sequences half way through the training
     if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
+        train_dataset.generate_sequences()
         all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
         all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences))
-        train_dataset.generate_sequences()
+        with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+            pickle.dump(all_sequences_across_switches, f)
+        
         if args.sequence_sampling_distribution == "zipf":
             iwl_dataset.sequences = train_dataset.sequences[::10] # take every 10th sequence from train_dataset
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
@@ -624,10 +707,14 @@ for iter in range(args.num_iters // num_iters_per_epoch):
  
     # save phi_xt_list_epoch 
 
-    if iter % 10 == 0 and args.wandb_log != True:
+    if iter % 50 == 0 and args.wandb_log != True:
         record["model"] = model.state_dict()
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
+            
+        # save model state_dict
+        # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
+            # pickle.dump(model.state_dict(), f)
         # use json
         # with open(exp_name, "w") as f:
             # json.dump(record, f)
@@ -635,4 +722,11 @@ for iter in range(args.num_iters // num_iters_per_epoch):
 if args.wandb_log != True:
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
+        
+    with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+        pickle.dump(all_sequences_across_switches, f)
+        
+    # save model state_dict
+    # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
+        # pickle.dump(model.state_dict(), f)
 sys.exit(0)

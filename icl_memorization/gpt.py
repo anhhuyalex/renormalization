@@ -54,7 +54,7 @@ class CausalSelfAttention(nn.Module):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2) # batch_size, seq_len, 3*n_embd
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
@@ -116,6 +116,7 @@ class GPTConfig:
     n_embd: int = 64
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    is_initialize_attention_weights_to_zero: str = False
 
 class PositionalEncoding(nn.Module):
     def __init__(self, embedding_dim: int, dropout: float = 0.1, max_len: int = 64):
@@ -212,9 +213,31 @@ class GPT(nn.Module):
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
+            if config.is_initialize_attention_weights_to_zero == "zero_all_attn_weights":
+                if ".attn." in pn:
+                    torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = False 
+            elif config.is_initialize_attention_weights_to_zero == "zero_all_attn_except_cproj_weights":
+                if (".attn." in pn) and (".c_proj." not in pn):
+                    torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = False
+                print("params", pn, p.flatten()[:10])
+            elif config.is_initialize_attention_weights_to_zero == "zero_all_attn_allow_learning":
+                if (".attn." in pn):
+                    torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = True
+            elif config.is_initialize_attention_weights_to_zero == "zero_all_attn_allow_learning_debug":
+                if (".attn." in pn):
+                    # torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = True
+
+
         # report number of parameters
         print("number of parameters: %.2d" % (self.get_num_params(),))
-
     def get_num_params(self, non_embedding=True):
         """
         Return the number of parameters in the model.
@@ -348,31 +371,31 @@ class GPT(nn.Module):
 
     #     return model
 
-    # def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
-    #     # start with all of the candidate parameters
-    #     param_dict = {pn: p for pn, p in self.named_parameters()}
-    #     # filter out those that do not require grad
-    #     param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
-    #     # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
-    #     # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
-    #     decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
-    #     nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
-    #     optim_groups = [
-    #         {'params': decay_params, 'weight_decay': weight_decay},
-    #         {'params': nodecay_params, 'weight_decay': 0.0}
-    #     ]
-    #     num_decay_params = sum(p.numel() for p in decay_params)
-    #     num_nodecay_params = sum(p.numel() for p in nodecay_params)
-    #     print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
-    #     print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
-    #     # Create AdamW optimizer and use the fused version if it is available
-    #     fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
-    #     use_fused = fused_available and device_type == 'cuda'
-    #     extra_args = dict(fused=True) if use_fused else dict()
-    #     optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
-    #     print(f"using fused AdamW: {use_fused}")
+    def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
+        # start with all of the candidate parameters
+        param_dict = {pn: p for pn, p in self.named_parameters()}
+        # filter out those that do not require grad
+        param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        optim_groups = [
+            {'params': decay_params, 'weight_decay': weight_decay},
+            {'params': nodecay_params, 'weight_decay': 0.0}
+        ]
+        num_decay_params = sum(p.numel() for p in decay_params)
+        num_nodecay_params = sum(p.numel() for p in nodecay_params)
+        print(f"num decayed parameter tensors: {len(decay_params)}, with {num_decay_params:,} parameters")
+        print(f"num non-decayed parameter tensors: {len(nodecay_params)}, with {num_nodecay_params:,} parameters")
+        # Create AdamW optimizer and use the fused version if it is available
+        fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+        use_fused = fused_available and device_type == 'cuda'
+        extra_args = dict(fused=True) if use_fused else dict()
+        optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=betas, **extra_args)
+        print(f"using fused AdamW: {use_fused}")
 
-    #     return optimizer
+        return optimizer
 
     # def estimate_mfu(self, fwdbwd_per_iter, dt):
     #     """ estimate model flops utilization (MFU) in units of A100 bfloat16 peak FLOPS """
@@ -416,3 +439,104 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+    
+class OneLayerAttention(nn.Module):
+    def __init__(self, len_context, num_heads, num_hidden_features, vocab_size, num_mlp_layers):
+        super().__init__()
+        self.len_context = len_context
+        self.num_heads = num_heads
+        self.num_hidden_features = num_hidden_features * num_heads
+        self.wte = nn.Embedding(vocab_size, self.num_hidden_features)
+        self.wpe = nn.Embedding(len_context, self.num_hidden_features)
+        self.pre_attn_ln = LayerNorm(self.num_hidden_features, bias=True)
+        self.ln_f = LayerNorm(self.num_hidden_features, bias=True)
+        
+        # Modules
+        self.multihead_attn = nn.MultiheadAttention(embed_dim=self.num_hidden_features, num_heads=self.num_heads)
+        self.c_attn = nn.Linear(self.num_hidden_features, self.num_hidden_features * 3, bias=True)
+        linear_modules = []
+        for _ in range(num_mlp_layers):
+            linear_modules.append(nn.Linear(self.num_hidden_features, self.num_hidden_features))
+        self.linear_modules = nn.ModuleList(linear_modules)
+        self.lm_head = nn.Linear(self.num_hidden_features, vocab_size, bias=True)
+        # init all weights
+        self.apply(self._init_weights)
+        
+        # generate causal mask
+        # attn_bias = torch.zeros(len_context, len_context).to(self.wte.weight.dtype)
+        # temp_mask = torch.ones(len_context, len_context, dtype=torch.bool).tril(diagonal=0)
+        # attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+        # self.causal_mask  = attn_bias
+        
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def forward(self, idx, targets):
+        B, T = idx.size()
+        q, k, v, C = self.get_qkv(idx, targets)
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+        x = x.transpose(1, 2).contiguous().reshape(B, T, C)
+        
+        # mlp
+        x = self.ln_f(x)
+        for module in self.linear_modules:
+            x = torch.nn.functional.relu(module(x)) + x # residual connection
+        x = self.lm_head(x)
+        return x
+        
+    def get_qkv(self, idx, targets):
+        device = idx.device
+        B, T = idx.size()
+        assert T <= self.len_context, f"Cannot forward sequence of length {T}, block size is only {self.len_context}"
+        
+        pos = torch.arange(0, T, dtype=torch.long, device=device) # shape (T)
+    
+        tok_emb = self.wte(idx)
+        pos_emb = self.wpe(pos)
+        x = tok_emb + pos_emb
+        _, _, C = x.size()
+        # x = self.pre_attn_ln(x)
+        
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        q, k, v  = self.c_attn(x).split(self.num_hidden_features, dim=2)
+        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        return q, k, v, C
+    
+    def get_attention_weights(self, idx, targets):
+        q, k, v, C = self.get_qkv(idx, targets)
+        attn, attn_weight = self.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+        return attn, attn_weight
+    
+    def scaled_dot_product_attention(self, query, key, value, attn_mask=None, dropout_p=0.0,
+        is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+        L, S = query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+        if is_causal:
+            assert attn_mask is None
+            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
+            attn_bias.to(query.dtype)
+
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            else:
+                attn_bias = attn_mask + attn_bias
+
+        if enable_gqa:
+            key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
+            value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
+
+        attn_weight = query @ key.transpose(-2, -1) * scale_factor
+        attn_weight += attn_bias
+        attn_weight = torch.softmax(attn_weight, dim=-1)
+        attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+        return attn_weight @ value, attn_weight

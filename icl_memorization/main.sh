@@ -6,6 +6,7 @@
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/%j.out
 #SBATCH --gres=gpu:1
+#SBATCH --array=0-69
 # SBATCH --partition=mig
 # source activate renormalization
 # source ../../learning_to_learn/l2l/bin/activate
@@ -36,8 +37,13 @@ optimizer="Adam"
 num_iters=5000000
 K=1000
 sequence_sampling_distribution="uniform"
+num_mlp_layers=$SLURM_ARRAY_TASK_ID
 # SLURM_ARRAY_TASK_ID=0
-wandb_group_name=memo_apr6_zipf_num_heads_24_num_layers_36_lr_1e-5 # memo_dec20_uniformdist_modelsize # memo_feb24_zipf
-jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline python -u main.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 8 --num_layers 4 --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name}  ; done 
+# memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_weights
+# memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_weights
+# memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_except_cproj_weights
+# memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_except_cproj_weights
+wandb_group_name="memo_may26_zipf_onelayerattention_lr_1e-4_vary_num_hidden_features_num_heads"
+jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline python -u main.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 8 --num_layers 4 --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name}  ; done 
 # jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline ../../learning_to_learn/l2l/bin/python -u analysis.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_hidden_features 8 --num_layers 4 --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name}  ; done 
  
