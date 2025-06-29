@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.6
+#       jupytext_version: 1.16.2
 #   kernelspec:
 #     display_name: Python (fmri)
 #     language: python
@@ -622,7 +622,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         if args.sequence_sampling_distribution == "zipf":
             iwl_dataset.sequences = torch.cat(all_sequences_across_switches["sequences"], dim=0)
             iwl_dataset.len_data = len(iwl_dataset.sequences)
-            print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
+            # print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
                                             sampler=val_sampler,
                                             **{'batch_size': args.batch_size, 'num_workers': args.workers,
@@ -685,7 +685,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             "loss_per_appearance": (loss_per_appearance),
             "appearances": (appearances),
         })
-    print("iter", iter, "loss", losses.avg, logs)
+    print("iter", iter, "loss", losses.avg)
     if iter == args.num_iters - 1: 
         if args.sequence_sampling_distribution == "zipf":
             test_metrics = validate_gradient_descent_zipf(iter, iwl_test_loader, model, args, criterion, device)
@@ -729,4 +729,5 @@ if args.wandb_log != True:
     # save model state_dict
     # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
         # pickle.dump(model.state_dict(), f)
+print("Finished training")
 sys.exit(0)
