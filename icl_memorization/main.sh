@@ -5,8 +5,8 @@
 #SBATCH --time=36:00:00
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/%j.out
-# SBATCH --gres=gpu:1
-#SBATCH --array=0-0
+#SBATCH --gres=gpu:1
+#SBATCH --array=0-70
 # SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc
@@ -37,7 +37,7 @@ optimizer="Adam"
 num_iters=5000000
 K=1000
 sequence_sampling_distribution="uniform"
-num_mlp_layers=$SLURM_ARRAY_TASK_ID
+num_mlp_layers=3
 # SLURM_ARRAY_TASK_ID=0
 # memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_weights
 # memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_weights
