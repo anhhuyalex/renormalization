@@ -452,7 +452,6 @@ class OneLayerAttention(nn.Module):
         self.ln_f = LayerNorm(self.num_hidden_features, bias=True)
         
         # Modules
-        self.multihead_attn = nn.MultiheadAttention(embed_dim=self.num_hidden_features, num_heads=self.num_heads)
         self.c_attn = nn.Linear(self.num_hidden_features, self.num_hidden_features * 3, bias=True)
         linear_modules = []
         for _ in range(num_mlp_layers):
@@ -488,6 +487,15 @@ class OneLayerAttention(nn.Module):
             x = torch.nn.functional.relu(module(x)) + x # residual connection
         x = self.lm_head(x)
         return x
+    
+    def freeze_attention_weights(self):
+        """
+        Freeze the attention weights so that they do not get updated during training.
+        """
+        for name, param in self.named_parameters():
+            if 'c_attn' in name or 'multihead_attn' in name:
+                param.requires_grad = False
+                print(f"Freezing parameter: {name}")
         
     def get_qkv(self, idx, targets):
         device = idx.device

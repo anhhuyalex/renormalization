@@ -6,13 +6,13 @@
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/%j.out
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-70
+#SBATCH --array=0
 # SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc
-# source ../../learning_to_learn/l2l/bin/activate
+source ../../learning_to_learn/l2l/bin/activate
 # cd /jukebox/norman/qanguyen/patdiff_seq
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+# conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
 # wandb login --relogin --host=https://stability.wandb.io
 # srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
