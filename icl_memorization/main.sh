@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH --job-name=memo
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=30G
 #SBATCH --time=36:00:00
 #SBATCH --output l2l-%J.log
 #SBATCH -o slurms/%j.out
 #SBATCH --gres=gpu:1
-#SBATCH --array=0
-# SBATCH --partition=mig
+#SBATCH --array=20-60%5
+#SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc
 source ../../learning_to_learn/l2l/bin/activate
