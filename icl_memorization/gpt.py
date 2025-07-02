@@ -488,13 +488,13 @@ class OneLayerAttention(nn.Module):
         x = self.lm_head(x)
         return x
     
-    def freeze_attention_weights(self):
+    def require_grad_attention_weights(self, require_grad=True):
         """
         Freeze the attention weights so that they do not get updated during training.
         """
         for name, param in self.named_parameters():
             if 'c_attn' in name or 'multihead_attn' in name:
-                param.requires_grad = False
+                param.requires_grad = require_grad
                 print(f"Freezing parameter: {name}")
         
     def get_qkv(self, idx, targets):
