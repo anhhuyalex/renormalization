@@ -306,7 +306,7 @@ elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num
 elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample":
     args.arch = "gpt"
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
-    num_hidden_features = 2 ** np.linspace(0, 9, 10)
+    num_hidden_features = 2 ** np.linspace(0, 9, 10).astype(int)
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
     args.num_hidden_features = num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
     args.num_layers = 12

@@ -43,7 +43,7 @@ num_mlp_layers=3
 # memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_except_cproj_weights
 # memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_except_cproj_weights
 # wandb_group_name="memo_aug15_zipf_onelayerattention_lr_1e-3"
-wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_noresample"
+wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
 # wandb_group_name="memo_jul4_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
 savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
