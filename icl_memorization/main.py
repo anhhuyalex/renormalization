@@ -161,6 +161,7 @@ def set_zipf_exp_params(args):
     args.sequence_sampling_distribution = "zipf"
     args.K = 100000
     args.num_iters = 80000
+    args.is_resample_tasks = "False"
     
 def set_zipf_exp_params_resample(args): 
     set_zipf_exp_params(args)
@@ -191,7 +192,7 @@ def set_zipf_exp_one_layer_attention(args, lr, num_hidden_features, num_heads, v
     args.vocab_size = vocab_size
     
     args.is_resample_tasks = "True"
-    args.num_iters = 40000 
+    args.num_iters = 50 
     args.sequence_sampling_distribution = "zipf"
     args.K = 100000
     
@@ -291,7 +292,16 @@ elif args.wandb_group_name == "memo_may26_zipf_onelayerattention_lr_1e-4_vary_nu
     num_heads_list = [1] + list(np.arange(2, 24, 4)) # length: 7
     num_heads = int(num_heads_list[args.SLURM_ARRAY_TASK_ID // len(num_hidden_features_list)])
     set_zipf_exp_one_layer_attention(args, 1e-4, num_hidden_features, num_heads, int(2))  
-
+elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_resample":
+    args.arch = "gpt"
+    num_heads = [1] + list(range(2, 17, 2)) # len: 9
+    num_layers = [1] + list(range(2, 17, 2)) # len: 9 
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_layers = num_layers[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -368,7 +378,7 @@ class Sequence(torch.utils.data.Dataset):
         self.sequences = torch.randint(0, 2, (self.K, self.len_context)) 
         
     def __len__(self):
-        return self.len_data
+        return len(self.sequences)
 
     def __getitem__(self, task: int):
         if (self.sequence_sampling_distribution == "uniform") or (self.skip == True):
@@ -492,6 +502,8 @@ def validate_gradient_descent(epoch, val_loader, model, args, criterion, device)
     with torch.no_grad():
         for i, (seq, task) in enumerate(val_loader):
             seq, task = seq.to(device), task.to(device) 
+            # print device of seq and task
+            print ("seq device", seq.device, "task device", task.device)
             
             
             output = model(seq, task) # shape: B, N, D
@@ -529,15 +541,15 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     test_top1 = []
     test_metrics = defaultdict(list)
     model.eval() # switch to eval mode
-    sequence_ranks = torch.zeros((args.K,args.len_context-1), dtype=torch.long).to(device)
-    lengths = torch.zeros((args.K,args.len_context-1), dtype=torch.long).to(device)
-    logsoftmaxlosses = torch.zeros((args.K,args.len_context-1), dtype=torch.float).to(device) 
-    accuracys = torch.zeros((args.K,args.len_context-1), dtype=torch.float).to(device)
+    sequence_ranks = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.long).to(device)
+    lengths = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.long).to(device)
+    logsoftmaxlosses = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.float).to(device) 
+    accuracys = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.float).to(device)
     with torch.no_grad():
         for i, (seq, task) in enumerate(val_loader):
             seq, task = seq.to(device), task.to(device) 
             
-            # print("seq", seq.shape, "task", task)
+            print("seq", seq.shape, "task", task.shape, "sequence_ranks", sequence_ranks.shape, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
             output = model(seq, task) # shape: B, N, D
             # print ("seq", seq.shape, "task", task.shape, "output", output.shape )
             preds = output 
@@ -555,15 +567,16 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
                 
                 # if args.K < 10000: # for small K, we can save the whole tensor 
                 # test_metrics["sequence_rank"].append(task.detach().cpu().numpy())
-                sequence_ranks[task, i_seq] = task 
-                lengths[task, i_seq] = i_seq + 1 
-                logsoftmaxlosses[task, i_seq] = logsoftmaxloss 
-                accuracys[task, i_seq] = is_correct.float() 
+                sequence_ranks[i:i+len(task), i_seq] = task 
+                lengths[i:i+len(task), i_seq] = i_seq + 1 
+                logsoftmaxlosses[i:i+len(task), i_seq] = logsoftmaxloss 
+                accuracys[i:i+len(task), i_seq] = is_correct.float() 
 
     test_metrics["sequence_rank"] = sequence_ranks[:,0].detach().cpu().numpy() # average over positions
     test_metrics["length"] = 50
     test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
     test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
+    print("test_metrics accuracy with length", len(test_metrics["accuracy"]))
      
     return test_metrics
  
@@ -593,7 +606,7 @@ all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.se
 all_sequences_across_switches["switch_start_iter"].append([0] * len(train_dataset.sequences))
 with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
     pickle.dump(all_sequences_across_switches, f)
-for iter in range(args.num_iters // num_iters_per_epoch):
+for iter in range(args.num_iters // num_iters_per_epoch): 
     # Switch the sequences half way through the training
     if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
         train_dataset.generate_sequences()
@@ -664,7 +677,6 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         
         # Write a function to compute the binary cross-entropy for each position in the sequence
         # But don't compute the mean, keep the vector dimension
-        # loss = criterion(preds[:,:-1,:].reshape(B * (N-1), D), seq[:,1:].reshape(B * (N-1)))
         logsoftmax = F.log_softmax(preds[:,:-1,:], dim=-1).reshape(B * (N-1), D)
         logsoftmaxloss = criterion(logsoftmax, seq[:,1:].reshape(B * (N-1)))
         logsoftmaxloss = logsoftmaxloss.reshape(B, N-1).mean(dim=-1) # shape: (B,)
@@ -720,6 +732,8 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             # json.dump(record, f)
   
 if args.wandb_log != True:
+    record["positional_encoding"] = model.transformer.wpe.weight.detach().cpu().numpy()
+    record["token_embedding"] = model.transformer.wte.weight.detach().cpu().numpy()
     with open(exp_name, "wb") as f:
         pickle.dump(record, f)
         

@@ -443,6 +443,7 @@ class GPT(nn.Module):
 class OneLayerAttention(nn.Module):
     def __init__(self, len_context, num_heads, num_hidden_features, vocab_size, num_mlp_layers):
         super().__init__()
+        
         self.len_context = len_context
         self.num_heads = num_heads
         self.num_hidden_features = num_hidden_features * num_heads
@@ -487,6 +488,23 @@ class OneLayerAttention(nn.Module):
             x = torch.nn.functional.relu(module(x)) + x # residual connection
         x = self.lm_head(x)
         return x
+    
+    def forward_mlp(self, idx, targets):
+        B, T = idx.size()
+        q, k, v, C = self.get_qkv(idx, targets)
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True)
+        x = x.transpose(1, 2).contiguous().reshape(B, T, C)
+        
+        # mlp
+        x = self.ln_f(x)
+        mlp_reps = [x.clone().detach()]
+        for module in self.linear_modules:
+            x = torch.nn.functional.relu(module(x)) + x # residual connection
+            mlp_reps.append(x.clone().detach())
+            print("len(mlp_reps)", len(mlp_reps))
+        x = self.lm_head(x)
+        print("final len mlp_reps", len(mlp_reps))
+        return x, mlp_reps
     
     def require_grad_attention_weights(self, require_grad=True):
         """
@@ -548,3 +566,91 @@ class OneLayerAttention(nn.Module):
         attn_weight = torch.softmax(attn_weight, dim=-1)
         attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
         return attn_weight @ value, attn_weight
+    
+class HeadsMLPGPT(nn.Module):
+    def __init__(self, len_context, num_heads, num_hidden_attn_features, num_input_mlp_features, num_hidden_mlp_features, vocab_size, num_layers):
+        super().__init__()
+        
+        self.len_context = len_context
+        self.num_heads = num_heads
+        self.num_hidden_attn_features = num_hidden_attn_features * num_heads
+        self.num_input_mlp_features = num_input_mlp_features
+        self.num_hidden_mlp_features = num_hidden_mlp_features
+        self.num_layers = num_layers
+        self.wte = nn.Embedding(vocab_size, self.num_hidden_attn_features)
+        self.wpe = nn.Embedding(len_context, self.num_hidden_attn_features)
+        # self.pre_attn_ln = LayerNorm(self.num_hidden_attn_features, bias=True)
+        # self.ln_f = nn.ModuleList([LayerNorm(self.num_hidden_attn_features, bias=True) for _ in range(num_layers)])
+        self.pre_attn_ln = nn.ModuleList([LayerNorm(self.num_hidden_attn_features, bias=True) for _ in range(num_layers)])
+        self.ln_f = nn.ModuleList([LayerNorm(self.num_input_mlp_features, bias=True) for _ in range(num_layers)])
+        
+        # Modules
+        self.c_attn = nn.ModuleList([nn.Linear(self.num_hidden_attn_features, self.num_hidden_attn_features * 3, bias=True) for _ in range(num_layers)]) # attention 
+        
+        # mlp
+        self.input_to_mlp = nn.ModuleList([nn.Linear(self.num_hidden_attn_features, self.num_input_mlp_features, bias=True) for _ in range(num_layers)])
+        linear_modules = []
+        for _ in range(num_layers):
+            linear_modules.append(nn.Linear(self.num_input_mlp_features, self.num_hidden_mlp_features))
+            # linear_modules.append(nn.Linear(self.num_hidden_attn_features, self.num_hidden_mlp_features))
+        self.linear_modules = nn.ModuleList(linear_modules)
+        self.lm_head = nn.ModuleList([nn.Linear(self.num_hidden_mlp_features, self.num_hidden_attn_features, bias=True) for _ in range(num_layers)])
+        self.lm_output = nn.Linear(self.num_hidden_attn_features, vocab_size, bias=True)
+        # init all weights
+        self.apply(self._init_weights)
+         
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        
+    def forward(self, idx, targets):
+        device = idx.device
+        B, T = idx.size()
+        assert T <= self.len_context, f"Cannot forward sequence of length {T}, block size is only {self.len_context}"
+        
+        pos = torch.arange(0, T, dtype=torch.long, device=device) # shape (T)
+    
+        tok_emb = self.wte(idx)
+        pos_emb = self.wpe(pos)
+        x = tok_emb + pos_emb
+        _, _, C = x.size()
+        
+        for layer in range(self.num_layers):
+            x = self.forward_one_layer(x=x, targets=targets, layer=layer)
+        x = self.lm_output(x)
+        return x
+    
+    def forward_one_layer(self, x, targets, layer):
+        # input is cloned x input for residual 
+        input_x = x.clone()
+        B, T, _ = x.size()
+        q, k, v, C = self.get_qkv(x=x, targets=targets, layer=layer)
+        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True).transpose(1, 2).contiguous().reshape(B, T, C)  + x # residual connection
+        # attn_x = x.clone()
+        # mlp
+        # x = self.ln_f[layer](x)
+        x = self.input_to_mlp[layer](x) # project the input to the MLP
+        x = self.ln_f[layer](x)
+        # Here, we fix D=input into MLP and d=dimensions per head (specified by num_hidden_attn_features)
+        module = self.linear_modules[layer] # get the MLP module corresponding to the current layer
+        x = torch.nn.functional.relu(module(x)) # residual connection
+        x = self.lm_head[layer](x) + input_x # residual connection
+        return x
+    
+    def get_qkv(self, x, targets, layer):
+        device = x.device
+        B, T, C = x.size()
+        assert T <= self.len_context, f"Cannot forward sequence of length {T}, block size is only {self.len_context}"
+         
+        x = self.pre_attn_ln[layer](x)
+        
+        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
+        q, k, v  = self.c_attn[layer](x).split(self.num_hidden_attn_features, dim=2)
+        q = q.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        k = k.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        v = v.view(B, T, self.num_heads, C // self.num_heads).transpose(1, 2)
+        return q, k, v, C
