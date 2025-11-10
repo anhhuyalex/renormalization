@@ -292,12 +292,13 @@ elif args.wandb_group_name == "memo_may26_zipf_onelayerattention_lr_1e-4_vary_nu
     num_heads_list = [1] + list(np.arange(2, 24, 4)) # length: 7
     num_heads = int(num_heads_list[args.SLURM_ARRAY_TASK_ID // len(num_hidden_features_list)])
     set_zipf_exp_one_layer_attention(args, 1e-4, num_hidden_features, num_heads, int(2))  
-elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_resample":
+elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_noresample":
     args.arch = "gpt"
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
-    num_layers = [1] + list(range(2, 17, 2)) # len: 9 
+    num_hidden_features = 2 ** np.linspace(0, 9, 10)
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
-    args.num_layers = num_layers[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
+    args.num_hidden_features = num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
+    args.num_layers = 12
     print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
     
     set_zipf_exp_params(args)
