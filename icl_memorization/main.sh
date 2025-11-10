@@ -1,17 +1,17 @@
 #!/bin/bash
 #SBATCH --job-name=memo
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=30G
-#SBATCH --time=36:00:00
+#SBATCH --time=24:00:00
 #SBATCH -o slurms/%j-with-projection-layer-with-residual-mlp.out
 #SBATCH --gres=gpu:1
 #SBATCH --array=0-99
-# SBATCH --partition=mig
+#SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc
-# source ../../learning_to_learn/l2l/bin/activate
+source ../../learning_to_learn/l2l/bin/activate
 # cd /jukebox/norman/qanguyen/patdiff_seq
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+# conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
 # wandb login --relogin --host=https://stability.wandb.io
 # srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
