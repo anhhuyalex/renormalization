@@ -125,6 +125,12 @@ parser.add_argument(
             default="",
             type=str, 
             action='store') 
+parser.add_argument(
+    '--savedir', 
+            default="",
+            type=str, 
+            action='store'
+)
 parser.add_argument('--resume', type=str, default=None,
                     help='resume from checkpoint')
     
@@ -306,7 +312,7 @@ elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num
 elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample":
     args.arch = "gpt"
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
-    num_hidden_features = 2 ** np.linspace(0, 9, 10).astype(int)
+    num_hidden_features = 2 ** np.linspace(0, 9, 10)
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
     args.num_hidden_features = num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
     args.num_layers = 12
@@ -598,10 +604,10 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
 import json
 import pickle
 # import matplotlib.pyplot as plt
-if os.path.exists(f"./cache/{args.wandb_group_name}") == False:
-    os.makedirs(f"./cache/{args.wandb_group_name}", exist_ok=True)
+if os.path.exists(f"{args.savedir}/cache/{args.wandb_group_name}") == False:
+    os.makedirs(f"{args.savedir}/cache/{args.wandb_group_name}", exist_ok=True)
 fileprefix = f"{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_L_{args.len_context}_hidden_{args.num_hidden_features}_nheads_{args.num_heads}_nlayers_{args.num_layers}_{time.time()}"
-dirprefix = f"./cache/{args.wandb_group_name}/{fileprefix}"
+dirprefix = f"{args.savedir}/cache/{args.wandb_group_name}/{fileprefix}"
 if os.path.exists(dirprefix) == False:
     os.makedirs(dirprefix, exist_ok=True)
 exp_name = f"{dirprefix}/{fileprefix}.pkl"
