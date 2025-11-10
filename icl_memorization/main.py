@@ -166,7 +166,7 @@ def set_zipf_exp_params(args):
 def set_zipf_exp_params_resample(args): 
     set_zipf_exp_params(args)
     args.is_resample_tasks = "True"
-    args.num_iters = 20000
+
 
 def set_zipf_exp_params_forget(args):
     set_zipf_exp_params(args)
@@ -301,6 +301,17 @@ elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num
     print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
     
     set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample":
+    args.arch = "gpt"
+    num_heads = [1] + list(range(2, 17, 2)) # len: 9
+    num_hidden_features = 2 ** np.linspace(0, 9, 10)
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
+    args.num_layers = 12
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
@@ -549,7 +560,7 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
         for i, (seq, task) in enumerate(val_loader):
             seq, task = seq.to(device), task.to(device) 
             
-            print("seq", seq.shape, "task", task.shape, "sequence_ranks", sequence_ranks.shape, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
+            # print("seq", seq.shape, "task", task.shape, "sequence_ranks", sequence_ranks.shape, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
             output = model(seq, task) # shape: B, N, D
             # print ("seq", seq.shape, "task", task.shape, "output", output.shape )
             preds = output 
