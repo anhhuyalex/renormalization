@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.6
+#       jupytext_version: 1.16.2
 #   kernelspec:
 #     display_name: Python (fmri)
 #     language: python
@@ -70,7 +70,7 @@ parser.add_argument(
 )
 parser.add_argument('--seed', default=None, type=int,
                     help='seed for initializing training.')
-parser.add_argument('--num_iter_per_epoch', default=100, type=int,  
+parser.add_argument('--num_iters_per_epoch', default=1000, type=int,  
                     help='number of iters per epoch')
 parser.add_argument('--num_iters', default=5e5, type=int,  
                     help='number of iters')
@@ -208,13 +208,22 @@ def set_zipf_exp_one_layer_attention(args, lr, num_hidden_features, num_heads, v
     
     
 
-if args.wandb_group_name == "memo_feb26_uniformdist_modelsize":
-    num_heads = [1] + list(range(2, 17, 2)) # len: 9
-    num_layers = [1] + list(range(2, 17, 2)) # len: 9 
-    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
-    args.num_layers = num_layers[args.SLURM_ARRAY_TASK_ID // len(num_heads)]
+if args.wandb_group_name == "memo_jan14_uniformdist_modelsize":
+    num_heads = np.arange(1, 13)
+    num_layers = np.arange(1, 13)
+    args.num_heads = int(num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)]) 
+    args.num_layers = int(num_layers[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
     print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    args.num_hidden_features = 8
     args.sequence_sampling_distribution = "uniform"
+    args.is_resample_tasks == "False" 
+    args.K = 20000
+    args.num_iters = 100000
+    args.arch = "gpt"
+    args.len_context = 100
+    args.vocab_size = 2
+    args.lr = 1e-3
+    args.num_iters_per_epoch = 1000
 elif args.wandb_group_name == "memo_apr6_zipf_num_heads_8_num_layers_12":
     args.num_heads = 8
     args.num_layers = 12
@@ -320,6 +329,28 @@ elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+elif args.wandb_group_name == "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    num_heads = [1] + list(range(2, 17, 2)) # len: 9
+    num_hidden_features = 2 ** np.linspace(0, 9, 10).astype(int)
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+elif args.wandb_group_name == "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    num_heads = [1] + list(range(2, 17, 2)) # len: 9
+    num_hidden_features = 2 ** np.linspace(0, 9, 10).astype(int)
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params_resample(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -368,8 +399,9 @@ else:
 if args.resume is not None:
     with open(args.resume, 'rb') as f:
         record = pickle.load(f)
-    args = record['args']
     
+    args = record['args']
+
 
 # +
 
@@ -392,11 +424,15 @@ class Sequence(torch.utils.data.Dataset):
         else:
             assert self.sequence_sampling_distribution == "uniform", f"sequence_sampling_distribution must be uniform or zipf, got {self.sequence_sampling_distribution}"
         self.skip = skip
+        
     def generate_sequences(self):
         self.sequences = torch.randint(0, 2, (self.K, self.len_context)) 
         
-    def __len__(self):
-        return len(self.sequences)
+    def __len__(self): 
+        if self.skip == True:
+            return len(self.sequences)
+        else:
+            return self.len_data
 
     def __getitem__(self, task: int):
         if (self.sequence_sampling_distribution == "uniform") or (self.skip == True):
@@ -422,7 +458,7 @@ if args.arch == "gpt":
         n_embd=args.num_heads * args.num_hidden_features,
         n_layer=args.num_layers,
         n_head=args.num_heads,
-        bias = args.gpt_bias == "True",
+        bias = True,
         is_initialize_attention_weights_to_zero = args.is_initialize_attention_weights_to_zero 
     )
     model = gpt.GPT(config, criterion).to(device)
@@ -465,7 +501,7 @@ if use_cuda:
     train_kwargs.update(cuda_kwargs)
     test_kwargs.update(cuda_kwargs)
 train_dataset = Sequence(K=args.K, 
-                         len_data = 1000 * args.num_iter_per_epoch,
+                         len_data = args.batch_size * args.num_iters_per_epoch,
                          len_context=args.len_context,
                          sequence_sampling_distribution = args.sequence_sampling_distribution
                          )
@@ -509,6 +545,9 @@ iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
 # plt.show()
 
 # +
+
+from asyncio import wait
+
 
 def validate_gradient_descent(epoch, val_loader, model, args, criterion, device):
     # seq_lens = list(range(1, args.len_context+1, 5)) 
@@ -582,20 +621,19 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
                 is_correct = (preds_query.argmax(dim=-1) == seqs_query)
                 logsoftmax = F.log_softmax(preds_query, dim=1)
                 logsoftmaxloss = F.nll_loss(logsoftmax, seqs_query, reduction="none") 
-                
                 # if args.K < 10000: # for small K, we can save the whole tensor 
                 # test_metrics["sequence_rank"].append(task.detach().cpu().numpy())
-                sequence_ranks[i:i+len(task), i_seq] = task 
-                lengths[i:i+len(task), i_seq] = i_seq + 1 
-                logsoftmaxlosses[i:i+len(task), i_seq] = logsoftmaxloss 
-                accuracys[i:i+len(task), i_seq] = is_correct.float() 
-
+                sequence_ranks[i*args.batch_size:i*args.batch_size+len(task), i_seq] = task 
+                lengths[i*args.batch_size:i*args.batch_size+len(task), i_seq] = i_seq + 1 
+                logsoftmaxlosses[i*args.batch_size:i*args.batch_size+len(task), i_seq] = logsoftmaxloss 
+                accuracys[i*args.batch_size:i*args.batch_size+len(task), i_seq] = is_correct.float() 
+    # print("sequence_ranks", sequence_ranks, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
+    # print("accuracys", accuracys)
     test_metrics["sequence_rank"] = sequence_ranks[:,0].detach().cpu().numpy() # average over positions
     test_metrics["length"] = 50
     test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
     test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
     print("test_metrics accuracy with length", len(test_metrics["accuracy"]))
-     
     return test_metrics
  
 
@@ -612,7 +650,7 @@ if os.path.exists(dirprefix) == False:
     os.makedirs(dirprefix, exist_ok=True)
 exp_name = f"{dirprefix}/{fileprefix}.pkl"
 print("Saving to", exp_name)
-num_iters_per_epoch = 50
+num_iters_per_epoch = args.num_iters_per_epoch
 num_apppearances = np.zeros(args.K)
 test_every = 1 # np.log10(args.K).astype(int) * 2
 all_sequences_across_switches = {
@@ -662,14 +700,10 @@ for iter in range(args.num_iters // num_iters_per_epoch):
     logs = {
         "num_apppearances": copy.deepcopy(num_apppearances),
     }
-    if args.sequence_sampling_distribution == "zipf"  :
-        if (iter % test_every == 0):
-            test_metrics = validate_gradient_descent_zipf(iter, iwl_test_loader, model, args, criterion, device)
-        else:
-            test_metrics = {}
+    if (iter % test_every == 0):
+        test_metrics = validate_gradient_descent_zipf(iter, iwl_test_loader, model, args, criterion, device)
     else:
-        test_losses, test_top1 = validate_gradient_descent(iter, train_loader, model, args, criterion, device)
-        
+        test_metrics = {}    
     
     losses = utils.AverageMeter('Loss', ':.4e')
     ridge_losses = utils.AverageMeter('Ridge Loss', ':.4e')
@@ -717,22 +751,13 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         })
     print("iter", iter, "loss", losses.avg)
     if iter == args.num_iters - 1: 
-        if args.sequence_sampling_distribution == "zipf":
-            test_metrics = validate_gradient_descent_zipf(iter, iwl_test_loader, model, args, criterion, device)
-        else:
-            test_losses, test_top1 = validate_gradient_descent(iter, train_loader, model, args, criterion, device)            
-    if args.sequence_sampling_distribution == "zipf":
-        logs["test_metrics"] = test_metrics
-    elif args.sequence_sampling_distribution == "uniform":
-        for i in range(args.len_context):
-            logs[f"test_loss_{i}"] = test_losses[i].avg
-            logs[f"test_top1_{i}"] = test_top1[i].avg
+        test_metrics = validate_gradient_descent_zipf(iter, iwl_test_loader, model, args, criterion, device)
     
-    if args.wandb_log:
-        wandb.log(logs)
-    else:
-        # wandb.log(logs)
-        record["logs"].append(logs)
+    
+    logs["test_metrics"] = test_metrics
+     
+     
+    record["logs"].append(logs)
     
  
     # save phi_xt_list_epoch 
@@ -749,14 +774,13 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         # with open(exp_name, "w") as f:
             # json.dump(record, f)
   
-if args.wandb_log != True:
-    record["positional_encoding"] = model.transformer.wpe.weight.detach().cpu().numpy()
-    record["token_embedding"] = model.transformer.wte.weight.detach().cpu().numpy()
-    with open(exp_name, "wb") as f:
-        pickle.dump(record, f)
-        
-    with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
-        pickle.dump(all_sequences_across_switches, f)
+record["positional_encoding"] = model.transformer.wpe.weight.detach().cpu().numpy()
+record["token_embedding"] = model.transformer.wte.weight.detach().cpu().numpy()
+with open(exp_name, "wb") as f:
+    pickle.dump(record, f)
+    
+with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+    pickle.dump(all_sequences_across_switches, f)
         
     # save model state_dict
     # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:

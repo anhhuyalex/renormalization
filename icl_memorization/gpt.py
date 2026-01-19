@@ -214,23 +214,23 @@ class GPT(nn.Module):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
 
             if config.is_initialize_attention_weights_to_zero == "zero_all_attn_weights":
-                if ".attn." in pn:
+                if "c_attn" in pn:
                     torch.nn.init.zeros_(p)
                     # freeze the weights
                     p.requires_grad = False 
             elif config.is_initialize_attention_weights_to_zero == "zero_all_attn_except_cproj_weights":
-                if (".attn." in pn) and (".c_proj." not in pn):
+                if ("c_attn" in pn) and (".c_proj." not in pn):
                     torch.nn.init.zeros_(p)
                     # freeze the weights
                     p.requires_grad = False
                 print("params", pn, p.flatten()[:10])
             elif config.is_initialize_attention_weights_to_zero == "zero_all_attn_allow_learning":
-                if (".attn." in pn):
+                if ("c_attn" in pn):
                     torch.nn.init.zeros_(p)
                     # freeze the weights
                     p.requires_grad = True
             elif config.is_initialize_attention_weights_to_zero == "zero_all_attn_allow_learning_debug":
-                if (".attn." in pn):
+                if ("c_attn" in pn):
                     # torch.nn.init.zeros_(p)
                     # freeze the weights
                     p.requires_grad = True
@@ -441,7 +441,8 @@ class GPT(nn.Module):
         return idx
     
 class OneLayerAttention(nn.Module):
-    def __init__(self, len_context, num_heads, num_hidden_features, vocab_size, num_mlp_layers):
+    def __init__(self, len_context, num_heads, num_hidden_features, vocab_size, 
+        num_mlp_layers, is_initialize_attention_weights_to_zero = None):
         super().__init__()
         
         self.len_context = len_context
@@ -461,12 +462,32 @@ class OneLayerAttention(nn.Module):
         self.lm_head = nn.Linear(self.num_hidden_features, vocab_size, bias=True)
         # init all weights
         self.apply(self._init_weights)
-        
-        # generate causal mask
-        # attn_bias = torch.zeros(len_context, len_context).to(self.wte.weight.dtype)
-        # temp_mask = torch.ones(len_context, len_context, dtype=torch.bool).tril(diagonal=0)
-        # attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-        # self.causal_mask  = attn_bias
+        # apply special scaled init to the residual projections, per GPT-2 paper
+        for pn, p in self.named_parameters():
+            if pn.endswith('c_proj.weight'):
+                torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * 1)) # 1 layer
+
+            if is_initialize_attention_weights_to_zero == "zero_all_attn_weights":
+                if "c_attn" in pn:
+                    torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = False 
+            elif is_initialize_attention_weights_to_zero == "zero_all_attn_except_cproj_weights":
+                if ("c_attn" in pn) and (".c_proj." not in pn):
+                    torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = False
+                print("params", pn, p.flatten()[:10])
+            elif is_initialize_attention_weights_to_zero == "zero_all_attn_allow_learning":
+                if ("c_attn" in pn):
+                    torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = True
+            elif is_initialize_attention_weights_to_zero == "zero_all_attn_allow_learning_debug":
+                if ("c_attn" in pn):
+                    # torch.nn.init.zeros_(p)
+                    # freeze the weights
+                    p.requires_grad = True 
         
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -629,16 +650,16 @@ class HeadsMLPGPT(nn.Module):
         input_x = x.clone()
         B, T, _ = x.size()
         q, k, v, C = self.get_qkv(x=x, targets=targets, layer=layer)
-        x = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True).transpose(1, 2).contiguous().reshape(B, T, C)  + x # residual connection
-        # attn_x = x.clone()
+        x = x + torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=True).transpose(1, 2).contiguous().reshape(B, T, C) # residual connection
+        attn_x = x.clone()
         # mlp
-        # x = self.ln_f[layer](x)
-        x = self.input_to_mlp[layer](x) # project the input to the MLP
         x = self.ln_f[layer](x)
+        x = self.input_to_mlp[layer](x) # project the input to the MLP
+        # x = self.ln_f[layer](x)
         # Here, we fix D=input into MLP and d=dimensions per head (specified by num_hidden_attn_features)
         module = self.linear_modules[layer] # get the MLP module corresponding to the current layer
         x = torch.nn.functional.relu(module(x)) # residual connection
-        x = self.lm_head[layer](x) + input_x # residual connection
+        x = self.lm_head[layer](x) + attn_x # residual connection
         return x
     
     def get_qkv(self, x, targets, layer):
