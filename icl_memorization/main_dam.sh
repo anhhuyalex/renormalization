@@ -5,15 +5,17 @@
 #SBATCH --time=72:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
+#SBATCH --partition=mig
 # SBATCH --array=0-80%20
-# SBATCH --partition=mig
+
 # source activate renormalization
 source ~/.bashrc
-# source ../../learning_to_learn/l2l/bin/activate
+source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
 # cd /jukebox/norman/qanguyen/patdiff_seq
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+# conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
-savedir="/scratch/qanguyen/gautam"
+# savedir="/scratch/qanguyen/gautam"
+savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
 
 # Parameter Grid
 etas=(1 10 100)
