@@ -216,6 +216,63 @@ def initialize_record(args):
     return record
 
 
+@torch.no_grad()
+def compute_model_stats(model: DAM, args):
+    """
+    Computes per-position summary stats for monitoring.
+
+    Returns:
+        dict with:
+          - A_logits_mean: (N,) cpu tensor
+          - B_logits_mean: (N,) cpu tensor
+          - A_logits_mean_mean: float
+          - B_logits_mean_mean: float
+          - A_sharpness: float
+          - A_correlation: (N, H, H) cpu tensor
+          - A_correlation_offdiag_mean: (N,) cpu tensor
+          - A_correlation_offdiag_mean_mean: float
+    """
+    # A_logits: (N, H, N) -> mean over last dim -> (N, H) -> mean over heads -> (N,)
+    A_logits_mean = model.A_logits.detach().mean(dim=-1).mean(dim=1).cpu()
+    A_logits_mean_mean = A_logits_mean.mean().item()
+
+    # B_logits: (H, N) -> mean over heads -> (N,)
+    B_logits_mean = model.B_logits.detach().mean(dim=0).cpu()
+    B_logits_mean_mean = B_logits_mean.mean().item()
+
+    # Just take mean max attention as proxy for "sharpness"
+    A_sharpness = 0.0
+    for n in range(1, args.N):
+        A_n = model.get_A(n)  # (H, n)
+        A_sharpness += A_n.max(dim=1).values.mean().item()
+    A_sharpness /= (args.N - 1)
+
+    # Pearson correlation across the last dim (N) between heads (rows).
+    # X: (N, H, N)
+    X = model.A_logits.detach()  # shape: (N, H, N)
+    X = X - X.mean(dim=-1, keepdim=True)  # center over last dim
+    X = X / (X.std(dim=-1, keepdim=True, unbiased=False) + 1e-8)  # normalize variance
+    A_correlation = torch.matmul(X, X.transpose(-1, -2)) / X.shape[-1]  # (N, H, H)
+
+    # Off-diagonal mean per n: (N,)
+    offdiag_mask = ~torch.eye(args.H, dtype=torch.bool, device=A_correlation.device)
+    A_correlation_offdiag_mean = (
+        A_correlation.masked_select(offdiag_mask).view(args.N, -1).mean(dim=1).cpu()
+    )
+    A_correlation_offdiag_mean_mean = A_correlation_offdiag_mean.mean().item()
+
+    return {
+        "A_logits_mean": A_logits_mean,
+        "B_logits_mean": B_logits_mean,
+        "A_logits_mean_mean": A_logits_mean_mean,
+        "B_logits_mean_mean": B_logits_mean_mean,
+        "A_sharpness": A_sharpness,
+        "A_correlation": A_correlation.detach().cpu(),
+        "A_correlation_offdiag_mean": A_correlation_offdiag_mean,
+        "A_correlation_offdiag_mean_mean": A_correlation_offdiag_mean_mean,
+    }
+
+
 # +
 
 if __name__ == "__main__":
@@ -234,6 +291,7 @@ if __name__ == "__main__":
     parser.add_argument("--NUM_ITERS_PER_LOG", type=int, default=100)
     parser.add_argument("--savedir", type=str, default="/scratch/qanguyen/gautam")
     parser.add_argument("--prefix", type=str, default="")
+    parser.add_argument("--is_freeze_A", type=str, default="False")
     parser.add_argument(
         "--device",
         type=str,
@@ -286,32 +344,25 @@ if __name__ == "__main__":
         # Update memory
         model.update_memory(batch)
         # Compute stats
-        with torch.no_grad():
-            A_grad_norm = model.A_logits.grad.norm().item() if model.A_logits.grad is not None else 0.0
-            B_grad_norm = model.B_logits.grad.norm().item() if model.B_logits.grad is not None else 0.0
-            # A_entropy (approximate, averaged over N)
-            # Just take mean max attention as proxy for "sharpness"
-            A_sharpness = 0.0
-            for n in range(1, args.N):
-                A_n = model.get_A(n) # (H, n)
-                A_sharpness += A_n.max(dim=1).values.mean().item()
-            A_sharpness /= (args.N - 1)
-            
-            logs = {
-                "step": step,
-                "loss": loss,
-                "accuracy": accuracy,
-                "A_grad_norm": A_grad_norm,
-                "B_grad_norm": B_grad_norm,
-                "A_sharpness": A_sharpness,
-                "phase": "train"
-            }
-            record["logs"].append(logs)
+        stats = compute_model_stats(model, args)
+        logs = {
+            "step": step,
+            "loss": loss,
+            "accuracy": accuracy,
+            **stats,
+            "phase": "train",
+        }
+        record["logs"].append(logs)
 
         if step % args.NUM_ITERS_PER_LOG == 0:
             print(f"Step {step}: Loss = {loss:.4f}, Accuracy = {accuracy:.4f}")
             
-            print(f"Stats: A_grad={A_grad_norm:.4f}, B_grad={B_grad_norm:.4f}, A_sharp={A_sharpness:.4f}")
+            print(
+                f"Stats: A_logits_mean={stats['A_logits_mean_mean']:.4f}, "
+                f"B_logits_mean={stats['B_logits_mean_mean']:.4f}, "
+                f"A_corr_offdiag={stats['A_correlation_offdiag_mean_mean']:.4f}, "
+                f"A_sharp={stats['A_sharpness']:.4f}"
+            )
 
     print("Verification complete.")
     # save model.state_dict() 
@@ -320,7 +371,11 @@ if __name__ == "__main__":
     # resample sequences 
     sequences = torch.sign(torch.randn(args.K, args.N, device=device))
     print(f"Sequences resampled with shape: {sequences.shape}")
-    model.eval()
+    if args.is_freeze_A == "True":
+        model.A_logits.requires_grad = False
+        optimizer = torch.optim.Adam(model.B_logits.parameters(), lr=args.lr)
+    elif args.is_freeze_A == "False":
+        model.eval()
     model.clear_memory() # clear memory for evaluation
 
     for step in range(args.NUM_STEPS):
@@ -334,12 +389,15 @@ if __name__ == "__main__":
         # Update memory
         model.update_memory(batch)
 
+        # Compute stats
+        stats = compute_model_stats(model, args)
         logs = {
-                "step": step,
-                "loss": loss,
-                "accuracy": accuracy, 
-                "phase": "eval"
-            }
+            "step": step,
+            "loss": loss,
+            "accuracy": accuracy,
+            **stats,
+            "phase": "eval",
+        }
         record["logs"].append(logs)
     # save model.state_dict() as A_logits and B_logits
     torch.save(record, f"{args.savedir}/{exp_name}.pt")

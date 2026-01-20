@@ -2,7 +2,7 @@
 #SBATCH --job-name=memo
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=10G
-#SBATCH --time=72:00:00
+#SBATCH --time=3:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
 #SBATCH --partition=mig
@@ -10,46 +10,56 @@
 
 # source activate renormalization
 source ~/.bashrc
-source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
+
+
+hostname="$(hostname)"
+if [[ "$hostname" == *della* ]]; then
+  python="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/python"
+  savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
+  source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
+else
+  python="python"
+  savedir="/scratch/qanguyen/gautam"
+  conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+fi
 # cd /jukebox/norman/qanguyen/patdiff_seq
 # conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
-# savedir="/scratch/qanguyen/gautam"
-savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
+
 
 # Parameter Grid
-etas=(1 10 100)
-lrs=(1e-3 1e-2 1e-1)
-init_stds=(1e-2 1e-1 1e0)
-Hs=(1 5 10 30 100)
+# etas=(1 10 100)
+# lrs=(1e-3 1e-2 1e-1)
+# init_stds=(1e-2 1e-1 1e0)
+# Hs=(1 5 10 30 100)
 
-# Decode SLURM_ARRAY_TASK_ID
-# Total combos = 3 * 3 * 3 * 5 = 135
-# Order calculation: H changes fastest
-idx=$SLURM_ARRAY_TASK_ID
+# # Decode SLURM_ARRAY_TASK_ID
+# # Total combos = 3 * 3 * 3 * 5 = 135
+# # Order calculation: H changes fastest
+# idx=$SLURM_ARRAY_TASK_ID
 
-num_Hs=${#Hs[@]}
-i_H=$((idx % num_Hs))
-idx=$((idx / num_Hs))
+# num_Hs=${#Hs[@]}
+# i_H=$((idx % num_Hs))
+# idx=$((idx / num_Hs))
 
-num_init_stds=${#init_stds[@]}
-i_std=$((idx % num_init_stds))
-idx=$((idx / num_init_stds))
+# num_init_stds=${#init_stds[@]}
+# i_std=$((idx % num_init_stds))
+# idx=$((idx / num_init_stds))
 
-num_lrs=${#lrs[@]}
-i_lr=$((idx % num_lrs))
-idx=$((idx / num_lrs))
+# num_lrs=${#lrs[@]}
+# i_lr=$((idx % num_lrs))
+# idx=$((idx / num_lrs))
 
-num_etas=${#etas[@]}
-i_eta=$((idx % num_etas))
+# num_etas=${#etas[@]}
+# i_eta=$((idx % num_etas))
 
-# Retrieve values
-eta=${etas[$i_eta]}
-lr=${lrs[$i_lr]}
-init_std=${init_stds[$i_std]}
-H=${Hs[$i_H]}
+# # Retrieve values
+# eta=${etas[$i_eta]}
+# lr=${lrs[$i_lr]}
+# init_std=${init_stds[$i_std]}
+# H=${Hs[$i_H]}
 
-echo "Running with eta=$eta, lr=$lr, init_std=$init_std, H=$H"
+# echo "Running with eta=$eta, lr=$lr, init_std=$init_std, H=$H"
 
 # Construct specific prefix
 
@@ -90,12 +100,13 @@ else
   exit 1
 fi
 
-prefix="dam_jan19_largeK_no_adapt_H_${H}"
+prefix="dam_jan19_no_adapt_A_H_${H}"
 num_steps=10000
-K=10000
-batch_size=1000
-M=500000
-N=100
-python -u main_dam.py --savedir $savedir --prefix $prefix \
+K=500
+batch_size=50
+M=3000
+N=50
+is_freeze_A="True"
+$python -u main_dam.py --savedir $savedir --prefix $prefix \
     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
-    --BATCH_SIZE $batch_size --K $K --M $M --N $N
+    --BATCH_SIZE $batch_size --K $K --M $M --N $N --is_freeze_A $is_freeze_A
