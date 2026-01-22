@@ -45,7 +45,7 @@ num_mlp_layers=3
 # wandb_group_name="memo_aug15_zipf_onelayerattention_lr_1e-3"
 # wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
 # wandb_group_name="memo_dec8_zipf_heads_mlp_gpt_lr_1e_3"
-wandb_group_name="memo_jan14_uniformdist_modelsize" 
+wandb_group_name="memo_jan20_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample" 
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
