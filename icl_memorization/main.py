@@ -329,7 +329,7 @@ elif args.wandb_group_name == "memo_nov10_zipf_gpt2_vary_num_hidden_features_num
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
-elif args.wandb_group_name == "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample":
+elif args.wandb_group_name == "memo_jan20_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample":
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
@@ -340,7 +340,7 @@ elif args.wandb_group_name == "memo_jan4_zipf_onelayerattention_vary_num_hidden_
     
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
-elif args.wandb_group_name == "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample":
+elif args.wandb_group_name == "memo_jan20_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample":
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
     num_heads = [1] + list(range(2, 17, 2)) # len: 9
@@ -773,9 +773,9 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         # use json
         # with open(exp_name, "w") as f:
             # json.dump(record, f)
-  
-record["positional_encoding"] = model.transformer.wpe.weight.detach().cpu().numpy()
-record["token_embedding"] = model.transformer.wte.weight.detach().cpu().numpy()
+if args.arch == "gpt":
+    record["positional_encoding"] = model.transformer.wpe.weight.detach().cpu().numpy()
+    record["token_embedding"] = model.transformer.wte.weight.detach().cpu().numpy()
 with open(exp_name, "wb") as f:
     pickle.dump(record, f)
     
