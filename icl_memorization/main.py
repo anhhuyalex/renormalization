@@ -351,6 +351,28 @@ elif args.wandb_group_name == "memo_jan20_zipf_onelayerattention_vary_num_hidden
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+elif args.wandb_group_name == "memo_jan25_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    t = args.SLURM_ARRAY_TASK_ID
+
+    num_heads = [1] + list(range(2, 17, 7)) # length: 4
+    num_hidden_features = (2 ** np.linspace(0, 9, 4)).astype(int) # length: 4
+    num_hidden_features_mlp = (2 ** np.arange(0, 11, 1)).astype(int) # length: 11
+
+    nH = len(num_heads)
+    nF = len(num_hidden_features)
+    nM = len(num_hidden_features_mlp)
+
+    iH = t % nH
+    iF = (t // nH) % nF
+    iM = t // (nH * nF)
+
+    args.num_heads = num_heads[iH]
+    args.num_hidden_features = int(num_hidden_features[iF])
+    args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -466,11 +488,12 @@ elif args.arch == "OneLayerAttention":
     import gpt
     # /jukebox/norman/qanguyen/renormalization/icl_memorization/gpt.py
     # arguments: len_context, num_heads, num_hidden_features, vocab_size, num_mlp_layers)
-    model = gpt.OneLayerAttention(args.len_context, 
-                                  args.num_heads, 
-                                  args.num_hidden_features, 
-                                  args.vocab_size, 
-                                  args.num_mlp_layers).to(device)
+    model = gpt.OneLayerAttention(len_context = args.len_context, 
+                                  num_heads = args.num_heads, 
+                                  num_hidden_features = args.num_hidden_features, 
+                                  vocab_size = args.vocab_size, 
+                                  num_mlp_layers = args.num_mlp_layers,
+                                  num_hidden_features_mlp = args.num_hidden_features_mlp).to(device)
 if args.optimizer == 'SGD': 
     optimizer = torch.optim.SGD(model.parameters(),  
                             lr=args.lr, 
@@ -602,16 +625,27 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     lengths = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.long).to(device)
     logsoftmaxlosses = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.float).to(device) 
     accuracys = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.float).to(device)
+    vertical_bars_metric = 0
+    decorrelation_metric = 0 
+    num_batches = 15
     with torch.no_grad():
         for i, (seq, task) in enumerate(val_loader):
             seq, task = seq.to(device), task.to(device) 
             
             # print("seq", seq.shape, "task", task.shape, "sequence_ranks", sequence_ranks.shape, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
             output = model(seq, task) # shape: B, N, D
+            
             # print ("seq", seq.shape, "task", task.shape, "output", output.shape )
             preds = output 
-            B, N, D = output.shape
-             
+            B, N, D = output.shape  
+            if i < num_batches:
+                _, attn = model.get_attention_weights(seq, task)
+                vertical_bars_metric += utils.corr_attn_prefix_rows(attn) 
+                decorrelation_metric += utils.corr_heads_at_ts(attn)
+                # print("vertical_bars_metric", vertical_bars_metric.shape)
+                # print("decorrelation_metric", decorrelation_metric.shape)
+                # print("utils.__file__", utils.__file__)
+                # print("corr_heads_at_ts defaults", utils.corr_heads_at_ts.__defaults__)
             for i_seq in range(args.len_context-1): 
                 preds_query = preds[:, i_seq,:].reshape(-1, D)
                 seqs_query = seq[:,(i_seq+1)].reshape(-1)
@@ -633,7 +667,13 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     test_metrics["length"] = 50
     test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
     test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
-    print("test_metrics accuracy with length", len(test_metrics["accuracy"]))
+    vertical_bars_metric /= num_batches 
+    decorrelation_metric /= num_batches 
+    test_metrics["vertical_bars_metric"] = vertical_bars_metric.detach().cpu().numpy().mean(axis=0) # shape: H, N, N
+    test_metrics["decorrelation_metric"] = decorrelation_metric.detach().cpu().numpy().mean(axis=0) # shape: T, H, H
+    print("test_metrics accuracy with length", len(test_metrics["accuracy"])) 
+    print("test_metrics vertical_bars_metric", test_metrics["vertical_bars_metric"].shape)
+    print("test_metrics decorrelation_metric", test_metrics["decorrelation_metric"].shape)
     return test_metrics
  
 
@@ -762,7 +802,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
  
     # save phi_xt_list_epoch 
 
-    if iter % 50 == 0 and args.wandb_log != True:
+    if iter % 10 == 0 and args.wandb_log != True:
         record["model"] = model.state_dict()
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
