@@ -5,7 +5,7 @@
 #       extension: .py
 #       format_name: light
 #       format_version: '1.5'
-#       jupytext_version: 1.16.6
+#       jupytext_version: 1.16.2
 #   kernelspec:
 #     display_name: Python (fmri)
 #     language: python
@@ -685,29 +685,30 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     print("test_metrics decorrelation_metric", test_metrics["decorrelation_metric"].shape)
 
     # linear probing of MLP reps metric 
-    # for each layer, fit a linear model to the mlp_reps predicting the labels
-    for i in range(len(mlp_reps_batch)):
-        mlp_reps_per_layer[i] = np.concatenate(mlp_reps_per_layer[i], axis=0)
-        print("layer", i, "shape", mlp_reps_per_layer[i].shape)
-        w
-        # random partition into tr ain and test 
-        train_ids = np.random.choice(np.arange(mlp_reps_per_layer[i].shape[0]), size=int(0.8*mlp_reps_per_layer[i].shape[0]), replace=False)
-        test_ids = np.setdiff1d(np.arange(mlp_reps_per_layer[i].shape[0]), train_ids)
-        train_mlp_reps = mlp_reps_per_layer[i][train_ids]
-        test_mlp_reps = mlp_reps_per_layer[i][test_ids]
-        train_labels = mlp_reps_per_layer["label"][train_ids]
-        test_labels = mlp_reps_per_layer["label"][test_ids]
-        
-        print(f"mlp_rep {i} shape", mlp_reps_per_layer[i].shape)  
-        # fit a logistic regression model to the mlp_reps predicting the labels
-        logisticregression = LogisticRegression(max_iter=1000)
-        logisticregression.fit(train_mlp_reps, train_labels)
-        mlp_dict["test_labels"].extend(mlp_reps_per_layer["label"][test_ids]) 
-        test_preds = logisticregression.predict(test_mlp_reps)
-        mlp_dict["accuracy"].extend(test_preds == test_labels)
-        mlp_dict["layer"].extend([i] * len(test_ids))
-        mlp_dict["epoch"].extend([epoch] * len(test_ids))
-        print("test_accuracy", logisticregression.score(test_mlp_reps, test_labels), "test_labels", test_labels, "test_mlp_reps", test_preds)
+    # for each layer, fit a linear model to the mlp_reps predicting the labels 
+    if args.arch == "gpt":
+        for i in range(len(mlp_reps_batch)):
+            mlp_reps_per_layer[i] = np.concatenate(mlp_reps_per_layer[i], axis=0)
+            print("layer", i, "shape", mlp_reps_per_layer[i].shape)
+            w
+            # random partition into tr ain and test 
+            train_ids = np.random.choice(np.arange(mlp_reps_per_layer[i].shape[0]), size=int(0.8*mlp_reps_per_layer[i].shape[0]), replace=False)
+            test_ids = np.setdiff1d(np.arange(mlp_reps_per_layer[i].shape[0]), train_ids)
+            train_mlp_reps = mlp_reps_per_layer[i][train_ids]
+            test_mlp_reps = mlp_reps_per_layer[i][test_ids]
+            train_labels = mlp_reps_per_layer["label"][train_ids]
+            test_labels = mlp_reps_per_layer["label"][test_ids]
+            
+            print(f"mlp_rep {i} shape", mlp_reps_per_layer[i].shape)  
+            # fit a logistic regression model to the mlp_reps predicting the labels
+            logisticregression = LogisticRegression(max_iter=1000)
+            logisticregression.fit(train_mlp_reps, train_labels)
+            mlp_dict["test_labels"].extend(mlp_reps_per_layer["label"][test_ids]) 
+            test_preds = logisticregression.predict(test_mlp_reps)
+            mlp_dict["accuracy"].extend(test_preds == test_labels)
+            mlp_dict["layer"].extend([i] * len(test_ids))
+            mlp_dict["epoch"].extend([epoch] * len(test_ids))
+            print("test_accuracy", logisticregression.score(test_mlp_reps, test_labels), "test_labels", test_labels, "test_mlp_reps", test_preds)
     return test_metrics
  
 
