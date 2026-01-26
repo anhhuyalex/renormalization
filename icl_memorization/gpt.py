@@ -442,12 +442,14 @@ class GPT(nn.Module):
     
 class OneLayerAttention(nn.Module):
     def __init__(self, len_context, num_heads, num_hidden_features, vocab_size, 
-        num_mlp_layers, is_initialize_attention_weights_to_zero = None):
+        num_mlp_layers, is_initialize_attention_weights_to_zero = None, 
+        num_hidden_features_mlp = None):
         super().__init__()
         
         self.len_context = len_context
         self.num_heads = num_heads
         self.num_hidden_features = num_hidden_features * num_heads
+        self.num_hidden_features_mlp = num_hidden_features_mlp if num_hidden_features_mlp is not None else self.num_hidden_features
         self.wte = nn.Embedding(vocab_size, self.num_hidden_features)
         self.wpe = nn.Embedding(len_context, self.num_hidden_features)
         self.pre_attn_ln = LayerNorm(self.num_hidden_features, bias=True)
@@ -456,10 +458,11 @@ class OneLayerAttention(nn.Module):
         # Modules
         self.c_attn = nn.Linear(self.num_hidden_features, self.num_hidden_features * 3, bias=True)
         linear_modules = []
-        for _ in range(num_mlp_layers):
-            linear_modules.append(nn.Linear(self.num_hidden_features, self.num_hidden_features))
+        linear_modules.append(nn.Linear(self.num_hidden_features, self.num_hidden_features_mlp))
+        for _ in range(num_mlp_layers-1):
+            linear_modules.append(nn.Linear(self.num_hidden_features_mlp, self.num_hidden_features_mlp))
         self.linear_modules = nn.ModuleList(linear_modules)
-        self.lm_head = nn.Linear(self.num_hidden_features, vocab_size, bias=True)
+        self.lm_head = nn.Linear(self.num_hidden_features_mlp, vocab_size, bias=True)
         # init all weights
         self.apply(self._init_weights)
         # apply special scaled init to the residual projections, per GPT-2 paper
@@ -505,7 +508,8 @@ class OneLayerAttention(nn.Module):
         
         # mlp
         x = self.ln_f(x)
-        for module in self.linear_modules:
+        x = torch.nn.functional.relu(self.linear_modules[0](x)) # first layer might not be a residual connection
+        for module in self.linear_modules[1:]:
             x = torch.nn.functional.relu(module(x)) + x # residual connection
         x = self.lm_head(x)
         return x
@@ -518,13 +522,13 @@ class OneLayerAttention(nn.Module):
         
         # mlp
         x = self.ln_f(x)
-        mlp_reps = [x.clone().detach()]
-        for module in self.linear_modules:
+        mlp_reps = [x.clone().detach()] 
+        x = torch.nn.functional.relu(self.linear_modules[0](x)) # first layer might not be a residual connection
+        mlp_reps.append(x.clone().detach())
+        for module in self.linear_modules[1:]:
             x = torch.nn.functional.relu(module(x)) + x # residual connection
             mlp_reps.append(x.clone().detach())
-            print("len(mlp_reps)", len(mlp_reps))
         x = self.lm_head(x)
-        print("final len mlp_reps", len(mlp_reps))
         return x, mlp_reps
     
     def require_grad_attention_weights(self, require_grad=True):
@@ -566,9 +570,11 @@ class OneLayerAttention(nn.Module):
         L, S = query.size(-2), key.size(-2)
         scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
         attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+
         if is_causal:
             assert attn_mask is None
-            temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+            temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(diagonal=0)
+
             attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
             attn_bias.to(query.dtype)
 

@@ -90,6 +90,214 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
         return res
+
+
+def pearson_corr_lastdim(x: torch.Tensor, y: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """
+    Batched Pearson correlation along the last dimension.
+
+    Args:
+        x: Tensor with shape (..., L)
+        y: Tensor broadcastable to x with shape (..., L)
+        eps: Small constant for numerical stability.
+
+    Returns:
+        Tensor with shape (...) containing Pearson correlations.
+    """
+    # Center over last dim
+    x0 = x - x.mean(dim=-1, keepdim=True)
+    y0 = y - y.mean(dim=-1, keepdim=True)
+
+    # Normalize variance (unbiased=False matches common deep-learning usage)
+    x0 = x0 / (x0.std(dim=-1, keepdim=True, unbiased=False) + eps)
+    y0 = y0 / (y0.std(dim=-1, keepdim=True, unbiased=False) + eps)
+
+    # Correlation is mean of z-scored products along last dim
+    return (x0 * y0).mean(dim=-1)
+
+
+@torch.no_grad()
+def corr_heads_at_ts(
+    attn: torch.Tensor,
+    step: int = 5,
+    ts: torch.Tensor | None = None,
+    eps: float = 1e-8,
+    return_ts: bool = False,
+    fill_nan: bool = True,
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute per-batch head-head correlation matrices for several values of t using causal prefixes.
+
+    For each t in `ts` (default: arange(0, H, step) clipped to < N), form:
+        X_t = attn[:, :, t, :t]   with shape (B, H, t)
+    and compute Pearson correlation across heads (treating each head's length-t vector as a sample):
+        corr_t[b] = corrcoef_over_lastdim(X_t[b])  -> (H, H)
+
+    Args:
+        attn: (B, H, N, N) attention probabilities.
+        step: Step size when ts is None.
+        ts: Optional 1D LongTensor of t indices. If None, uses torch.arange(0, H, step).
+            Note: `t` indexes the sequence dimension N, so we always clip to ts < N.
+        eps: Numerical stability for std normalization.
+        return_ts: If True, return (corr, ts_valid). Otherwise return corr only.
+        fill_nan: If True, fill undefined t<=1 slices with NaN; else fill with 0.
+
+    Returns:
+        corr: (B, T, H, H) where T = len(ts_valid)
+        ts_valid (optional): (T,) the actually-used t indices (ts clipped to < N)
+    """
+    if attn.ndim != 4:
+        raise ValueError(f"attn must have shape (B,H,N,N); got {tuple(attn.shape)}")
+    B, H, N, N2 = attn.shape
+    if N != N2:
+        raise ValueError(f"attn must be square in last 2 dims; got {(N, N2)}")
+
+    device = attn.device
+    if ts is None:
+        if step <= 0:
+            raise ValueError(f"step must be > 0; got {step}")
+        ts = torch.arange(0, N, step, device=device, dtype=torch.long)
+    else:
+        if not isinstance(ts, torch.Tensor):
+            ts = torch.as_tensor(ts, device=device)
+        ts = ts.to(device=device, dtype=torch.long)
+        if ts.ndim != 1:
+            raise ValueError(f"ts must be 1D; got shape {tuple(ts.shape)}")
+
+    ts_valid = ts[ts < N]
+    T = int(ts_valid.numel())
+    fill = float("nan") if fill_nan else 0.0
+    out = attn.new_full((B, T, H, H), fill)
+
+    # Loop over a small number of t values; inside is batched over B and all heads.
+    for ti in range(T):
+        t = int(ts_valid[ti].item())
+        if t <= 1:
+            continue
+
+        # X: (B,H,t)
+        X = attn[:, :, t, :t]
+
+        # Center/standardize over last dim (t), then compute correlation via dot products.
+        X = X - X.mean(dim=-1, keepdim=True)
+        X = X / (X.std(dim=-1, keepdim=True, unbiased=False) + eps)
+        out[:, ti] = torch.matmul(X, X.transpose(-1, -2)) / X.shape[-1]
+
+    return (out, ts_valid) if return_ts else out
+
+
+@torch.no_grad()
+def corr_attn_prefix_rows(
+    attn: torch.Tensor,
+    step: int = 5,
+    positions: torch.Tensor | None = None,
+    eps: float = 1e-8,
+    chunk_t: int | None = None,
+    return_nan_matrix: bool = True,
+) -> torch.Tensor:
+    """
+    Compute correlations between prefix-normalized attention rows on a coarse (step) grid.
+
+    Given attention `attn` with shape (B, H, N, N), for a set of positions `pos` (default:
+    0, step, 2*step, ...), define:
+
+      s_positions = pos                         (i.e., 0, step, 2*step, ...)
+      t_positions = pos + 1                     (i.e., 1, step+1, 2*step+1, ...)
+
+    so that `s` and `t` are always distinct (modulo valid range), and compute for each
+    pair (s, t) with s in s_positions and t in t_positions and t > s:
+
+      x = attn[..., s, :s] normalized to sum 1
+      y = attn[..., t, :s] normalized to sum 1
+      corr(s,t) = PearsonCorr(x, y) over the last dimension (length s)
+
+    This matches the common strictly-causal setting where row t attends only to indices < t,
+    so the meaningful prefix for row s is :s (excluding the diagonal).
+
+    Args:
+        attn: (B, H, N, N) attention probabilities (typically softmaxed).
+        step: Step size used when `positions` is None.
+        positions: Optional 1D LongTensor of positions in [0, N). If provided, overrides step.
+        eps: Numerical stability for renormalization and std.
+        chunk_t: Optional chunk size for t-positions to reduce peak memory.
+        return_nan_matrix: If True, fill invalid entries (t <= s or s==0) with NaN.
+            If False, fill them with 0.
+
+    Returns:
+        corr: (B, H, P_s, P_t) where:
+            - P_s = len(positions) (s_positions index i)
+            - P_t = number of valid t_positions = (positions + 1) < N (t_positions index j)
+          Entry (i,j) corresponds to s = positions[i], t = positions[j] + 1.
+          Only entries with j >= i and valid indices are populated; others are NaN or 0
+          depending on `return_nan_matrix`.
+    """
+    if attn.ndim != 4:
+        raise ValueError(f"attn must have shape (B,H,N,N); got {tuple(attn.shape)}")
+    B, H, N, N2 = attn.shape
+    if N != N2:
+        raise ValueError(f"attn must be square in last 2 dims; got {(N, N2)}")
+
+    device = attn.device
+    if positions is None:
+        if step <= 0:
+            raise ValueError(f"step must be > 0; got {step}")
+        positions = torch.arange(0, N, step, device=device, dtype=torch.long)
+    else:
+        if not isinstance(positions, torch.Tensor):
+            positions = torch.as_tensor(positions, device=device)
+        positions = positions.to(device=device, dtype=torch.long)
+        if positions.ndim != 1:
+            raise ValueError(f"positions must be 1D; got shape {tuple(positions.shape)}")
+
+    P = int(positions.numel())
+    fill = float("nan") if return_nan_matrix else 0.0
+
+    # Precompute valid t positions: t_positions = positions + 1, but must satisfy t < N.
+    # Since positions is increasing, validity is a prefix.
+    t_positions = positions + 1
+    P_t = int((t_positions < N).sum().item())
+    t_positions = t_positions[:P_t]
+
+    out = attn.new_full((B, H, P, P_t), fill)
+
+    # One Python loop over s; inside is fully batched over B,H and all valid t (shifted by +1).
+    for i in range(P):
+        if i >= P_t:
+            break  # no columns remain with j >= i
+        s = int(positions[i].item())
+        if s <= 0:
+            continue
+        if s >= N:
+            continue
+
+        # x: (B,H,s) -> normalize to sum 1 -> (B,H,1,s)
+        x = attn[:, :, s, :s]
+        x = x / (x.sum(dim=-1, keepdim=True) + eps)
+        x = x.unsqueeze(2)  # (B,H,1,s)
+
+        # Columns correspond to t_positions = positions + 1, and we only fill j >= i.
+        tpos = t_positions[i:]  # (T,)
+        if tpos.numel() == 0:
+            continue
+        valid_len = int(tpos.numel())
+
+        # Optionally chunk over t to cap memory.
+        if chunk_t is None or int(chunk_t) <= 0:
+            y = attn[:, :, tpos, :s]  # (B,H,T,s)
+            y = y / (y.sum(dim=-1, keepdim=True) + eps)
+            corr = pearson_corr_lastdim(x, y, eps=eps)  # (B,H,T)
+            out[:, :, i, i : (i + valid_len)] = corr
+        else:
+            T = int(tpos.numel())
+            for j0 in range(0, T, int(chunk_t)):
+                j1 = min(T, j0 + int(chunk_t))
+                tpos_chunk = tpos[j0:j1]
+                y = attn[:, :, tpos_chunk, :s]  # (B,H,Tc,s)
+                y = y / (y.sum(dim=-1, keepdim=True) + eps)
+                corr = pearson_corr_lastdim(x, y, eps=eps)  # (B,H,Tc)
+                out[:, :, i, (i + j0) : (i + j1)] = corr
+
+    return out
     
 ################# MODELS ########################
 
