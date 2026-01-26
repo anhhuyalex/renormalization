@@ -4,7 +4,7 @@
 #SBATCH --mem-per-cpu=30G
 #SBATCH --time=36:00:00
 #SBATCH -o slurms/%j-heads.out
-#SBATCH --gres=gpu:1
+# SBATCH --gres=gpu:1
 #SBATCH --array=0-99%20
 # SBATCH --partition=mig
 # source activate renormalization
@@ -42,10 +42,10 @@ num_mlp_layers=3
 # memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_weights
 # memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_except_cproj_weights
 # memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_except_cproj_weights
-# wandb_group_name="memo_aug15_zipf_onelayerattention_lr_1e-3"
+# wandb_group_name="memo_jan23_zipf_onelayerattention_lr_1e-3"
 # wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
 # wandb_group_name="memo_dec8_zipf_heads_mlp_gpt_lr_1e_3"
-wandb_group_name="memo_jan20_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample" 
+wandb_group_name="memo_jan25_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample" 
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
