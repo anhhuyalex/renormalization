@@ -26,20 +26,19 @@ import argparse
 import time
 import os
 import copy
+from typing import Optional
 
 class DAM(nn.Module):
-    def __init__(self, N, H, M, eta=1.0, init_std=1e-2):
+    def __init__(self, N, H, eta=1.0, init_std=1e-2):
         """
         Args:
             N: Sequence length (bits).
             H: Hidden dimension (number of heads).
-            M: Memory capacity (number of sequences).
             eta: Inverse temperature parameter.
         """
         super().__init__()
         self.N = N
         self.H = H
-        self.M = M
         self.eta = eta
         self.init_std = init_std
 
@@ -52,34 +51,20 @@ class DAM(nn.Module):
         # B parameters: (H, N).
         self.B_logits = nn.Parameter(torch.randn(H, N) * self.init_std) # small positive weights
 
-        # Memory state
-        # We store binary sequences
-        # Register as a buffer so `model.to(device)` moves it with the module.
-        # Note: we still reassign/resize it in `update_memory`, which is fine for buffers.
-        self.register_buffer("memory", torch.zeros(0, N))
-        self.is_memory_empty = True
+        # Dataset (acts as the "memory bank"): (K, N) with entries in {-1, +1}
+        # Stored as a buffer so `model.to(device)` moves it with the module.
+        self.register_buffer("dataset", torch.zeros(0, N))
 
-    def update_memory(self, sequences):
+    def set_dataset(self, sequences: torch.Tensor):
         """
-        Updates the DAM with new sequences.
-        The memory is a queue so we only keep the last M sequences.
+        Set the retrieval set (dataset) used for InfoNCE-style training.
+
         Args:
-            sequences: (Batch, N) tensor of binary sequences (-1, +1).
+            sequences: (K, N) tensor of binary sequences (-1, +1).
         """
-        new_memory = torch.cat([self.memory, sequences.detach().to(self.memory.device)], dim=0)
-
-        if new_memory.shape[0] > self.M:
-            new_memory = new_memory[-self.M:]
-
-        self.memory = new_memory
-        self.is_memory_empty = False
-
-    def clear_memory(self):
-        """
-        Clears the memory.
-        """
-        self.memory = torch.zeros(0, self.N, device=self.memory.device)
-        self.is_memory_empty = True
+        if sequences.ndim != 2 or sequences.shape[1] != self.N:
+            raise ValueError(f"Expected sequences with shape (K, {self.N}), got {tuple(sequences.shape)}")
+        self.dataset = sequences.detach().to(self.dataset.device)
 
     def get_A(self, n):
         """
@@ -99,114 +84,80 @@ class DAM(nn.Module):
         """
         return F.softmax(self.B_logits, dim=-1)
 
-    def forward_step(self, zeta, n, phi_mu):
+    def retrieval_logits(self, zeta: torch.Tensor, n: int, phi_all: Optional[torch.Tensor] = None):
         """
-        Predict probability of (n+1)-th bit (index n) being +1.
+        Compute K-way logits for retrieving the correct sequence from the dataset given a cue.
 
         Args:
-            zeta: (Batch, N) full sequences (we only peek up to n).
-            n: int, current length (0 to N-1). We verify up to zeta[:, :n].
-               We want to predict zeta[:, n].
-            phi_mu: (M, H) Precomputed memory keys.
+            zeta: (Batch, N) full sequences (we only use the prefix zeta[:, :n]).
+            n: int, prefix length (0..N-1). We use cue zeta[:, :n].
+            phi_all: optional precomputed dataset keys (K, H).
 
         Returns:
-            probs: (Batch,) probability that next bit is +1.
+            logits: (Batch, K) where logits[b, mu] = eta * <hat_phi_b, phi_mu>
         """
-        B_val = zeta.shape[0] # batch size
+        if self.dataset.numel() == 0:
+            raise RuntimeError("Dataset is empty. Call set_dataset(sequences) before training/evaluation.")
 
-        # handle empty memory
-        if self.is_memory_empty: # shape: (M, N) where M = memory capacity, N = sequence length
-            return torch.full((B_val,), 0.5, device=zeta.device)
+        A_n = self.get_A(n)  # (H, n)
+        context = zeta[:, :n]  # (Batch, n)
+        hat_phi = torch.einsum("bi,hi->bh", context, A_n)  # (Batch, H)
 
-        A_n = self.get_A(n) # shape: (H, n)
-        # context is the input sequence up to position n (exclusive)
-        context = zeta[:, :n] # shape: (Batch, n)
-        # hat_phi = sum A_i * zeta_i.
-        hat_phi = torch.einsum('bi,hi->bh', context, A_n)
-        # if n == 5 and np.random.rand() < 0.1:
-        #     print("A_n", A_n[0].flatten(), A_n.shape, self.A_logits[n, :, :n])
-        #     print("context: ", context[0,:10], "hat_phi: ", hat_phi[0,:10])
-            # print("B_mat", B_mat, B_mat.shape)
-        # 3. Retrieval probabilities
-        # score: (Batch, M)
-        # score = eta * hat_phi^T phi_mu
-        score = self.eta * torch.einsum('bh,mh->bm', hat_phi, phi_mu)
-        pi = F.softmax(score, dim=1) # (Batch, M)
-        
-        # 4. Predict next bit
-        # We want prob that (n)-th bit is +1.
-        # memory_bits: (M,)
-        memory_bits_at_n = self.memory[:, n] # +1 or -1
+        if phi_all is None:
+            # phi_all: (K, H) = (H, N) x (K, N)^T
+            phi_all = torch.einsum("hn,kn->kh", self.get_B(), self.dataset)
 
-        # We want sum of pi where memory bit is +1.
-        # Indicator: (memory_bits_at_n == 1).float()
-        plus_one_mask = (memory_bits_at_n > 0).float()
-        # prob = sum(pi * mask)
-        prob_plus_one = torch.sum(pi * plus_one_mask.unsqueeze(0), dim=1)
+        logits = self.eta * torch.einsum("bh,kh->bk", hat_phi, phi_all)
+        return logits
 
-        # print("prob_plus_one: ", prob_plus_one)
-        return prob_plus_one
-
-    def train_batch(self, sequences, optimizer):
+    def train_batch(self, sequences: torch.Tensor, indices: torch.Tensor, optimizer):
         """
-        Computes the BCE loss averaged over all positions.
+        InfoNCE-style training: maximize probability of retrieving the correct sequence index.
+
+        For each prefix length n, compute logits over all K dataset sequences and apply
+        multiclass cross entropy against the true index.
+
         Args:
-             sequences: (Batch, N)
+            sequences: (Batch, N) sampled sequences from the dataset.
+            indices: (Batch,) int64 indices into the dataset identifying the correct class.
+            optimizer: torch optimizer (used only when model is in training mode).
+
         Returns:
-             loss: scalar
+            loss: float
+            accuracy: float (top-1 retrieval accuracy averaged over n)
         """
-        total_loss = 0.0
-        total_accuracy = 0.0
-        
-        # If memory is empty, we can't really predict based on history, 
-        # but we returning 0.5 loss is appropriate and no grad update.
-        if self.is_memory_empty:
-            # Just return dummy values, no update
-            bce = -torch.log(torch.tensor(0.5))
-            return bce, torch.tensor(0.5)
+        if self.dataset.numel() == 0:
+            raise RuntimeError("Dataset is empty. Call set_dataset(sequences) before training/evaluation.")
+
+        if indices.dtype != torch.long:
+            indices = indices.long()
 
         if self.training:
-            optimizer.zero_grad() 
+            if optimizer is None:
+                raise ValueError("optimizer must be provided when model is in training mode.")
+            optimizer.zero_grad()
+
         loss_batch = 0.0
-        
-        # Precompute phi_mu for the batch (Constant for this batch update)
-        # phi_mu = B (H, N) x memory^T (N, M) -> (H, M) -> transpose to (M, H)
-        # einsum: hn, mn -> mh
-        phi_mu = torch.einsum('hn,mn->mh', self.get_B(), self.memory)
-        
+        total_accuracy = 0.0
+
+        # Precompute dataset keys once per batch: phi_all is (K, H)
+        phi_all = torch.einsum("hn,kn->kh", self.get_B(), self.dataset)
+
         for n in range(1, self.N):
-            # Predict n-th bit (0-indexed) using 0..n-1 history
-            prob_plus_one = self.forward_step(sequences, n, phi_mu) # shape: (Batch,)
-            # Target
-            target = sequences[:, n] # -1 or +1, shape: (Batch,)
-            # Convert target to 0/1 for BCE
-            target_01 = (target > 0).float()
-
-            # numeric stability
-            prob_plus_one = torch.clamp(prob_plus_one, 1e-6, 1.0 - 1e-6)
-
-            loss_n = F.binary_cross_entropy(prob_plus_one, target_01)
+            logits = self.retrieval_logits(sequences, n, phi_all=phi_all)  # (Batch, K)
+            loss_n = F.cross_entropy(logits, indices)
             loss_batch = loss_batch + loss_n
 
-            # accuracy
-            accuracy_n = ((prob_plus_one > 0.5) == (target_01 > 0.5))
-            total_accuracy += accuracy_n.float().mean()
-            
-        # Normalize sum of losses by number of predictions (N-1)
-        # Note: problem says 1/N sum_{n=0}^{N-1}, but code loop is range(1, N) -> n=1..N-1.
-        # This misses n=0 prediction. But n=0 has 0 context.
-        # forward_step(n=0) uses context zeta[:, :0] (empty).
-        # We can include n=0 if we want, but let's stick to existing range but fix normalization.
-        
+            preds = logits.argmax(dim=1)
+            total_accuracy += (preds == indices).float().mean()
+
         loss_final = loss_batch / (self.N - 1)
+
         if self.training:
             loss_final.backward()
-            optimizer.step() 
-         
-        total_loss = loss_final.item()
-        avg_accuracy = total_accuracy / (self.N - 1)
+            optimizer.step()
 
-        return total_loss, avg_accuracy
+        return loss_final.item(), (total_accuracy / (self.N - 1)).item()
 
 def initialize_record(args):
     record = {
@@ -284,7 +235,6 @@ if __name__ == "__main__":
     parser.add_argument("--INIT_STD", type=float, default=1e-1)
     parser.add_argument("--N", type=int, default=50)
     parser.add_argument("--H", type=int, default=30)
-    parser.add_argument("--M", type=int, default=3000)
     parser.add_argument("--K", type=int, default=500)
     parser.add_argument("--BATCH_SIZE", type=int, default=50)
     parser.add_argument("--NUM_STEPS", type=int, default=50000)
@@ -314,22 +264,16 @@ if __name__ == "__main__":
     # Create savedir if it doesn't exist
     os.makedirs(f"{args.savedir}/{args.prefix}", exist_ok=True) 
     exp_name = f"{args.prefix}/dam_{time.time()}"
-    model = DAM(args.N, args.H, args.M, eta=args.eta, init_std=args.INIT_STD)
+    model = DAM(args.N, args.H, eta=args.eta, init_std=args.INIT_STD)
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     record = initialize_record(args)
 
     # Generate random sequences
     sequences = torch.sign(torch.randn(args.K, args.N, device=device))
+    model.set_dataset(sequences)
 
-    # Initialize memory
-    # We start with empty memory as per standard online learning or just-in-time memorization.
-    # Initializing with zeros is harmful because dot products with -1/+1 sequences are low,
-    # effectively acting as noise or bias if not masked correctly.
-    # init_mem = torch.zeros(args.M, args.N)
-    # model.update_memory(init_mem)
-    # print(f"Memory initialized with shape: {model.memory.shape}")
-    print("Memory initialized as empty.")
+    print(f"Dataset initialized with shape: {sequences.shape}")
 
     # Training Loop Simulation
     model.train()
@@ -339,10 +283,7 @@ if __name__ == "__main__":
         indices = torch.randint(0, args.K, (args.BATCH_SIZE,), device=device)
         batch = sequences[indices]
 
-        loss, accuracy = model.train_batch(batch, optimizer)
-
-        # Update memory
-        model.update_memory(batch)
+        loss, accuracy = model.train_batch(batch, indices, optimizer)
         # Compute stats
         stats = compute_model_stats(model, args)
         logs = {
@@ -371,14 +312,14 @@ if __name__ == "__main__":
     # resample sequences 
     sequences = torch.sign(torch.randn(args.K, args.N, device=device))
     print(f"Sequences resampled with shape: {sequences.shape}")
-    if args.is_freeze_A == "True":
+    model.set_dataset(sequences)
+    if args.is_freeze_A == "FreezeA":
         model.A_logits.requires_grad = False
         optimizer = torch.optim.Adam([model.B_logits], lr=args.lr)
-    elif args.is_freeze_A == "False":
+    elif args.is_freeze_A == "BothAB":
         model.eval() 
     elif args.is_freeze_A == "LearnAB":
         pass
-    model.clear_memory() # clear memory for evaluation
 
     for step in range(args.NUM_STEPS):
 
@@ -386,10 +327,7 @@ if __name__ == "__main__":
         indices = torch.randint(0, args.K, (args.BATCH_SIZE,), device=device)
         batch = sequences[indices]
 
-        loss, accuracy = model.train_batch(batch, optimizer)
-
-        # Update memory
-        model.update_memory(batch)
+        loss, accuracy = model.train_batch(batch, indices, optimizer)
 
         # Compute stats
         stats = compute_model_stats(model, args)
@@ -403,3 +341,4 @@ if __name__ == "__main__":
         record["logs"].append(logs)
     # save model.state_dict() as A_logits and B_logits
     torch.save(record, f"{args.savedir}/{exp_name}.pt")
+    

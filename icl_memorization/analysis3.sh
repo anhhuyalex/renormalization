@@ -1,5 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=analysis3
+<<<<<<< HEAD
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=20G
 #SBATCH --time=1:00:00
@@ -8,13 +9,27 @@
 # SBATCH --gres=gpu:1
 # SBATCH --partition=mig
 #SBATCH --array=0-99
+=======
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=10G
+#SBATCH --time=1:00:00
+#SBATCH --output analysis3-%J.log
+#SBATCH -o slurms/%j.out
+#SBATCH --gres=gpu:1
+#SBATCH --partition=mig
+#SBATCH --array=20-35
+>>>>>>> 4da9ce73709aa26e4d78fa98c0a833a643d512a6
 # 1-9%10
 
 # Environment setup
 source ~/.bashrc
+<<<<<<< HEAD
 conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
 
 # source ../../learning_to_learn/l2l/bin/activate
+=======
+source ../../learning_to_learn/l2l/bin/activate
+>>>>>>> 4da9ce73709aa26e4d78fa98c0a833a643d512a6
 
 # In the bash script, get all the folders in the './cache/memo_may26_zipf_onelayerattention_lr_1e-3_vary_num_hidden_features_num_heads/*'
 # Then, for each folder, run the analysis3.py script

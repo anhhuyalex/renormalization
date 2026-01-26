@@ -8,10 +8,17 @@
 #SBATCH --array=0-99%20
 # SBATCH --partition=mig
 # source activate renormalization
-source ~/.bashrc
-# source ../../learning_to_learn/l2l/bin/activate
-# cd /jukebox/norman/qanguyen/patdiff_seq
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+hostname="$(hostname)"
+if [[ "$hostname" == *della* ]]; then
+  python="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/python"
+  savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
+  source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
+else
+  python="python"
+  savedir="/scratch/qanguyen/gautam"
+  conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+fi
+ 
 
 # wandb login --relogin --host=https://stability.wandb.io
 # srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
@@ -49,8 +56,6 @@ wandb_group_name="memo_jan25_zipf_onelayerattention_vary_num_hidden_features_num
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
-# savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
-savedir="/scratch/qanguyen/gautam"
 jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline python -u main.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias}  --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
 # jupytext --to py main_fork.ipynb  && for run in {0..0}; do WANDB_MODE=offline python -u main_fork.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
 # jupytext --to py main_freeze.ipynb  && for run in {0..0}; do WANDB_MODE=offline python -u main_freeze.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 

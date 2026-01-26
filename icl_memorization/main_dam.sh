@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=memo
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=10G
+#SBATCH --mem-per-cpu=40G
 #SBATCH --time=3:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
@@ -64,49 +64,57 @@ fi
 # Construct specific prefix
 
 # Run script
-H=$1
-if [ -z "$H" ]; then
-  echo "Error: missing H. Usage: $0 <H>, where H in {100, 30, 10, 5, 1}"
-  exit 1
-fi
-if [ "$H" -eq 100 ]; then
-  eta=10.0
-  lr=1e-2
-  init_std=1e-1
-  H=100
+# H=$1
+# if [ -z "$H" ]; then
+#   echo "Error: missing H. Usage: $0 <H>, where H in {100, 30, 10, 5, 1}"
+#   exit 1
+# fi
+# if [ "$H" -eq 100 ]; then
+#   eta=10.0
+#   lr=1e-2
+#   init_std=1e-1
+#   H=100
   
-elif [ "$H" -eq 30 ]; then
-  eta=10.0
-  lr=1e-2
-  init_std=1e-2
-  H=30
-elif [ "$H" -eq 10 ]; then
-  eta=10.0
-  lr=1e-2
-  init_std=1e-2
-  H=10
-elif [ "$H" -eq 5 ]; then
-  eta=10.0
-  lr=1e-2
-  init_std=1e-1
-  H=5
-elif [ "$H" -eq 1 ]; then
-  eta=10.0
-  lr=1e-3
-  init_std=1e-2
-  H=1
-else
-  echo "Error: unsupported H=$H. Expected H in {100, 30, 10, 5, 1}"
-  exit 1
-fi
+# elif [ "$H" -eq 30 ]; then
+#   eta=10.0
+#   lr=1e-2
+#   init_std=1e-2
+#   H=30
+# elif [ "$H" -eq 10 ]; then
+#   eta=10.0
+#   lr=1e-2
+#   init_std=1e-2
+#   H=10
+# elif [ "$H" -eq 5 ]; then
+#   eta=10.0
+#   lr=1e-2
+#   init_std=1e-1
+#   H=5
+# elif [ "$H" -eq 1 ]; then
+#   eta=10.0
+#   lr=1e-2
+#   init_std=1e-2
+#   H=1
+# else
+#   echo "Error: unsupported H=$H. Expected H in {100, 30, 10, 5, 1}"
+#   exit 1
+# fi
 
-prefix="dam_jan19_no_adapt_A_H_${H}"
+Ks=(10 100 500 1000 2000 4000 8000 10000 15000 20000 25000 30000 35000 40000 45000 50000) # len: 16
 num_steps=10000
-K=500
+K=${Ks[$SLURM_ARRAY_TASK_ID]}
 batch_size=50
 M=3000
 N=50
-is_freeze_A="True"
-$python -u main_dam.py --savedir $savedir --prefix $prefix \
+eta=10.0
+lr=1e-2
+init_std=1e-2
+H=30
+is_freeze_A="BothAB"
+prefix="infonce_jan21_varyK_is_freeze_A_${is_freeze_A}"
+# $python -u main_dam.py --savedir $savedir --prefix $prefix \
+#     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
+#     --BATCH_SIZE $batch_size --K $K --M $M --N $N --is_freeze_A $is_freeze_A
+$python -u main_infonce.py --savedir $savedir --prefix $prefix \
     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
-    --BATCH_SIZE $batch_size --K $K --M $M --N $N --is_freeze_A $is_freeze_A
+    --BATCH_SIZE $batch_size --K $K --N $N --is_freeze_A $is_freeze_A
