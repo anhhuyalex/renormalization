@@ -358,8 +358,8 @@ elif args.wandb_group_name == "memo_jan25_zipf_onelayerattention_vary_num_hidden
     args.vocab_size = 2
     t = args.SLURM_ARRAY_TASK_ID
 
-    num_heads = list(range(7, 17, 7)) # length: 2
-    num_hidden_features = (2 ** np.linspace(2, 9, 4)).astype(int) # length: 2
+    num_heads = list(range(9, 17, 7)) # length: 2
+    num_hidden_features = (2 ** np.linspace(4, 9, 4)).astype(int) # length: 2
     num_hidden_features_mlp = (2 ** np.arange(0, 11, 1)).astype(int) # length: 11
     num_hidden_features_mlp_frac = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0] # length: 11
 
