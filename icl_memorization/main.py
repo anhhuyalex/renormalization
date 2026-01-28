@@ -120,6 +120,8 @@ parser.add_argument('--sequence_sampling_distribution', type=str,
                     help='sequence_sampling_distribution')
 parser.add_argument('--is_resample_tasks', default="False", type=str,
                     help='whether to resample tasks')
+parser.add_argument('--is_save_attn_reps', default="False", type=str,
+                    help='whether to save attention reps')
 parser.add_argument(
             '--fileprefix', 
             default="",
@@ -356,9 +358,10 @@ elif args.wandb_group_name == "memo_jan25_zipf_onelayerattention_vary_num_hidden
     args.vocab_size = 2
     t = args.SLURM_ARRAY_TASK_ID
 
-    num_heads = [1] + list(range(2, 17, 7)) # length: 4
-    num_hidden_features = (2 ** np.linspace(0, 9, 4)).astype(int) # length: 4
+    num_heads = list(range(7, 17, 7)) # length: 2
+    num_hidden_features = (2 ** np.linspace(2, 9, 4)).astype(int) # length: 2
     num_hidden_features_mlp = (2 ** np.arange(0, 11, 1)).astype(int) # length: 11
+    num_hidden_features_mlp_frac = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0] # length: 11
 
     nH = len(num_heads)
     nF = len(num_hidden_features)
@@ -370,9 +373,22 @@ elif args.wandb_group_name == "memo_jan25_zipf_onelayerattention_vary_num_hidden
 
     args.num_heads = num_heads[iH]
     args.num_hidden_features = int(num_hidden_features[iF])
-    args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
+    # args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features * num_hidden_features_mlp_frac[iM])
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+elif args.wandb_group_name == "memo_jan27_zipf_onelayerattention_save_attn_reps":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    num_heads =  list(range(12, 17, 2)) # len: 3
+    num_hidden_features = 2 ** np.arange(3, 10, 2).astype(int) # len: 4
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+    args.is_save_attn_reps = "True"
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -628,7 +644,9 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     vertical_bars_metric = 0
     decorrelation_metric = 0 
     num_batches = 15
-    mlp_reps_per_layer = defaultdict(list)
+    mlp_reps_per_layer = defaultdict(list) 
+    if args.is_save_attn_reps:
+        attn_reps = []
     with torch.no_grad():
         for i, (seq, task) in enumerate(val_loader):
             seq, task = seq.to(device), task.to(device) 
@@ -639,7 +657,9 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
             # print ("seq", seq.shape, "task", task.shape, "output", output.shape )
             preds = output 
             B, N, D = output.shape  
-            
+            if args.is_save_attn_reps and i == 0:
+                _, attn = model.get_attention_weights(seq, task)
+                attn_reps.append(attn.detach().cpu().numpy())
             if i < num_batches:
                 _, attn = model.get_attention_weights(seq, task)
                 vertical_bars_metric += utils.corr_attn_prefix_rows(attn) 
@@ -683,32 +703,9 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     print("test_metrics accuracy with length", len(test_metrics["accuracy"])) 
     print("test_metrics vertical_bars_metric", test_metrics["vertical_bars_metric"].shape)
     print("test_metrics decorrelation_metric", test_metrics["decorrelation_metric"].shape)
-
-    # linear probing of MLP reps metric 
-    # for each layer, fit a linear model to the mlp_reps predicting the labels 
-    if args.arch == "gpt":
-        for i in range(len(mlp_reps_batch)):
-            mlp_reps_per_layer[i] = np.concatenate(mlp_reps_per_layer[i], axis=0)
-            print("layer", i, "shape", mlp_reps_per_layer[i].shape)
-            w
-            # random partition into tr ain and test 
-            train_ids = np.random.choice(np.arange(mlp_reps_per_layer[i].shape[0]), size=int(0.8*mlp_reps_per_layer[i].shape[0]), replace=False)
-            test_ids = np.setdiff1d(np.arange(mlp_reps_per_layer[i].shape[0]), train_ids)
-            train_mlp_reps = mlp_reps_per_layer[i][train_ids]
-            test_mlp_reps = mlp_reps_per_layer[i][test_ids]
-            train_labels = mlp_reps_per_layer["label"][train_ids]
-            test_labels = mlp_reps_per_layer["label"][test_ids]
-            
-            print(f"mlp_rep {i} shape", mlp_reps_per_layer[i].shape)  
-            # fit a logistic regression model to the mlp_reps predicting the labels
-            logisticregression = LogisticRegression(max_iter=1000)
-            logisticregression.fit(train_mlp_reps, train_labels)
-            mlp_dict["test_labels"].extend(mlp_reps_per_layer["label"][test_ids]) 
-            test_preds = logisticregression.predict(test_mlp_reps)
-            mlp_dict["accuracy"].extend(test_preds == test_labels)
-            mlp_dict["layer"].extend([i] * len(test_ids))
-            mlp_dict["epoch"].extend([epoch] * len(test_ids))
-            print("test_accuracy", logisticregression.score(test_mlp_reps, test_labels), "test_labels", test_labels, "test_mlp_reps", test_preds)
+ 
+    if args.is_save_attn_reps:
+        test_metrics["attn_reps"] = attn_reps
     return test_metrics
  
 
