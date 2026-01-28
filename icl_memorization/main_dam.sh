@@ -6,7 +6,7 @@
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
 #SBATCH --partition=mig
-# SBATCH --array=0-80%20
+#SBATCH --array=0-80%20
 
 # source activate renormalization
 source ~/.bashrc
