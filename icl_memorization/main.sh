@@ -5,11 +5,7 @@
 #SBATCH --time=18:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
-<<<<<<< HEAD
 #SBATCH --array=15-30
-=======
-#SBATCH --array=0-11
->>>>>>> refs/remotes/origin/master
 # SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc
