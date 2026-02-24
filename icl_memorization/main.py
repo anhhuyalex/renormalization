@@ -113,7 +113,7 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
                         help='disables CUDA training')  
  
 parser.add_argument('--K', default=1, type=int, 
-                    help='number of tasks')
+                    help='number of tasks') 
 parser.add_argument('--sequence_sampling_distribution', type=str,
                     default="uniform", 
                     choices = ["uniform", "zipf"],
@@ -122,6 +122,8 @@ parser.add_argument('--is_resample_tasks', default="False", type=str,
                     help='whether to resample tasks')
 parser.add_argument('--is_save_attn_reps', default="False", type=str,
                     help='whether to save attention reps')
+parser.add_argument('--is_get_vertical_bars_metric', default="False", type=str,
+                    help='whether to get vertical bars metric')
 parser.add_argument(
             '--fileprefix', 
             default="",
@@ -168,7 +170,7 @@ else:
 def set_zipf_exp_params(args):
     args.sequence_sampling_distribution = "zipf"
     args.K = 100000
-    args.num_iters = 80000
+    args.num_iters = 100000
     args.is_resample_tasks = "False"
     
 def set_zipf_exp_params_resample(args): 
@@ -358,23 +360,27 @@ elif args.wandb_group_name == "memo_jan25_zipf_onelayerattention_vary_num_hidden
     args.vocab_size = 2
     t = args.SLURM_ARRAY_TASK_ID
 
-    num_heads = list(range(9, 17, 7)) # length: 2
-    num_hidden_features = (2 ** np.linspace(4, 9, 4)).astype(int) # length: 2
-    num_hidden_features_mlp = (2 ** np.arange(0, 11, 1)).astype(int) # length: 11
-    num_hidden_features_mlp_frac = [1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0] # length: 11
+    num_heads = [9] + list(np.arange(2, 17, 2)) # length: 0, 2, 4, 6, 8, 9, 10, 12, 14, 16 = 10
+    num_hidden_features = (2 ** np.arange(0, 10, 1)).astype(int) # length: 10
+    # num_hidden_features_mlp = (2 ** np.arange(0, 11, 1)).astype(int) # length: 11
+    num_hidden_features_mlp_frac = np.linspace(0.1, 5.0, 10) # length: 11
+    FH = [9, 16, 64, 128, 576, 1024, 4608]
+    
 
     nH = len(num_heads)
     nF = len(num_hidden_features)
-    nM = len(num_hidden_features_mlp)
+    nM = len(num_hidden_features_mlp_frac)
 
     iH = t % nH
     iF = (t // nH) % nF
     iM = t // (nH * nF)
 
-    args.num_heads = num_heads[iH]
+    args.num_heads = int(num_heads[iH])
     args.num_hidden_features = int(num_hidden_features[iF])
     # args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
     args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features * num_hidden_features_mlp_frac[iM])
+    if int(args.num_heads * args.num_hidden_features) not in FH: 
+        raise ValueError(f"num_heads * num_hidden_features = {args.num_heads * args.num_hidden_features} is not in FH = {FH}")
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
 elif args.wandb_group_name == "memo_jan27_zipf_onelayerattention_save_attn_reps":
@@ -389,6 +395,84 @@ elif args.wandb_group_name == "memo_jan27_zipf_onelayerattention_save_attn_reps"
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
     args.is_save_attn_reps = "True"
+elif args.wandb_group_name == "memo_feb24_zipf_onelayerattention_multipleswitches":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    num_heads =  list(range(1, 18, 4)) # len: 5
+    num_hidden_features = 2 ** np.arange(3, 12, 2).astype(int) # len: 5
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    args.is_resample_tasks = "Forget" 
+    args.is_resample_tasks_every = 10
+    args.num_iters = 200000
+elif args.wandb_group_name == "memo_feb24_zipf_gpt_multipleswitches":
+    args.arch = "gpt"
+    args.vocab_size = 2
+    num_heads =  list(range(1, 18, 4)) # len: 5
+    num_hidden_features = 2 ** np.arange(3, 12, 2).astype(int) # len: 5
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    args.is_resample_tasks = "Forget" 
+    args.is_resample_tasks_every = 10
+    args.num_iters = 200000
+elif args.wandb_group_name == "memo_feb24_zipf_gpt2_vary_num_hidden_features_num_heads_K":
+    args.arch = "gpt"
+    t = args.SLURM_ARRAY_TASK_ID
+
+    num_heads =  list(range(2, 17, 4)) # len: 4
+    num_hidden_features = 2 ** np.linspace(1, 9, 4).astype(int) # len: 4
+     
+
+    nH = len(num_heads)
+    nF = len(num_hidden_features)
+
+    iH = t % nH
+    iF = (t // nH) % nF
+    iM = t // (nH * nF)
+
+    args.num_heads = int(num_heads[iH])
+    args.num_hidden_features = int(num_hidden_features[iF])
+    # args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features) 
+    args.num_layers = 12
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params_resample(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    Ks = [1000, 5000, 25000, 100000] # 4
+    args.K = Ks[iM]
+elif args.wandb_group_name == "memo_feb24_zipf_onelayerattention_vary_num_hidden_features_num_heads_K":
+    args.arch = "OneLayerAttention"
+    t = args.SLURM_ARRAY_TASK_ID
+
+    num_heads =  list(range(2, 17, 4)) # len: 4
+    num_hidden_features = 2 ** np.linspace(1, 9, 4).astype(int) # len: 4
+     
+
+    nH = len(num_heads)
+    nF = len(num_hidden_features)
+
+    iH = t % nH
+    iF = (t // nH) % nF
+    iM = t // (nH * nF)
+
+    args.num_heads = int(num_heads[iH])
+    args.num_hidden_features = int(num_hidden_features[iF])
+    # args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features) 
+    args.num_layers = 12
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params_resample(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    Ks = [100, 1000, 5000, 25000, 100000] # 4
+    args.K = Ks[iM]
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -645,7 +729,7 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     decorrelation_metric = 0 
     num_batches = 15
     mlp_reps_per_layer = defaultdict(list) 
-    if args.is_save_attn_reps:
+    if args.is_save_attn_reps == "True":
         attn_reps = []
     with torch.no_grad():
         for i, (seq, task) in enumerate(val_loader):
@@ -657,10 +741,10 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
             # print ("seq", seq.shape, "task", task.shape, "output", output.shape )
             preds = output 
             B, N, D = output.shape  
-            if args.is_save_attn_reps and i == 0:
+            if args.is_save_attn_reps == "True" and i == 0:
                 _, attn = model.get_attention_weights(seq, task)
                 attn_reps.append(attn.detach().cpu().numpy())
-            if i < num_batches:
+            if i < num_batches and args.is_get_vertical_bars_metric == "True":
                 _, attn = model.get_attention_weights(seq, task)
                 vertical_bars_metric += utils.corr_attn_prefix_rows(attn) 
                 decorrelation_metric += utils.corr_heads_at_ts(attn)
@@ -695,16 +779,17 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
     test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
 
-    # vertical bars metric and decorrelation metric
-    vertical_bars_metric /= num_batches 
-    decorrelation_metric /= num_batches 
-    test_metrics["vertical_bars_metric"] = vertical_bars_metric.detach().cpu().numpy().mean(axis=0) # shape: H, N, N
-    test_metrics["decorrelation_metric"] = decorrelation_metric.detach().cpu().numpy().mean(axis=0) # shape: T, H, H
-    print("test_metrics accuracy with length", len(test_metrics["accuracy"])) 
-    print("test_metrics vertical_bars_metric", test_metrics["vertical_bars_metric"].shape)
-    print("test_metrics decorrelation_metric", test_metrics["decorrelation_metric"].shape)
+    # vertical bars metric and decorrelation metric 
+    if args.is_get_vertical_bars_metric == "True":
+        vertical_bars_metric /= num_batches 
+        decorrelation_metric /= num_batches 
+        test_metrics["vertical_bars_metric"] = vertical_bars_metric.detach().cpu().numpy().mean(axis=0) # shape: H, N, N
+        test_metrics["decorrelation_metric"] = decorrelation_metric.detach().cpu().numpy().mean(axis=0) # shape: T, H, H
+        print("test_metrics accuracy with length", len(test_metrics["accuracy"])) 
+        print("test_metrics vertical_bars_metric", test_metrics["vertical_bars_metric"].shape)
+        print("test_metrics decorrelation_metric", test_metrics["decorrelation_metric"].shape)
  
-    if args.is_save_attn_reps:
+    if args.is_save_attn_reps == "True":
         test_metrics["attn_reps"] = attn_reps
     return test_metrics
  
@@ -752,16 +837,20 @@ for iter in range(args.num_iters // num_iters_per_epoch):
                                         'pin_memory': True})
         num_apppearances = np.zeros(args.K)
         
+        
     # Switch the sequences several times throughout the training
     # Save the sequences and the start iter of the switch, so that
     # we can plot forgetting curves across different switches
-    elif args.is_resample_tasks == "Forget" and iter % 100 == 0:
+    elif args.is_resample_tasks == "Forget" and iter % args.is_resample_tasks_every == 0:
         train_dataset.generate_sequences()
         all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences[::50]))
         all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences[::50]))
+        with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+            pickle.dump(all_sequences_across_switches, f)
+
         num_apppearances = np.zeros(args.K)
         if args.sequence_sampling_distribution == "zipf":
-            iwl_dataset.sequences = torch.cat(all_sequences_across_switches["sequences"], dim=0)
+            iwl_dataset.sequences = torch.cat(all_sequences_across_switches["sequences"], dim=0)[::10]
             iwl_dataset.len_data = len(iwl_dataset.sequences)
             # print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
