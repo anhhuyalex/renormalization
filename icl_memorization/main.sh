@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=memo
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=2
 #SBATCH --mem-per-cpu=30G
-#SBATCH --time=36:00:00
-#SBATCH -o slurms/%j-varyK.out
+#SBATCH --time=72:00:00
+#SBATCH -o slurms/%j-memo_mar3.out
 #SBATCH --gres=gpu:1
 #SBATCH --array=0-11
 # SBATCH --partition=mig
@@ -56,7 +56,7 @@ num_mlp_layers=3
 # wandb_group_name="memo_jan23_zipf_onelayerattention_lr_1e-3"
 # wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
 # wandb_group_name="memo_dec8_zipf_heads_mlp_gpt_lr_1e_3"
-wandb_group_name="memo_feb24_zipf_onelayerattention_vary_num_hidden_features_num_heads_K" 
+wandb_group_name="memo_mar3_zipf_gpt_multipleswitches" 
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"

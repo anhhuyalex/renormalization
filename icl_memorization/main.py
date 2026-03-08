@@ -395,32 +395,34 @@ elif args.wandb_group_name == "memo_jan27_zipf_onelayerattention_save_attn_reps"
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
     args.is_save_attn_reps = "True"
-elif args.wandb_group_name == "memo_feb24_zipf_onelayerattention_multipleswitches":
+elif args.wandb_group_name == "memo_feb27_zipf_onelayerattention_multipleswitches":
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
-    num_heads =  list(range(1, 18, 4)) # len: 5
-    num_hidden_features = 2 ** np.arange(3, 12, 2).astype(int) # len: 5
+    num_heads =  list(range(1, 15, 3)) # len: 5
+    num_hidden_features = 2 ** np.arange(3, 10, 2).astype(int) # len: 4
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
     args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
     args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
+    
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
     args.is_resample_tasks = "Forget" 
-    args.is_resample_tasks_every = 10
-    args.num_iters = 200000
-elif args.wandb_group_name == "memo_feb24_zipf_gpt_multipleswitches":
+    args.is_resample_tasks_every = 40
+    args.num_iters = 400000
+elif args.wandb_group_name == "memo_feb27_zipf_gpt_multipleswitches":
     args.arch = "gpt"
     args.vocab_size = 2
-    num_heads =  list(range(1, 18, 4)) # len: 5
-    num_hidden_features = 2 ** np.arange(3, 12, 2).astype(int) # len: 5
+    num_heads =  list(range(1, 15, 3)) # len: 5
+    num_hidden_features = 2 ** np.arange(3, 10, 2).astype(int) # len: 4
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
     args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
     args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
+    args.num_layers=12
     set_zipf_exp_params(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
     args.is_resample_tasks = "Forget" 
-    args.is_resample_tasks_every = 10
-    args.num_iters = 200000
+    args.is_resample_tasks_every = 40
+    args.num_iters = 400000
 elif args.wandb_group_name == "memo_feb24_zipf_gpt2_vary_num_hidden_features_num_heads_K":
     args.arch = "gpt"
     t = args.SLURM_ARRAY_TASK_ID
@@ -823,10 +825,9 @@ for iter in range(args.num_iters // num_iters_per_epoch):
     # Switch the sequences half way through the training
     if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
         train_dataset.generate_sequences()
-        all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
-        all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences))
-        with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
-            pickle.dump(all_sequences_across_switches, f)
+        # all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
+        # with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+        #     pickle.dump(all_sequences_across_switches, f)
         
         if args.sequence_sampling_distribution == "zipf":
             iwl_dataset.sequences = train_dataset.sequences[::10] # take every 10th sequence from train_dataset
@@ -843,14 +844,13 @@ for iter in range(args.num_iters // num_iters_per_epoch):
     # we can plot forgetting curves across different switches
     elif args.is_resample_tasks == "Forget" and iter % args.is_resample_tasks_every == 0:
         train_dataset.generate_sequences()
-        all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences[::50]))
-        all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences[::50]))
-        with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
-            pickle.dump(all_sequences_across_switches, f)
+        # all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences ))
+        # with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+        #     pickle.dump(all_sequences_across_switches, f)
 
         num_apppearances = np.zeros(args.K)
         if args.sequence_sampling_distribution == "zipf":
-            iwl_dataset.sequences = torch.cat(all_sequences_across_switches["sequences"], dim=0)[::10]
+            iwl_dataset.sequences = train_dataset.sequences[::10]
             iwl_dataset.len_data = len(iwl_dataset.sequences)
             # print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
