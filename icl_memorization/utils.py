@@ -13,6 +13,7 @@ import pickle
 import functools
 import shutil
 import io
+import os
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
 class CPU_Unpickler(pickle.Unpickler):
@@ -835,3 +836,6 @@ def is_interactive():
     import __main__ as main
     return not hasattr(main, '__file__')
 
+def ensure_dir(dir):
+    if not os.path.exists(dir):
+        os.makedirs(dir)

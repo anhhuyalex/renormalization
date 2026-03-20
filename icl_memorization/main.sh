@@ -5,7 +5,7 @@
 #SBATCH --time=72:00:00
 #SBATCH -o slurms/%j-memo_mar3.out
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-11
+#SBATCH --array=0-69
 # SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc

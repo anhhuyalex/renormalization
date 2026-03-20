@@ -399,7 +399,7 @@ elif args.wandb_group_name == "memo_feb27_zipf_onelayerattention_multipleswitche
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
     num_heads =  list(range(1, 15, 3)) # len: 5
-    num_hidden_features = 2 ** np.arange(3, 10, 2).astype(int) # len: 4
+    num_hidden_features = 2 ** np.arange(3, 11, 1).astype(int) # len: 8
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
     args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
     args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
@@ -409,11 +409,11 @@ elif args.wandb_group_name == "memo_feb27_zipf_onelayerattention_multipleswitche
     args.is_resample_tasks = "Forget" 
     args.is_resample_tasks_every = 40
     args.num_iters = 400000
-elif args.wandb_group_name == "memo_feb27_zipf_gpt_multipleswitches":
+elif args.wandb_group_name == "memo_mar3_zipf_gpt_multipleswitches":
     args.arch = "gpt"
     args.vocab_size = 2
-    num_heads =  list(range(1, 15, 3)) # len: 5
-    num_hidden_features = 2 ** np.arange(3, 10, 2).astype(int) # len: 4
+    num_heads =  list(range(2, 15, 2)) # len: 7
+    num_hidden_features = 2 ** np.arange(0, 11, 1).astype(int) # len: 10
     args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
     args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
     args.num_hidden_features_mlp = args.num_heads * args.num_hidden_features
