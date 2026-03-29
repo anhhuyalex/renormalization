@@ -423,7 +423,7 @@ elif args.wandb_group_name == "memo_mar3_zipf_gpt_multipleswitches":
     args.is_resample_tasks = "Forget" 
     args.is_resample_tasks_every = 40
     args.num_iters = 400000
-elif args.wandb_group_name == "memo_feb24_zipf_gpt2_vary_num_hidden_features_num_heads_K":
+elif args.wandb_group_name == "memo_mar28_zipf_gpt2_vary_num_hidden_features_num_heads_K":
     args.arch = "gpt"
     t = args.SLURM_ARRAY_TASK_ID
 
@@ -447,10 +447,11 @@ elif args.wandb_group_name == "memo_feb24_zipf_gpt2_vary_num_hidden_features_num
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
-    Ks = [1000, 5000, 25000, 100000] # 4
-    args.K = Ks[iM]
-elif args.wandb_group_name == "memo_feb24_zipf_onelayerattention_vary_num_hidden_features_num_heads_K":
+    Ks = np.logspace(0, 5, 6)
+    args.K = int(Ks[iM])
+elif args.wandb_group_name == "memo_mar24_zipf_onelayerattention_vary_num_hidden_features_num_heads_K":
     args.arch = "OneLayerAttention"
+    args.vocab_size = 2
     t = args.SLURM_ARRAY_TASK_ID
 
     num_heads =  list(range(2, 17, 4)) # len: 4
@@ -468,13 +469,13 @@ elif args.wandb_group_name == "memo_feb24_zipf_onelayerattention_vary_num_hidden
     args.num_hidden_features = int(num_hidden_features[iF])
     # args.num_hidden_features_mlp = int(num_hidden_features_mlp[iM])
     args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features) 
-    args.num_layers = 12
+    # args.num_layers = 12
     print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
-    Ks = [100, 1000, 5000, 25000, 100000] # 4
-    args.K = Ks[iM]
+    Ks = np.logspace(0, 5, 6)
+    args.K = int(Ks[iM])
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
