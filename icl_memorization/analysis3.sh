@@ -1,50 +1,45 @@
 #!/bin/bash
 #SBATCH --job-name=analysis3
-<<<<<<< HEAD
 #SBATCH --cpus-per-task=4
 #SBATCH --mem-per-cpu=20G
-#SBATCH --time=1:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output analysis3-%J.log
 #SBATCH -o slurms/%j.out
 # SBATCH --gres=gpu:1
 # SBATCH --partition=mig
 #SBATCH --array=0-99
-=======
-#SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=10G
-#SBATCH --time=1:00:00
-#SBATCH --output analysis3-%J.log
-#SBATCH -o slurms/%j.out
-#SBATCH --gres=gpu:1
-#SBATCH --partition=mig
-#SBATCH --array=20-35
->>>>>>> 4da9ce73709aa26e4d78fa98c0a833a643d512a6
 # 1-9%10
 
 # Environment setup
 source ~/.bashrc
-<<<<<<< HEAD
-conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
-
-# source ../../learning_to_learn/l2l/bin/activate
-=======
-source ../../learning_to_learn/l2l/bin/activate
->>>>>>> 4da9ce73709aa26e4d78fa98c0a833a643d512a6
+hostname="$(hostname)"
+echo "hostname: $hostname"
+if [[ "$hostname" == *della* ]]; then
+  python="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/python"
+  savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
+  source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
+  jupytext="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/jupytext"
+else
+  python="python"
+  savedir="/scratch/qanguyen/gautam"
+  conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+  jupytext="jupytext"
+fi
 
 # In the bash script, get all the folders in the './cache/memo_may26_zipf_onelayerattention_lr_1e-3_vary_num_hidden_features_num_heads/*'
 # Then, for each folder, run the analysis3.py script
 
 # Get all the folders in the './cache/memo_may26_zipf_onelayerattention_lr_1e-3_vary_num_hidden_features_num_heads/*'
 # Use sort to ensure deterministic ordering
-folder=$(ls -d ./cache/memo_may26_zipf_onelayerattention_lr_1e-3_vary_num_hidden_features_num_heads/* | sort | head -n $((SLURM_ARRAY_TASK_ID+1)) | tail -n 1)
-echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
-echo "Selected folder: $folder"
+# folder=$(ls -d ./cache/memo_may26_zipf_onelayerattention_lr_1e-3_vary_num_hidden_features_num_heads/* | sort | head -n $((SLURM_ARRAY_TASK_ID+1)) | tail -n 1)
+# echo "SLURM_ARRAY_TASK_ID: $SLURM_ARRAY_TASK_ID"
+# echo "Selected folder: $folder"
 
-# Check if folder exists and is not empty
-if [ -z "$folder" ] || [ ! -d "$folder" ]; then
-    echo "Error: Folder not found or invalid for SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
-    exit 1
-fi
+# # Check if folder exists and is not empty
+# if [ -z "$folder" ] || [ ! -d "$folder" ]; then
+#     echo "Error: Folder not found or invalid for SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
+#     exit 1
+# fi
 
 # For each folder, run the analysis3.py script
-python -u analysis3.py --folder $folder
+python -u analysis4.py # --folder $folder
