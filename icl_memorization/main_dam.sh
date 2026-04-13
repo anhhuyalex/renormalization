@@ -6,7 +6,7 @@
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
 #SBATCH --partition=mig
-#SBATCH --array=0-80%20
+#SBATCH --array=0-134
 
 # source activate renormalization
 source ~/.bashrc
@@ -28,93 +28,93 @@ fi
 
 
 # Parameter Grid
-# etas=(1 10 100)
-# lrs=(1e-3 1e-2 1e-1)
-# init_stds=(1e-2 1e-1 1e0)
-# Hs=(1 5 10 30 100)
+etas=(1 10 100)
+lrs=(1e-3 1e-2 1e-1)
+init_stds=(1e-2 1e-1 1e0)
+Hs=(1 5 10 30 100)
 
-# # Decode SLURM_ARRAY_TASK_ID
-# # Total combos = 3 * 3 * 3 * 5 = 135
-# # Order calculation: H changes fastest
-# idx=$SLURM_ARRAY_TASK_ID
+# Decode SLURM_ARRAY_TASK_ID
+# Total combos = 3 * 3 * 3 * 5 = 135
+# Order calculation: H changes fastest
+idx=$SLURM_ARRAY_TASK_ID
 
-# num_Hs=${#Hs[@]}
-# i_H=$((idx % num_Hs))
-# idx=$((idx / num_Hs))
+num_Hs=${#Hs[@]}
+i_H=$((idx % num_Hs))
+idx=$((idx / num_Hs))
 
-# num_init_stds=${#init_stds[@]}
-# i_std=$((idx % num_init_stds))
-# idx=$((idx / num_init_stds))
+num_init_stds=${#init_stds[@]}
+i_std=$((idx % num_init_stds))
+idx=$((idx / num_init_stds))
 
-# num_lrs=${#lrs[@]}
-# i_lr=$((idx % num_lrs))
-# idx=$((idx / num_lrs))
+num_lrs=${#lrs[@]}
+i_lr=$((idx % num_lrs))
+idx=$((idx / num_lrs))
 
-# num_etas=${#etas[@]}
-# i_eta=$((idx % num_etas))
+num_etas=${#etas[@]}
+i_eta=$((idx % num_etas))
 
-# # Retrieve values
-# eta=${etas[$i_eta]}
-# lr=${lrs[$i_lr]}
-# init_std=${init_stds[$i_std]}
-# H=${Hs[$i_H]}
+# Retrieve values
+eta=${etas[$i_eta]}
+lr=${lrs[$i_lr]}
+init_std=${init_stds[$i_std]}
+H=${Hs[$i_H]}
 
-# echo "Running with eta=$eta, lr=$lr, init_std=$init_std, H=$H"
+echo "Running with eta=$eta, lr=$lr, init_std=$init_std, H=$H"
 
 # Construct specific prefix
 
 # Run script
-# H=$1
-# if [ -z "$H" ]; then
-#   echo "Error: missing H. Usage: $0 <H>, where H in {100, 30, 10, 5, 1}"
-#   exit 1
-# fi
-# if [ "$H" -eq 100 ]; then
-#   eta=10.0
-#   lr=1e-2
-#   init_std=1e-1
-#   H=100
+H=$1
+if [ -z "$H" ]; then
+  echo "Error: missing H. Usage: $0 <H>, where H in {100, 30, 10, 5, 1}"
+  exit 1
+fi
+if [ "$H" -eq 100 ]; then
+  eta=10.0
+  lr=1e-2
+  init_std=1e-1
+  H=100
   
-# elif [ "$H" -eq 30 ]; then
-#   eta=10.0
-#   lr=1e-2
-#   init_std=1e-2
-#   H=30
-# elif [ "$H" -eq 10 ]; then
-#   eta=10.0
-#   lr=1e-2
-#   init_std=1e-2
-#   H=10
-# elif [ "$H" -eq 5 ]; then
-#   eta=10.0
-#   lr=1e-2
-#   init_std=1e-1
-#   H=5
-# elif [ "$H" -eq 1 ]; then
-#   eta=10.0
-#   lr=1e-2
-#   init_std=1e-2
-#   H=1
-# else
-#   echo "Error: unsupported H=$H. Expected H in {100, 30, 10, 5, 1}"
-#   exit 1
-# fi
+elif [ "$H" -eq 30 ]; then
+  eta=10.0
+  lr=1e-2
+  init_std=1e-2
+  H=30
+elif [ "$H" -eq 10 ]; then
+  eta=10.0
+  lr=1e-2
+  init_std=1e-2
+  H=10
+elif [ "$H" -eq 5 ]; then
+  eta=10.0
+  lr=1e-2
+  init_std=1e-1
+  H=5
+elif [ "$H" -eq 1 ]; then
+  eta=10.0
+  lr=1e-2
+  init_std=1e-2
+  H=1
+else
+  echo "Error: unsupported H=$H. Expected H in {100, 30, 10, 5, 1}"
+  exit 1
+fi
 
-Ks=(10 100 500 1000 2000 4000 8000 10000 15000 20000 25000 30000 35000 40000 45000 50000) # len: 16
+# Ks=(10 100 500 1000 2000 5000 10000 50000) # len: 16
 num_steps=10000
-K=${Ks[$SLURM_ARRAY_TASK_ID]}
+K=500 # ${Ks[$SLURM_ARRAY_TASK_ID]}
 batch_size=50
 M=3000
-N=50
-eta=10.0
-lr=1e-2
-init_std=1e-2
-H=30
-is_freeze_A="BothAB"
-prefix="infonce_jan21_varyK_is_freeze_A_${is_freeze_A}"
-# $python -u main_dam.py --savedir $savedir --prefix $prefix \
-#     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
-#     --BATCH_SIZE $batch_size --K $K --M $M --N $N --is_freeze_A $is_freeze_A
-$python -u main_infonce.py --savedir $savedir --prefix $prefix \
+# N=50
+# eta=10.0
+# lr=1e-2
+# init_std=1e-2
+# H=30
+is_freeze_A="False"
+prefix="memo_dam_apr7_K_500_is_freeze_A_${is_freeze_A}"
+$python -u main_dam.py --savedir $savedir --prefix $prefix \
     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
-    --BATCH_SIZE $batch_size --K $K --N $N --is_freeze_A $is_freeze_A
+    --BATCH_SIZE $batch_size --K $K --M $M --N $N --is_freeze_A $is_freeze_A
+# $python -u main_infonce.py --savedir $savedir --prefix $prefix \
+#     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
+#     --BATCH_SIZE $batch_size --K $K --N $N --is_freeze_A $is_freeze_A

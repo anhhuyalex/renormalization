@@ -289,7 +289,7 @@ if __name__ == "__main__":
     parser.add_argument("--BATCH_SIZE", type=int, default=50)
     parser.add_argument("--NUM_STEPS", type=int, default=50000)
     parser.add_argument("--NUM_ITERS_PER_LOG", type=int, default=100)
-    parser.add_argument("--savedir", type=str, default="/scratch/qanguyen/gautam")
+    parser.add_argument("--savedir", type=str, default="/scratch/qanguyen/gautam/cache")
     parser.add_argument("--prefix", type=str, default="")
     parser.add_argument("--is_freeze_A", type=str, default="False")
     parser.add_argument(
