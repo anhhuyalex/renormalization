@@ -2,11 +2,11 @@
 #SBATCH --job-name=memo
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=40G
-#SBATCH --time=3:00:00
+#SBATCH --time=13:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
-#SBATCH --partition=mig
-#SBATCH --array=0-134
+# SBATCH --partition=mig
+#SBATCH --array=0
 
 # source activate renormalization
 source ~/.bashrc
@@ -64,6 +64,7 @@ echo "Running with eta=$eta, lr=$lr, init_std=$init_std, H=$H"
 # Construct specific prefix
 
 # Run script
+# for H in {100, 30, 10, 5, 1}; do sbatch --array=0-134 main_dam.sh $H; done
 H=$1
 if [ -z "$H" ]; then
   echo "Error: missing H. Usage: $0 <H>, where H in {100, 30, 10, 5, 1}"
@@ -105,13 +106,16 @@ num_steps=10000
 K=500 # ${Ks[$SLURM_ARRAY_TASK_ID]}
 batch_size=50
 M=3000
-# N=50
+N=50
 # eta=10.0
 # lr=1e-2
 # init_std=1e-2
 # H=30
-is_freeze_A="False"
-prefix="memo_dam_apr7_K_500_is_freeze_A_${is_freeze_A}"
+
+savedir="/scratch/qanguyen/gautam/cache/"
+is_freeze_A="LearnAB"
+prefix="memo_dam_apr10_K_100_is_freeze_A_${is_freeze_A}"
+
 $python -u main_dam.py --savedir $savedir --prefix $prefix \
     --eta $eta --lr $lr --INIT_STD $init_std --H $H --NUM_STEPS $num_steps \
     --BATCH_SIZE $batch_size --K $K --M $M --N $N --is_freeze_A $is_freeze_A
