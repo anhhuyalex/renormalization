@@ -476,6 +476,20 @@ elif args.wandb_group_name == "memo_mar24_zipf_onelayerattention_vary_num_hidden
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
     Ks = np.logspace(0, 5, 6)
     args.K = int(Ks[iM])
+elif args.wandb_group_name == "memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresample":
+    args.arch = "gpt"
+    num_heads = list(range(2, 15, 1)) # len: 13
+    num_hidden_features = 2 ** np.linspace(1, 8, 8).astype(int)
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    args.num_layers = 12
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    args.num_iters = 200000
+    # assert that cuda exists
+    assert torch.cuda.is_available(), "cuda not available"
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)

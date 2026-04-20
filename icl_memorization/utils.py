@@ -14,6 +14,8 @@ import functools
 import shutil
 import io
 import os
+import seaborn as sns
+
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
 class CPU_Unpickler(pickle.Unpickler):
@@ -839,3 +841,23 @@ def is_interactive():
 def ensure_dir(dir):
     if not os.path.exists(dir):
         os.makedirs(dir)
+
+def set_plot_style():
+    sns.set(
+        context="talk",
+        font_scale=1.0,
+        color_codes=True,
+        palette="deep",
+        style="ticks",
+        rc={
+            "mathtext.fontset": "cm",
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "axes.linewidth": 1.5,
+            "figure.dpi": 70,
+            "text.usetex": True,
+            "font.size": 24,
+            "legend.fontsize": 14,
+            "legend.title_fontsize": 16,
+        },
+    )
