@@ -939,7 +939,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
     # save phi_xt_list_epoch 
 
     if iter % 10 == 0 and args.wandb_log != True:
-        record["model"] = model.state_dict()
+        # record["model"] = model.state_dict()
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
             

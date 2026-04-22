@@ -856,8 +856,9 @@ def set_plot_style():
             "axes.linewidth": 1.5,
             "figure.dpi": 70,
             "text.usetex": True,
-            "font.size": 24,
+            "font.size": 28,
             "legend.fontsize": 14,
             "legend.title_fontsize": 16,
         },
     )
+
