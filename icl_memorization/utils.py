@@ -14,7 +14,10 @@ import functools
 import shutil
 import io
 import os
+import matplotlib as mpl
+import matplotlib.pyplot as plt
 import seaborn as sns
+from matplotlib.ticker import FuncFormatter
 
 IMAGE_WIDTH = 32
 IMAGE_CHANNELS = 3
@@ -842,6 +845,11 @@ def ensure_dir(dir):
     if not os.path.exists(dir):
         os.makedirs(dir)
 
+def sci_tex(x):
+    exp = int(np.floor(np.log10(x)))
+    mant = x / (10 ** exp)
+    return rf"${mant:.1f}\times 10^{{{exp}}}$"
+
 def set_plot_style():
     sns.set(
         context="talk",
@@ -851,6 +859,7 @@ def set_plot_style():
         style="ticks",
         rc={
             "mathtext.fontset": "cm",
+            "axes.formatter.use_mathtext": True,
             "xtick.direction": "in",
             "ytick.direction": "in",
             "axes.linewidth": 1.5,
@@ -861,4 +870,17 @@ def set_plot_style():
             "legend.title_fontsize": 16,
         },
     )
+
+def add_colorbar(fig, ax, norm, cmap="turbo", label=None, log_ticks=False):
+    sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax)
+    if label is not None:
+        cbar.set_label(label)
+    if log_ticks:
+        cbar.formatter = FuncFormatter(
+            lambda x, _pos: sci_tex(x) if x > 0 else "0"
+        )
+        cbar.update_ticks()
+    return cbar
 

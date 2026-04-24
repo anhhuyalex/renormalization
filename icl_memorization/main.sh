@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=memo
-#SBATCH --cpus-per-task=1
+#SBATCH --cpus-per-task=3
 #SBATCH --mem-per-cpu=30G
 #SBATCH --time=72:00:00
 #SBATCH -o slurms/%j-heads.out
-#SBATCH --gres=gpu:1
+# SBATCH --gres=gpu:1
 #SBATCH --array=15-30
 # SBATCH --partition=mig
 # source activate renormalization

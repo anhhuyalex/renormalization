@@ -490,6 +490,22 @@ elif args.wandb_group_name == "memo_apr19_zipf_gpt2_vary_num_hidden_features_num
     args.num_iters = 200000
     # assert that cuda exists
     assert torch.cuda.is_available(), "cuda not available"
+    import gpt
+    config = gpt.GPTConfig(
+        block_size = args.len_context,
+        n_embd=args.num_heads * args.num_hidden_features,
+        n_layer=args.num_layers,
+        n_head=args.num_heads,
+        bias = True,
+        is_initialize_attention_weights_to_zero = args.is_initialize_attention_weights_to_zero 
+    )
+    model = gpt.GPT(config, nn.NLLLoss(reduction="none")) 
+    num_parameters = sum(p.numel() for k, p in model.state_dict().items())
+    print(f"Number of parameters: {num_parameters}")
+    if num_parameters > 1e6:
+        sys.exit()
+    if num_parameters < 3e5:
+        sys.exit()
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
