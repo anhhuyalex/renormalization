@@ -19,21 +19,35 @@ import copy
 import time
 from enum import Enum
 import importlib
+import pprint
+import socket
+import sys
 
-import torch
-import torch.nn.functional as F
-import torch.backends.cudnn as cudnn
-import torch.distributed as dist
-import torch.multiprocessing as mp
-import torch.nn as nn
-import torch.nn.parallel
-import torch.optim
-import torch.utils.data
-import torchvision.datasets as datasets
-import torchvision.models as models
-import torchvision.transforms as transforms
-from torch.optim.lr_scheduler import StepLR, OneCycleLR
-from torch.utils.data import Subset
+try:
+    import torch
+    import torch.nn.functional as F
+    import torch.backends.cudnn as cudnn
+    import torch.distributed as dist
+    import torch.multiprocessing as mp
+    import torch.nn as nn
+    import torch.nn.parallel
+    import torch.optim
+    import torch.utils.data
+    import torchvision.datasets as datasets
+    import torchvision.models as models
+    import torchvision.transforms as transforms
+    from torch.optim.lr_scheduler import StepLR, OneCycleLR
+    from torch.utils.data import Subset
+except ModuleNotFoundError as exc:
+    if exc.name == "torch":
+        print("Failed to import torch.", file=sys.stderr)
+        print(f"hostname: {socket.gethostname()}", file=sys.stderr)
+        print(f"sys.executable: {sys.executable}", file=sys.stderr)
+        print(f"sys.version: {sys.version}", file=sys.stderr)
+        print(f"CONDA_PREFIX: {os.environ.get('CONDA_PREFIX', '<unset>')}", file=sys.stderr)
+        print("sys.path:", file=sys.stderr)
+        pprint.pprint(sys.path, stream=sys.stderr)
+    raise
 import attention
 # import webdataset as wds
 
@@ -46,7 +60,6 @@ import random
 import pandas as pd
 
 import wandb 
-import sys 
 import glob
 from collections import defaultdict
 

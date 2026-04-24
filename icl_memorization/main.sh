@@ -22,6 +22,25 @@ else
   conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
   jupytext="jupytext"
 fi
+
+print_python_diagnostics() {
+  echo "===== python diagnostics ====="
+  echo "date: $(date)"
+  echo "hostname: $(hostname)"
+  echo "PATH: $PATH"
+  echo "CONDA_PREFIX: ${CONDA_PREFIX:-<unset>}"
+  echo "python variable: $python"
+  echo "jupytext variable: $jupytext"
+  echo "which python: $(which python 2>&1 || true)"
+  echo "which jupytext: $(which jupytext 2>&1 || true)"
+  echo "\$python --version: $($python --version 2>&1 || true)"
+  echo "\$python executable: $($python -c 'import sys; print(sys.executable)' 2>&1 || true)"
+  echo "\$python sys.path:"
+  $python -c 'import pprint, sys; pprint.pprint(sys.path)' 2>&1 || true
+  echo "\$python torch check:"
+  $python -c 'import torch; print(torch.__version__)' 2>&1 || true
+  echo "=============================="
+}
  
 
 # wandb login --relogin --host=https://stability.wandb.io
@@ -61,6 +80,7 @@ wandb_group_name="memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresa
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
+print_python_diagnostics
 $jupytext --to py main.ipynb && for run in {0..0}; do WANDB_MODE=offline $python -u main.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias}  --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
 # jupytext --to py main_fork.ipynb  && for run in {0..0}; do WANDB_MODE=offline python -u main_fork.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
 # $jupytext --to py main_probe.ipynb && for run in {0..0}; do WANDB_MODE=offline $python -u main_probe.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias}  --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
