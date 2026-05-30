@@ -19,36 +19,23 @@ import copy
 import time
 from enum import Enum
 import importlib
-import pprint
-import socket
-import sys
 
-try:
-    import torch
-    import torch.nn.functional as F
-    import torch.backends.cudnn as cudnn
-    import torch.distributed as dist
-    import torch.multiprocessing as mp
-    import torch.nn as nn
-    import torch.nn.parallel
-    import torch.optim
-    import torch.utils.data
-    import torchvision.datasets as datasets
-    import torchvision.models as models
-    import torchvision.transforms as transforms
-    from torch.optim.lr_scheduler import StepLR, OneCycleLR
-    from torch.utils.data import Subset
-except ModuleNotFoundError as exc:
-    if exc.name == "torch":
-        print("Failed to import torch.", file=sys.stderr)
-        print(f"hostname: {socket.gethostname()}", file=sys.stderr)
-        print(f"sys.executable: {sys.executable}", file=sys.stderr)
-        print(f"sys.version: {sys.version}", file=sys.stderr)
-        print(f"CONDA_PREFIX: {os.environ.get('CONDA_PREFIX', '<unset>')}", file=sys.stderr)
-        print("sys.path:", file=sys.stderr)
-        pprint.pprint(sys.path, stream=sys.stderr)
-    raise
+import torch
+import torch.nn.functional as F
+import torch.backends.cudnn as cudnn
+import torch.distributed as dist
+import torch.multiprocessing as mp
+import torch.nn as nn
+import torch.nn.parallel
+import torch.optim
+import torch.utils.data
+import torchvision.datasets as datasets
+import torchvision.models as models
+import torchvision.transforms as transforms
+from torch.optim.lr_scheduler import StepLR, OneCycleLR
+from torch.utils.data import Subset
 import attention
+import gpt
 # import webdataset as wds
 
 import datetime
@@ -60,6 +47,7 @@ import random
 import pandas as pd
 
 import wandb 
+import sys 
 import glob
 from collections import defaultdict
 
@@ -150,7 +138,10 @@ parser.add_argument(
 )
 parser.add_argument('--resume', type=str, default=None,
                     help='resume from checkpoint')
+parser.add_argument('--is_save_model_every', default=-1, type=int,
+                    help='save model every k iterations; -1 means never')
     
+
 
 # if running this interactively, can specify jupyter_args here for argparser to use
 if utils.is_interactive():
@@ -519,6 +510,75 @@ elif args.wandb_group_name == "memo_apr19_zipf_gpt2_vary_num_hidden_features_num
         sys.exit()
     if num_parameters < 3e5:
         sys.exit()
+elif args.wandb_group_name == "memo_may1_zipf_gpt2_vary_num_hidden_features_num_heads_doresample":
+    args.arch = "gpt"
+    num_heads = list(range(2, 15, 2)) # len: 7
+    num_hidden_features = 2 ** np.linspace(1, 8, 8).astype(int)
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    args.num_layers = 12
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params_resample(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    args.num_iters = 80000
+    # assert that cuda exists
+    assert torch.cuda.is_available(), "cuda not available" 
+elif args.wandb_group_name == "memo_may25_zipf_onelayerattention_large_noresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    num_heads = list(range(13, 17, 1)) # len: 2
+    num_hidden_features = 2 ** np.linspace(8, 9, 2).astype(int) # len : 2
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_heads)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_heads)])
+    args.num_layers = 12
+    args.is_save_model_every = 25
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features) 
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    args.num_iters = 300000
+    args.K = 500000
+    # assert that cuda exists
+    assert torch.cuda.is_available(), "cuda not available" 
+    model = gpt.OneLayerAttention(len_context = args.len_context, 
+                                  num_heads = args.num_heads, 
+                                  num_hidden_features = args.num_hidden_features, 
+                                  vocab_size = args.vocab_size, 
+                                  num_mlp_layers = args.num_mlp_layers,
+                                  num_hidden_features_mlp = args.num_hidden_features_mlp) 
+    num_parameters = sum(p.numel() for k, p in model.state_dict().items())
+    print("Model has", num_parameters, "parameters")
+    if num_parameters > 1e9:
+        sys.exit()
+elif args.wandb_group_name == "memo_may25_zipf_onelayerattention_large_doresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    num_heads = list(range(13, 17, 1)) # len: 2
+    num_hidden_features = 2 ** np.linspace(8, 9, 2).astype(int) # len : 2
+    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_hidden_features)] 
+    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_hidden_features)])
+    args.is_save_model_every = 25
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features) 
+    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
+    
+    set_zipf_exp_params_resample(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
+    args.num_iters = 300000
+    args.K = 500000
+    # assert that cuda exists
+    assert torch.cuda.is_available(), "cuda not available" 
+    model = gpt.OneLayerAttention(len_context = args.len_context, 
+                                  num_heads = args.num_heads, 
+                                  num_hidden_features = args.num_hidden_features, 
+                                  vocab_size = args.vocab_size, 
+                                  num_mlp_layers = args.num_mlp_layers,
+                                  num_hidden_features_mlp = args.num_hidden_features_mlp) 
+    num_parameters = sum(p.numel() for k, p in model.state_dict().items())
+    print("Model has", num_parameters, "parameters")
+    if num_parameters > 1e9:
+        sys.exit()
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -653,6 +713,8 @@ elif args.optimizer == 'Adam':
 else:
     raise ValueError("optimizer not recognized")
 iters_per_epoch = 1000
+num_parameters = sum(p.numel() for k, p in model.state_dict().items())
+print("Model has", num_parameters, "parameters")
 # scheduler = StepLR(optimizer, step_size=50, gamma=0.7)
 # scheduler = OneCycleLR(optimizer, max_lr=args.lr, 
 #                        total_steps=args.epochs * iters_per_epoch, 
@@ -677,7 +739,9 @@ train_dataset = Sequence(K=args.K,
 iwl_dataset = Sequence(K=args.K, len_context=args.len_context,  skip=True, 
                        len_data = args.K // 10,
                        sequence_sampling_distribution = "uniform")
-iwl_dataset.sequences = train_dataset.sequences[::10] # take every 10th sequence from train_dataset
+_iwl_cutoff = min(200000, args.K)
+iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
+iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
 print ("sequences.sequence_sampling_distribution", iwl_dataset.sequence_sampling_distribution)
 train_sampler = None
 val_sampler = None 
@@ -874,7 +938,9 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         #     pickle.dump(all_sequences_across_switches, f)
         
         if args.sequence_sampling_distribution == "zipf":
-            iwl_dataset.sequences = train_dataset.sequences[::10] # take every 10th sequence from train_dataset
+            _iwl_cutoff = min(200000, args.K)
+            iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
+            iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
                                             sampler=val_sampler,
                                             **{'batch_size': args.batch_size, 'num_workers': args.workers,
@@ -894,7 +960,9 @@ for iter in range(args.num_iters // num_iters_per_epoch):
 
         num_apppearances = np.zeros(args.K)
         if args.sequence_sampling_distribution == "zipf":
-            iwl_dataset.sequences = train_dataset.sequences[::10]
+            _iwl_cutoff = min(200000, args.K)
+            iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
+            iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
             iwl_dataset.len_data = len(iwl_dataset.sequences)
             # print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
@@ -971,13 +1039,11 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         # record["model"] = model.state_dict()
         with open(exp_name, "wb") as f:
             pickle.dump(record, f)
+    
+    if args.is_save_model_every > 0 and iter % args.is_save_model_every == 0:
+        with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
+            pickle.dump(model.state_dict(), f)
             
-        # save model state_dict
-        # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
-            # pickle.dump(model.state_dict(), f)
-        # use json
-        # with open(exp_name, "w") as f:
-            # json.dump(record, f)
 if args.arch == "gpt":
     record["positional_encoding"] = model.transformer.wpe.weight.detach().cpu().numpy()
     record["token_embedding"] = model.transformer.wte.weight.detach().cpu().numpy()

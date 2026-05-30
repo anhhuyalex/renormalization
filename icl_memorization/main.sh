@@ -4,7 +4,7 @@
 #SBATCH --mem-per-cpu=30G
 #SBATCH --time=72:00:00
 #SBATCH -o slurms/%j-heads.out
-# SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1
 #SBATCH --array=15-30
 # SBATCH --partition=mig
 # source activate renormalization
@@ -17,10 +17,10 @@ if [[ "$hostname" == *della* ]]; then
   source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
   jupytext="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/jupytext"
 else
-  python="python"
+  python="/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri/bin/python"
   savedir="/scratch/qanguyen/gautam"
   conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
-  jupytext="jupytext"
+  jupytext="/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri/bin/jupytext"
 fi
 
 print_python_diagnostics() {
@@ -76,7 +76,7 @@ num_mlp_layers=3
 # wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
 # wandb_group_name="memo_dec8_zipf_heads_mlp_gpt_lr_1e_3"
 # wandb_group_name="memo_apr3_zipf_onelayerattention_lr_1e-3_swapmlp_eval" 
-wandb_group_name="memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresample"
+wandb_group_name="memo_may25_zipf_onelayerattention_large_doresample"
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"

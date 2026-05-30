@@ -21,3 +21,7 @@ hipp.sh
 icl_memorization/cache 
 icl_memorization/slurms
 icl_memorization/wandb
+*.csv
+figs/
+specialization_icl/l2l
+*wandb/*
