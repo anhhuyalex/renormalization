@@ -742,6 +742,7 @@ iwl_dataset = Sequence(K=args.K, len_context=args.len_context,  skip=True,
 _iwl_cutoff = min(200000, args.K)
 iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
 iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
+iwl_dataset.original_indices = iwl_indices
 print ("sequences.sequence_sampling_distribution", iwl_dataset.sequence_sampling_distribution)
 train_sampler = None
 val_sampler = None 
@@ -884,7 +885,11 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
                 accuracys[i*args.batch_size:i*args.batch_size+len(task), i_seq] = is_correct.float() 
     # print("sequence_ranks", sequence_ranks, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
     # print("accuracys", accuracys)
-    test_metrics["sequence_rank"] = sequence_ranks[:,0].detach().cpu().numpy() # average over positions
+    subset_idx = sequence_ranks[:,0].detach().cpu().numpy()
+    if hasattr(val_loader.dataset, 'original_indices'):
+        test_metrics["sequence_rank"] = val_loader.dataset.original_indices[subset_idx]
+    else:
+        test_metrics["sequence_rank"] = subset_idx
     test_metrics["length"] = 50
     test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
     test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
@@ -941,6 +946,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             _iwl_cutoff = min(200000, args.K)
             iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
             iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
+            iwl_dataset.original_indices = iwl_indices
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
                                             sampler=val_sampler,
                                             **{'batch_size': args.batch_size, 'num_workers': args.workers,
@@ -963,6 +969,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             _iwl_cutoff = min(200000, args.K)
             iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
             iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
+            iwl_dataset.original_indices = iwl_indices
             iwl_dataset.len_data = len(iwl_dataset.sequences)
             # print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,

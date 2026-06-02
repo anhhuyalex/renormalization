@@ -24,4 +24,5 @@ icl_memorization/wandb
 *.csv
 figs/
 specialization_icl/l2l
-*wandb/*
+wandb/
+.vscode/
