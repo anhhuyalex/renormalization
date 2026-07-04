@@ -1,0 +1,1347 @@
+%%%%%%%% ICML 2025 EXAMPLE LATEX SUBMISSION FILE %%%%%%%%%%%%%%%%%
+
+\documentclass{article}
+
+\newif\ifonecol
+% \onecoltrue
+% \ifonecol
+
+% Recommended, but optional, packages for figures and better typesetting:
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\usepackage{booktabs} % for professional tables
+
+\usepackage{hyperref}
+
+
+% Attempt to make hyperref and algorithmic work together better:
+\newcommand{\theHalgorithm}{\arabic{algorithm}}
+
+% Use the following line for the initial blind version submitted for review:
+\usepackage{icml2026}
+
+% For preprint, use
+% \usepackage[preprint]{icml2026}
+
+% If accepted, instead use the following line for the camera-ready submission:
+% \usepackage[accepted]{icml2026}
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{amsthm}
+
+
+% if you use cleveref..
+\usepackage[capitalize,noabbrev]{cleveref}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% THEOREMS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{assumption}[theorem]{Assumption}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+% Todonotes is useful during development; simply uncomment the next line
+%    and comment out the line below the next line to turn off comments
+%\usepackage[disable,textsize=tiny]{todonotes}
+\usepackage[textsize=tiny]{todonotes}
+
+
+\newcommand{\gr}[1]{{\color{blue}[GR]: #1}}
+
+
+% The \icmltitle you define below is probably too long as a header.
+% Therefore, a short form for the running title is supplied here:
+\icmltitlerunning{Meta-memorization in transformers}
+
+\begin{document}
+\twocolumn[
+    \icmltitle{Meta-memorization in transformers}
+
+  % It is OKAY to include author information, even for blind submissions: the
+  % style file will automatically remove it for you unless you've provided
+  % the [accepted] option to the icml2026 package.
+
+  % List of affiliations: The first argument should be a (short) identifier you
+  % will use later to specify author affiliations Academic affiliations
+  % should list Department, University, City, Region, Country Industry
+  % affiliations should list Company, City, Region, Country
+
+  % You can specify symbols, otherwise they are numbered in order. Ideally, you
+  % should not use this facility. Affiliations will be numbered in order of
+  % appearance and this is the preferred way.
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}
+    \icmlauthor{Alex Nguyen}{yyy}
+    \icmlauthor{Kenneth A. Norman}{yyy,comp}
+    \icmlauthor{Gautam Reddy}{comp}
+    %\icmlauthor{}{sch}
+    %\icmlauthor{}{sch}
+  \end{icmlauthorlist}
+
+    \icmlaffiliation{yyy}{Department of XXX, University of YYY, Location, Country}
+    \icmlaffiliation{comp}{Company Name, Location, Country}
+    \icmlcorrespondingauthor{Firstname1 Lastname1}{first1.last1@xxx.edu}
+    \icmlcorrespondingauthor{Firstname2 Lastname2}{first2.last2@www.uk}
+
+  % You may provide any keywords that you find helpful for describing your
+  % paper; these are used to populate the "keywords" metadata in the PDF but
+  % will not be shown in the document
+  \icmlkeywords{Machine Learning, ICML}
+
+  \vskip 0.3in
+]
+
+% this must go after the closing bracket ] following \twocolumn[ ...
+
+% This command actually creates the footnote in the first column listing the
+% affiliations and the copyright notice. The command takes one argument, which
+% is text to display at the start of the footnote. The \icmlEqualContribution
+% command is standard text for equal contribution. Remove it (just {}) if you
+% do not need this facility.
+
+% Use ONE of the following lines. DO NOT remove the command.
+% If you have no special notice, KEEP empty braces:
+\printAffiliationsAndNotice{}  % no special notice (required even if empty)
+% Or, if applicable, use the standard equal contribution text:
+% \printAffiliationsAndNotice{\icmlEqualContribution}
+
+
+\begin{abstract}
+Transformers exhibit a remarkable ability for verbatim memorization. Consistent with expectations, larger models can memorize more sequences, with a capacity (in bits) that scales roughly linearly with parameter count. Curiously, larger models also memorize \emph{faster}, requiring fewer repetitions of a sequence during training before it is perfectly memorized. We first show that both memorization ``scaling laws'' are recapitulated in transformers trained on a random set of unstructured sequences, indicating that these effects are not due to a larger model's superior ability to learn linguistic or other implicit structure in data. We find that few-shot memorization is driven in part by a \emph{meta-memorization} effect, where models trained to memorize one corpus learn to memorize novel corpora more quickly. Mechanistically, we trace meta-memorization to the emergence of structured attention heads that convey length-invariant contextual information to multi-layer perceptrons where memorized sequences are stored. Meta-memorization is recapitulated in a model of a dense associative memory where retrieval is constrained by an attentional bottleneck. Building on previous work, we propose that transformers acquire an efficient, multi-step retrieval mechanism that involves readout of contextual sequence information by specialized attention heads, retrieval of sequence identity from a key-value memory, and subsequent next-token prediction based on sequence identity and current position in the sequence. 
+\end{abstract}
+
+\section{Introduction}
+\label{submission}
+
+%One feature of transformer models is their ability to adapt from a handful of examples presented at inference time. In large language models (LLMs) this has been attributed, in part, to in-context learning: the ability to infer a task and produce correct responses without any explicit weight updates (Brown et al., NeurIPS, 2020). A growing body of work has argued that in-context learning is best viewed as a consequence of meta-learning induced by next-token prediction, whereby the pretraining objective implicitly selects for internal algorithms that rapidly incorporate new information from the context (Garg et al., arXiv, 2022; Xie et al., ICLR, 2022). %Correspondingly, recent mechanistic studies have begun to identify concrete circuit motifs that implement simple forms of on-the-fly learning (Olsson et al., arXiv, 2022). 
+
+Transformers [Vaswani et al] are remarkable memorizers [to add refs here]. Independent of their capacity for generalization, large language models (LLMs) can reproduce training passages verbatim when prompted with sufficient context (Carlini et al., 2019; Carlini et al., 2021, more ) and this can be exploited to extract training data. For example, production language models verbatim recall much of \emph{Harry Potter and the Sorcerer's Stone} when prompted with the first few tokens of the first chapter  (Cooper et al, arxiv, 2025, Ahmed et al, arxiv, 2026, more). One influential approach to quantify memorization measures extractability: given a prefix of a training example, one asks whether the model reproduces the exact continuation, and how this probability changes with context length, dataset duplication, and scale (Carlini et al., ICLR, 2023). A complementary perspective measures memorization dynamically throughout training, asking how many presentations are necessary before examples become exactly reproducible, and how much of the dataset can be memorized before overfitting or forgetting dynamics intervene (Tirumala et al., NeurIPS, 2022). 
+
+Several robust regularities have emerged across these approaches. Memorization increases with model size and with the number of times a sequence is duplicated in the training corpus, often in simple log-linear relationships (Carlini et al., ICLR, 2023). More broadly, recent work has suggested that transformers have an effective storage capacity of a few bits per parameter, and that training can proceed through regimes in which the model first fills this capacity before shifting toward more reusable structure (Allen-Zhu et al, Morris et al., arXiv, 2025, others?). This ``bits-per-parameter'' scaling is intuitively appealing but nevertheless surprising given the many architectural degrees of freedom (depth, width, number of heads, normalization, and optimizer choices). Mechanistically, multiple analyses of pretrained transformers suggest that MLP layers act as loci of stored associations, consistent with a key-value memory view of feed-forward blocks (Geva et al., EMNLP, 2021; Meng et al., NeurIPS, 2022, Dong et al, 2025, others?). 
+
+Perhaps most puzzlingly, memorization does not merely scale in extent but also in speed. Larger models often require fewer presentations of a particular sentence before it is memorized (Tirumala et al., NeurIPS, 2022, Carlini et al., ICLR, 2023). From a naive capacity standpoint this is not an obvious consequence of scale: having more parameters can explain storing more items, and indeed, recent efforts to disentangle so-called unintended memorization from generalization show that capacity continues to scale systematically with parameter count (Morris et al, arxiv 2025). But this does not explain why gradient updates due to a small number of repeats should become systematically more effective at creating a memory. One obstacle to resolving this puzzle in full-scale language models is that ``memorization speed'' is confounded by the model’s improving ability to exploit the structure of language. Larger models may appear to memorize faster because they infer missing tokens from syntactic and semantic regularities more effectively, not because they are intrinsically better at forming verbatim memories. 
+
+Our goal is to establish a minimal framework that helps explain these memorization scaling laws, and allows for identifying general principles that enable few-shot memorization. To do this, we consider a simplified setting in which transformers of different sizes are trained autoregressively on a dataset of randomly generated binary sequences. The dataset is constructed with a skewed Zipfian rank-frequency distribution, ensuring that sequences are encountered over a broad range of repetition counts. This design serves two purposes. First, it mirrors a salient, domain-general feature of natural data that is known to influence emergent transformer behaviors in other contexts (Chan et al., NeurIPS, 2022). Second, it allows us to ask whether the rate at which a novel sequence is memorized depends on the model’s prior experience memorizing other sequences: if meta-learning-like effects exist for memorization, then low-frequency sequences encountered later in training may require fewer repeats precisely because the model has already learned how to memorize from the high-frequency portion of the dataset. Our core findings can be summarized as follows. 
+
+By systematically varying both the number of attention heads per layer and the model dimension of GPT-style transformers, we find that memorization capacity is governed primarily by parameter count, recapitulating the scaling regularities observed in models trained on language and synthetic data (Tirumala 2022, Carlini 2023, Morris 2025). Further, we show that larger models memorize faster: the number of presentations required for near-perfect recall decreases with scale, and rarer sequences, while necessarily learned later during training, can require much fewer repetitions once the model is sufficiently trained. Importantly, we identify a meta-memorization effect: when we swap the training set for a different random set, the new sequences are memorized substantially faster than the original ones, with the acceleration itself increasing with model size \gr{is this true}. 
+
+To identify mechanisms, we specialize to one-layer transformers with a multi-head attention layer and a three-layer MLP, and show that the same capacity and speed effects, including meta-memorization, persist in this minimal architecture. We use this architecture to perform ``probe'' and ``rescue'' experiments, which together lend further support for the hypothesis that memories are stored in feed-forward blocks and shows that meta-memorization is driven by learned structure in the attention heads. Attention maps most prominently acquire vertical-stripe-like patterns and progressive decorrelation, alongside the emergence of decodable sequence identity in the MLP. Together, these results support a picture in which attention heads gradually organize to convey length-invariant contextual information about the current sequence into the MLP, enabling faster writing and retrieval of sequence-specific traces.
+
+Finally, we show that much of this phenomenology can be recapitulated in a simplified model where a set of $H$ attention heads convey contextual information to a dense associative memory, with $H$ smaller than the sequence length, creating an explicit attentional bottleneck. This model provides a compact conceptual framing: verbatim recall in transformers can be understood as efficient retrieval of sequence identity from a key-value memory, and meta-memorization occurs in part due to an attentional bottleneck that incentivizes attention heads to specialize for efficient retrieval. 
+
+
+\section{Results}
+\label{sec:results}
+
+\subsection{A scaling law of memorization capacity vs. model size}
+We employed a decoder-only GPT-2 transformer architecture (\textcolor{red}{cite}) with
+ learnable positional encodings and causal masking. 
+ The model was trained on an autoregressive objective: given a partial sequence consisting of the first $n$ bits,
+  the model predicts the $(n+1)$-th bit. 
+  This autoregressive formulation requires the model to memorize the training sequences, 
+  as the randomly generated binary sequences contain no exploitable structure or regularity.
+
+To investigate the relationship between model capacity and memorization performance,
+ we varied two architectural parameters: the number of attention heads and the number of layers.
+  Each attention head had 8 features. 
+
+\textbf{Training Procedure for Uniformly Distributed Sequences}:
+Before training, we sampled a set of $K=20000$ sequences. Each 
+sequence is a binary string of length $N=100$, where each bit is independently and identically sampled
+ from a Bernoulli distribution over bits. 
+Models were trained using batched stochasticgradient descent on autoregressive loss 
+with a binary cross entropy objective.
+ Within each batch, sequences were sampled uniformly with replacement from the dataset.
+ We trained the model for $T=80000$ iterations using Adam, with $\text{lr}=0.001$ and a batch size of $B=256$.
+
+\textbf{Results}: 
+To quantify memorization, we evaluated model performance on the training sequences 
+at regular intervals (every 1000 iterations) throughout training. 
+For each sequence, we computed the average next-token prediction accuracy 
+by feeding the model the sequence prefix and comparing the predicted next token to the ground truth. 
+We report the average accuracy across all token positions and all sequences as our primary measure of overall memorization capacity. 
+
+We observed that memorization accuracy increased with model size according to a scaling law. 
+\textbf{Claim: We observe a scaling law in log-linear fashion with model size.} 
+\textcolor{red}{TODO: measure exponent ?}
+When comparing models with different numbers of layers and attention heads but similar parameter counts, 
+ memorization capacity remained largely equivalent.
+
+\textbf{Training with Zipfian-Distributed Sequences}:
+To examine how data distribution influences memorization dynamics, 
+we constructed a training corpus with a Zipfian rank-frequency distribution. 
+We first sampled $K=100{,}000$ random binary sequences, each of length $N=100$ bits, 
+where each bit was drawn independently from a Bernoulli(0.5) distribution.
+ We then assigned each sequence a rank $r \in \{1, 2, \ldots, K\}$ and 
+ defined its sampling probability as $p(r) \propto r^{-1}$.
+  During training, sequences were sampled independently and identically (i.i.d.) from 
+  rank distribution within each batch, 
+  ensuring that high-rank (infrequent) sequences were presented less frequently than low-rank
+   (frequent) sequences over the course of training.
+
+We employed the same GPT-2  architecture as in the previous section. 
+To vary model capacity, we manipulated the number of attention heads $n_h$ and the feature dimension per head $d_h$, 
+while holding the number of layers fixed at $L=12$. 
+ Models were trained for $T=80{,}000$ iterations using the Adam optimizer \textcolor{red}{cite}
+  with a learning rate of $\eta=0.001$ and a batch size of $B=256$ sequences.
+
+\textbf{Evaluation Metrics}:
+To assess memorization speed, we defined a sequence as ``memorized'' 
+when it achieved 90\% average per-token accuracy. 
+For each sequence, we measured: (1) the training iteration $t_{90}$ at which it first reached this threshold,
+ and (2) the total number of presentations $n_{\text{pres}}$ the sequence had received up to iteration $t_{90}$. 
+ The use of both measures allows us to disentangle the effects of training dynamics from sequence frequency.
+
+\subsection{A scaling law of memorization speed vs. model size}
+
+We observed a scaling law between model size and both memorization capacity and speed, 
+as illustrated in Figure \textcolor{red}{todo: add figure}. 
+
+In \textbf{Capacity scaling (Figure~2a).} We found that the maximum sequence rank achieving 90\% accuracy 
+scaled log-linearly with the total number of model parameters. 
+ This capacity scaling was largely invariant to the number of hidden features per head and attention heads,
+  consistent with prior findings that total parameter count is the primary determinant of memorization capacity.
+
+\textbf{Speed scaling (Figure~2b).} Larger models also memorized sequences faster.  
+For sequences of equal rank (i.e., with identical expected presentation frequencies), 
+larger models reached the 90\% accuracy threshold in fewer training iterations than smaller models. 
+This effect is visible by taking a vertical slice through Figure~2b at a fixed rank: 
+models with more parameters consistently achieve memorization earlier in training. 
+Additionally, by considering a horizontal slice at a fixed iteration.
+ we see that larger models have memorized more sequences (higher maximum rank) at any given point in training,
+  further confirming their superior capacity.
+
+\textbf{Fewer-shot memorization of rare sequences (Figure~2c).}  
+We found that high-rank (infrequent) sequences required fewer presentations 
+to reach 90\% accuracy than low-rank (frequent) sequences, despite being memorized later in training.
+ Figure~2c plots the number of presentations at the iteration of achieving 90\% accuracy against sequence rank. 
+ The downward trend indicates that sequences sampled less frequently during training nevertheless required fewer repetitions 
+ to be memorized once the model had been sufficiently exposed to more common sequences. 
+ \textcolor{red}{This finding suggests a form of \textit{meta-memorization}: 
+ after memorizing frequent sequences, the model develops mechanisms that enable it to memorize novel, 
+ rare sequences more efficiently from fewer examples. 
+ The magnitude of this effect increased with model size,
+  with larger models exhibiting steeper declines in presentations-to-memorization for high-rank sequences.}
+
+
+\subsection{Meta-Memorization: Learning to Memorize}
+
+To test the hypothesis that models develop improved memorization capabilities over the course of training,
+ we conducted a dataset-switching experiment designed to disentangle the effects of sequence frequency 
+ from later memorization time. 
+We trained models using the same GPT-2 architecture described in Section~\ref{sec:methods}
+ on a corpus of $K=100{,}000$ randomly generated binary sequences of length $N=100$, 
+ sampled according to a Zipfian rank-frequency distribution. 
+ After $T_{\text{switch}}=40{,}000$ training iterations 
+ (halfway through the total training duration of $T=80{,}000$ iterations), 
+ we replaced the entire training corpus with a newly generated set of $K=100{,}000$ sequences, 
+  also drawn from an identical Zipfian distribution. 
+  We then continued training our model for an additional 40,000 iterations on the new corpus. 
+
+This experiment allows us to compare memorization dynamics for two sets of sequences: one 
+in which the model encountered from the beginning of training, and one in which
+ the model first encountered at iteration $T_{\text{switch}}$. 
+ We observed a sharp recovery following the dataset switch: 
+ although memorization performance initially drops (as expected when encountering entirely new data), 
+ memorization speed improved more quickly from chance after $T_{\text{switch}}$. 
+ The model more rapidly memorized the new sequence 
+ compared to similar stages of training before the switch, even after controlling for sequence rank,
+  ultimately exceeding its pre-switch performance. Furthermore, 
+  given the same number of iterations, the model memorized more sequences 
+  from the new corpus than the original corpus. 
+  
+  This magnitude of the meta-memorization effect itself scaled with model capacity. 
+   Larger models exhibited steeper recovery curves following the dataset switch  
+   and achieved memorization of more new sequences than smaller models both before and 
+   after the switch.
+    \textcolor{red}{This suggests that meta-memorization reflects the emergence of 
+    memorization mechanisms that improve with scale. 
+    It reflects a form of meta-learning in which the model develops 
+    reusable mechanisms for efficient storage and retrieval of arbitrary sequences. }
+
+\subsection{Meta-Memorization in One-Layer Transformer} 
+ 
+
+\textbf{One-Layer Transformers Recapitulate Memorization Phenomena}:
+To enable mechanistic analysis of meta-memorization, 
+we investigated whether a minimal transformer architecture could reproduce the key phenomena observed in deeper models. 
+We trained one-layer transformers (consisting of a single multi-head attention layer followed by a three-layer MLP)
+ on the same random binary sequence tasks described above. 
+ This simplified architecture allows for more tractable analysis of the differential roles of attention and feed-forward components
+  in memorization, while still capturing the essential dynamics of interest.
+
+Despite their architectural simplicity, one-layer transformers recapitulated both scaling laws.
+ First, memorization capacity (maximum rank achieving 90\% accuracy) scaled log-linearly 
+ with total parameter count, consistent with the multi-layer results (Figure \textcolor{red}{todo: add figure}\ref{fig:one_layer_capacity}). 
+ We varied model size by adjusting the number of attention heads and features per head.
+
+Second, one-layer models also exhibited meta-memorization effects in the dataset-switching experiment. 
+Following the corpus replacement at $T_{\text{switch}}=40{,}000$,  
+these models showed sharper recovery: after an initial performance drop,  
+they memorized new sequences substantially faster than original sequences at comparable training stages,
+ even when controlling for sequence rank (\textcolor{red}{todo: add figure}\ref{fig:one_layer_meta}).  
+These results validate that the memorization scaling laws and meta-memorization effects  
+arise from fundamental transformer learning dynamics that emerge even in single-layer models.  
+ 
+\textbf{Meta-Memorization is Driven by Learned Attention Structure}:
+We hypothesize that meta-memorization reflects the attention heads' gradual
+ specialization to present informative representations to the MLP, 
+ enabling faster storage of novel sequence-specific associations.
+  To test whether attention heads indeed become more effective at facilitating 
+  memorization over the course of training, 
+  we conducted a probing experiment, where we trained one-layer transformers with varying numbers of attention heads and features per head on the standard Zipfian-distributed corpus. 
+  Every 50 gradient steps during training, we created a ``probe fork'' of the model: We initialize 
+  a new model with the same weights as the current model, freeze 
+  the attention weights and train only the MLP weights. 
+   We trained this forked model exclusively on a held-out set of probe sequences 
+   (never seen during the main training) for up to 1,000 iterations, 
+   recording the number of iterations required to reach 95\% accuracy on these probe sequences.
+
+If attention heads learn to provide increasingly informative input to the MLP over training,
+ then probe forks created later in training should require fewer iterations to memorize the probe sequences.
+  In figure \textcolor{red}{todo: add figure}, 
+  we observed that the number of iterations to reach 95\% accuracy on probe sequences decreased as the main training progressed. 
+  This demonstrates that the attention layer learns representations that facilitate faster memorization of entirely novel sequences.
+
+To provide further evidence of the necessity of the attention heads, 
+we trained models with attention weights initialized to zero and frozen throughout training.
+ In this configuration, attention heads distribute probability uniformly across all positions, 
+ providing no position-specific contextual information. 
+ These models failed to learn the training sequences and, 
+ correspondingly, probe forks showed little to no improvement in memorization speed regardless of training duration.
+
+\textbf{MLPs Store Sequence-Specific Associations; Attention Preserves Sequence-Agnostic Information}:
+The probing results suggest that attention and MLP layers play distinct functional roles: 
+attention learns to extract and route generalizable contextual information, 
+while MLPs store sequence-specific associations. 
+To test this division of labor hypothesis, we conducted a component-swapping experiment.
+
+We trained one-layer transformers on a corpus of $K=100{,}000$ random binary sequences (length $N=100$)
+sampled according to a Zipfian distribution.
+ At $T_{\text{switch}}=40{,}000$ iterations, we replaced the corpus with a newly generated set of sequences 
+ and continued training to completion ($T=80{,}000$ iterations). 
+ We saved model weights at two timepoints: immediately before the switch ($\theta_{\text{pre}}$) 
+ and at the end of training ($\theta_{\text{post}}$). 
+
+As expected, the final model ($\theta_{\text{post}}$) achieved high accuracy on the new corpus but has catastrophically forgotten the original corpus.
+ We then constructed a hybrid model combining the attention weights from $\theta_{\text{post}}$
+  with the MLP weights from $\theta_{\text{pre}}$, denoted $\theta_{\text{hybrid}} = (\text{Attn}_{\text{post}}, \text{MLP}_{\text{pre}})$. 
+We evaluated this hybrid on the \original corpus without any additional training.
+If sequence-specific information were stored primarily in attention weights, 
+then substituting the post-switch attention should eliminate recall of the original sequences.
+ Conversely, if sequence-specific associations reside in the MLP,
+  the pre-switch MLP weights should enable above-chance performance on the original corpus, 
+  even when paired with attention weights associated with a 
+  model that has catastrophically forgotten the original corpus.
+
+We found that $\theta_{\text{hybrid}}$ achieved above-chance accuracy on the original corpus 
+(Figure \textcolor{red}{todo: add figure}). 
+This result demonstrates that: (1) MLPs are the primary locus of sequence-specific memory traces, 
+and (2) attention weights learn to extract context-general features 
+(e.g., position-in-sequence, sequence boundaries) that can be reused across different memorization tasks.
+ 
+% \textbf{Attention Heads Develop Linearly Separable Representations of Sequences}: 
+% To measure the informativeness of attention heads' representations
+% of sequences, we trained 
+% linear classifiers to predict the identity of the sequence on the attention heads' representations
+% and on the MLP representations of each token in the sequence. 
+% More precisely, we construct a dataset where we extract vectors 
+% corresponding to the attention and MLP representations of 
+% 25 positions (distributed evenly across the sequence of length $N=100$) in the sequence
+% and associate them with the identity of the sequence (i.e. rank of the sequence). 
+% We then tracked the accuracy of the linear classifiers 
+% on this classification task as the model trained.  
+% We observed that the linear classifier accuracy 
+% of attention heads' representations rapidly increases as the model trains, exceeding 80\% accuracy. 
+% While the linear classifier accuracy of the MLP representations also increases
+% rapidly, it never exceeds 50\% accuracy. This linear classifier accuracy
+% also decreases with depth and also decreases over time for each layer.
+% This suggests that the attention heads' representations
+%  are more linearly classifiable than the MLP representations,
+%  whereas the MLP focuses on using the information from  
+%  the attention heads to decode the next bit.  
+
+\textbf{Attention Representations Encode Sequence Identity; MLP Representations Encode Next-Token Predictions}:
+
+ 
+We hypothesize that attention outputs preserve information about 
+the content of the sequence by developing linearly separable 
+representations of the sequence. 
+The MLP outputs transform this information into predictions 
+ about the next token.
+ To quantify how explicitly sequence identity is represented in different layers, 
+ for each epoch (1000 iterations), 
+ we presented 1000 novel sequences to the model and extracted activation vectors 
+ from both attention outputs 
+ and MLP outputs at 25 evenly spaced positions across sequences of 
+ length $N=100$ (positions 0, 4, 8, \ldots, 96). 
+
+ This yielded a classification dataset where the task is to predict sequence identity from activations at a given position.
+  We trained separate logistic classifiers 
+  for attention and MLP representations at regular intervals throughout model training. 
+   
+We observed that attention representations rapidly developed highly linearly separable representations
+ of sequence identity: linear classifier accuracy exceeded 80\% early
+  in training and continued to improve (Figure \textcolor{red}{todo: add figure}). 
+  While MLP classifier accuracy initially increased, it 
+  plateaued well below 50\% accuracy and, 
+  remarkably, \textit{decreased} over the course of training (Figure \textcolor{red}{todo: add figure}). 
+  We hypothesized that this decline is because the MLP must focus on predicting the next token 
+  rather than maintaining sequence identity information.
+
+\textcolor{red}{These results support a picture of the functional division 
+between attention and MLP layers in transformers: 
+attention heads learn to construct and preserve explicit, 
+linearly accessible representations of sequence identity,
+ that are robust across token positions. 
+The MLP, by contrast, transforms these representations into dataset-specific
+ features optimized for next-token prediction.
+  This explains why attention representations are 
+  more stable, even with changing datasets.}
+
+
+  \textbf{Attention Representations become Sparser and Decorrelated over time}:
+  How exactly do attention representations become more 
+  informative and linearly separable over the course of training. 
+  To answer this question, we visualized the attention 
+  representations for different sequences at different timepoints during training.
+  We observed that the attention representations become more sparse and decorrelated over time.
+  At the beginning of training, each attention head pays 
+  uniform attention to all previous positions in the sequence.  
+  However, as training progresses, the attention maps 
+  become sparser, indicating that the attention heads learn to pay more attention to 
+   particular positions in the sequence. 
+Intriguingly, we notice that for a specific sequence, 
+the attention maps form vertical bars, indicating that the attention heads learn to pay attention
+ to specific prior positions in the sequence, regardless of the position in the sequence.
+This allows the attention heads to learn to encode  
+the sequence identity into a compact representation. 
+Furthermore, to maximize information
+ about the sequence, 
+ the attention heads decorrelate over time, 
+ meaning that they learn to pay attention to
+  different positions in the sequence.
+ This allows the attention heads to learn to encode the sequence identity into a compact representation.
+
+\section{Introduction}
+ 
+
+Contributions:
+\begin{itemize}
+    \item \textcolor{red}{\textbf{We show that memorization accuracy increases vs. model size. Therefore larger models memorize better.}}
+    \begin{itemize}
+        \item Also larger models memorize faster.
+        \item Low frequency sequences are memorized after a fewer number of observations, even though they saturate at higher loss 
+    \end{itemize}
+    \item \textcolor{red}{\textbf{We show that transformers learn to memorize faster after the switch.}}
+    \begin{itemize}
+        \item Sequences that are presented less often are learned with fewer number of presentations.
+        \item  If we switch the sequences halfway through training, then after the switch the model should learn the new sequences after the switch in less time
+        \begin{itemize}
+            \item After the switch, the model learns equirank sequences faster (i.e. A sequence of rank k is learned faster (higher speed) post-switch than a pre-switch rank k sequence)
+            \item  After the switch, the models can learn more sequences in the same number of iterations (higher capacity)
+            \begin{itemize}
+                \item I.e. Sequences at a sufficiently high rank k are not learned in 10k iterations pre-switch but are learned within 5k iterations post switch
+            \end{itemize}
+            \item Larger models adapt faster to new sequences
+        \item This suggests that the model learns to memorize sequences more quickly as learning progresses
+        \end{itemize}
+    \end{itemize}
+    \item We propose a simplified model that reproduces the phenomenology: a one-layer attention model followed by a 3-layer MLPs
+    \begin{itemize}
+        \item We hypothesize that the model learns to transport information from a small set of diagnostic positions into head-specific subspaces, computing a barcode-like signature for each sequence. The MLP then decodes this signature to predict the next bit.
+        \item The attention heads adapt to allow learning to memorize
+        \begin{itemize}
+            \item Result 3a: Probe sequences show that as training proceeds, the attention heads present more informative input into the MLP
+            \item Result 3b: If we set attention weights to zero, model does not memorize
+            \item Result 3c: After the swap phase, the model has catastrophically forgotten the sequences it learned pre-switch. 
+            However, we can use post-Swap2 attention weights + pre-Swap MLP weights to rescue model performance
+        \end{itemize}
+    \end{itemize}
+    \item In our simple model of transformer memorization, larger models memorize better not only because they can store more information, but also because they learn to memorize faster. As model width and the number of attention heads grow, heads can be organized to route complementary bits of a sequence into stable representational slots that a downstream MLP can reliably read. This emergent organization acts as an internal coordinate system for sequence identity, allowing the model to encode and decode faster as it trains.
+\item We hypothesize that attention learns to transport information from a small set of diagnostic positions into head-specific subspaces, computing a barcode-like signature for each sequence. The MLP then decodes this signature to predict the next bit. This view suggests concrete probes in large language models: (i) automated path tracing to quantify which heads and MLP paths dominate the logit on memorized items; (iv) swapping absolute for relative position encodings to prevent the attention heads from reading from the same positions, which should hinder memorization if the mechanism is correct. Our model suggests that as models scale, their main improvement is not primarily in capacity but in the learned routing that makes learning to encode and decode faster.
+\end{itemize}
+
+\section{Task}
+In order to study how model size, data distribution, and number of repetitions affect memorization, 
+we propose to study memorization of random data in order to disentangle these effects from the structure of language. 
+To generate our random dataset, we sample a dataset of sequences of length 100, where each sequence is either an ON bit or an OFF bit with equal probability. 
+Therefore, there is no statistical structure in each data sequence, and an autoregressive model has no way to predict the next bit from the current bit. 
+
+We then train a transformer to "memorize" the entire dataset using an autoregressive loss. 
+In particular, given the first $l$ bits, the model is trained to predict the following $l+1$ bit, and evaluated using a binary cross entropy loss.
+The transformer is a GPT-2 architecture. 
+However, the sequences presented in a rank-Zipfian distribution (with probability proportional to their rank). 
+If the rank of a sequence is $k$, then the probability of the sequence being presented is $P(k) = \frac{1}{Zk}$, 
+where $Z=\sum_{k=1}^K \frac{1}{k}$ is the normalizing constant.
+
+Therefore, some sequences are seen a lot less frequently than others.
+
+\section{Results on GPT-2}
+\subsection{GPT-2 Memorizes more sequences more quickly as the number of parameters increases}
+\textbf{Claim: Memorization accuracy increases vs. model size so that Larger models memorize better.} 
+Memorization performance largely scales with number of parameters, not so much the architecture (i.e. number of layers/heads) matters less. 
+
+ \begin{figure}[H]
+     \centering
+     \subfigure[]{
+         \includegraphics[width=0.48\linewidth]{images/fig-gpt-scaling.png}
+     }
+     \subfigure[]{
+         \includegraphics[width=0.48\linewidth]{images/fig-gpt-train-loss.png}
+     }
+     \caption{Final train loss vs. number of parameters for a 12-layer GPT-2 model. To vary the number of parameters, we vary the number of heads and the number of features per head. \gr{Do you still have results for the case when the number of layers and heads are both being changed? This is good, but that adds an additional result that its the total number of parameters that seems to matter. If we don't have that, it would be worthwhile to show explicitly that we are varying both the number of heads and number of features per head in the above plot.}
+     \gr{Comments: (1) If we add the figure showing the other results with varying heads and layers, then I'd show the current panel (a) and that other panel. The current panel (b) is a Supplementary Figure. (2) Larger font size for the axis labels. (3) The outlier points with a smaller opacity and perhaps a different color. (4) Do you think it's worth adding a panel with a cartoon that summarizes the task? Then Figure 1 will have the cartoon + the current panel (a) + potentially the one with models of varying heads/layers.}
+     }
+     \label{fig:placeholder} 
+ \end{figure}
+
+ \textbf{TO DO: a) Plot 1a differing numbers of heads / features with differing colors and symbols. b) Add slide 122 of https://docs.google.com/presentation/d/1BC4zCkzWxcVDUMFIvDtk2DJ6oG-aQCNOJUJ-p_o9jFg/edit?slide=id.g344374c4c53_0_6#slide=id.g344374c4c53_0_6 
+}
+
+\textbf{into supplement
+ c) Current Panel b goes into supplementary
+ d) Panel a: cartoon of autoregressive prediction using transformer, Bottom should be the zipf law rank distribution.
+ Panel b: Loss when you train with different number of parameters}
+ 
+\textbf{Rate of memorization}:
+We also observe that transformers memorize sequences of the same rank more quickly.
+
+\textbf{\textcolor{red}{Plot results for standard transformers and one-layer transformers.}}
+
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[width=1\linewidth]{images/fig-train-loss-vs-epoch-hue-numparams.png}
+%     \caption{Here, I show the train loss of the model (averaged across all sequences and all positions) as a function of the # of parameters. Darker colors mean a model with higher number of parameters. We see that bigger models generally show a bigger drop in train loss. However, I would need to separate these train loss curves by rank to claim that the bigger models learn faster, since they might just have higher storage capacity.}
+%         \label{fig:fig-train-loss-vs-epoch-hue-numparams}
+% \end{figure}
+
+\textit{TO DO:
+Plot 1: x-axis iterations, y-axis: loss, color: number of parameters. Plot this averaging a range of ranks together.
+Plot 2: X-axis: Rank (or model size)
+Y: Time / Iterations until saturation, Different colors = different model size
+For a few different rank ranges, we plot how long does it take for them to saturate 
+Define saturation: 
+Prediction: If we replace Y with \# of presentations then we should see opposite trend, the model should memorize higher rank sequences with fewer \# of presentations.}  
+
+\subsection{Transformers Learn to Memorize}
+We are interested in whether the model develops structural mechanisms to memorize new sequences faster as training proceeds. To assess this, we run an experiment where we switch the sequences halfway through training. We hypothesize that if the model develops these mechanisms, after the switch the model should learn the new sequences after the switch better even with the same number of iterations. 
+
+\textbf{Transformers learn to memorize faster after the switch}: After the switch, the model learns equirank sequences faster (i.e. A sequence of rank k is learned faster post-switch than a pre-switch rank k sequence)
+
+\textbf{Transformers can memorize more sequences after the switch}: After the switch, the models can learn more sequences in the same number of iterations
+I.e. Sequences at a sufficiently high rank k are not learned in 10k iterations pre-switch but are learned within 5k iterations post switch.
+
+
+To show that larger models learn to memorize faster, we plot 
+the number of iterations required to learn a sequence of a given rank for a given model size.
+To do this, we define saturation as the iteration at which the model learns the sequence to 90\% accuracy.       
+In the following figure, we plot the number of iterations required to learn a sequence of a given rank for a given model size.
+\begin{figure}[H]
+    \centering
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-iterations-to-saturation-accuracy.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-number-of-appearances-to-saturation-accuracy.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-number-of-appearances-to-saturation-jump-plot.png}
+    }
+    \caption{ 
+    \textbf{a}: Number of iterations required to learn a sequence of a given rank for a given model size.
+    We plot the saturation iterations vs. rank for a given model size.
+    We define saturation as the iteration at which the model learns the sequence to 90\% accuracy. 
+    We see that higher rank sequences are learned later in time.
+    We see that larger models learn more sequences, i.e. more sequences have a saturation iteration below 100000.
+    \textbf{b}: We plot the number of appearances required to reach 90\% accuracy (i.e. accuracy at the last iteration) for a given model size 
+    as a function of rank. 
+    We can see that sequences at higher ranks are learned in fewer presentations to the model (due to the Zipfian distribution), 
+    even though higher rank sequences are learned later in time.
+    \textbf{c}: We plot number of appearances required to reach 90\% accuracy (i.e. accuracy at the last iteration) for a given model size 
+    as a function of rank. If the model is not able to learn a sequence, we define 
+    this number as 100000. 
+    We can see that sequences at higher ranks are learned in fewer presentations to the model (due to the Zipfian distribution), 
+    even though higher rank sequences are learned later in time.
+    This plot makes clear the limited capacity of the model to learn in the finite number of iterations. \gr{In this figure, we need to make three main points: (a) that larger models memorize more sequences, (b) that larger models memorize sequences of the same rank with fewer number of iterations, and (c) that larger models memorize sequences of the same rank with fewer number of appearances.}
+    \gr{Comments: (1) Are you sure the x-axis is sequence rank plus one, and not just sequence rank? (2) In panel a, is the second to largest model learning better than the largest model? (3) In panel b, filter out the sequences that have not been memorized and instead of panel (c), we can plot how many memorizes have reached saturation as a function of model size. The order of panels will then have to be changed. (4) Usual comment about larger label font sizes. Also, the legend has to be fixed (specify base 10, use one legend for all three panels, fewer significant digits, etc).}
+    }
+    \label{fig:iterations-to-saturation-panel}
+\end{figure}
+% \textbf{Transformers can memorize all sequences after the switch}: After the switch, sequences of all ranks are learned in a similar number of iterations  (for a large model)
+% In a small model, we still see a nonmonotonic effect: sequences of middle rank are learned in the fewest number of iterations. 
+
+% \begin{figure}[h]
+%     \centering
+%     \includegraphics[width=1\linewidth]{images/fig-large-model-switching-exp-pre-post-sequences.png}
+%     \caption{Large model (24 heads 36 layers) - Zooming into first 5000 appearances}
+%     \label{fig:placeholder}
+% \end{figure}
+
+\textbf{Points we want to make a) As expected larger models memorize more sequences. b) Larger models learn faster both when you measure the iteration and the number of appearances.}
+
+\textbf{TO DO: 0) Make the plots production ready (correct legend, axis labels, title, make the lines thicker etc). a) Panel that shows number of sequences memorized increases as model size increases. Panels b-c) should be current panels A and B. Cut off the plots at ranks 10 to the 4}
+
+In the previous experiment, we showed that larger models learn 
+higher rank sequences later in time (i.e. at a later iteration) but 
+with fewer number of presentations to the model.
+There was a confound between the iteration at which the model learns a sequence and the number of presentations to the model, 
+induced by the Zipfian distribution in ranks.
+In order to disentangle these effects, we 
+perform a new experiment where we switch the sequences halfway through training. 
+Therefore, the model has to learn entirely new sequences after the switch, 
+eveen through the Zipfian rank distribution of the sequences remains the same.
+If the model learns to memorize the new sequences faster, we 
+hypothesize that the model should learn the new sequences in fewer iterations than the old sequences, controlling 
+for their rank.
+In the following figure, we plot the average accuracy of sequences of different ranks as a function of iterations.
+We see that after the switch, the model learns the new sequences in fewer iterations than the old sequences, controlling 
+for their rank. This confirms our hypothesis that the model has learned to memorize.
+Furthermore, after the switch, the model can learn more sequences in the same number of iterations, i.e. 
+it can learn sequences at a higher rank in the same number of iterations.
+Larger models also learn faster and have higher capacity to learn more sequences after the switch.
+\begin{figure}[H]
+    \centering
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-switching-ranks-0-500.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-switching-ranks-500-1000.png}
+    }\\
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-switching-ranks-1000-1500.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-switching-ranks-1500-2000.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-switching-ranks-2000-2500.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-switching-ranks-2500-3000.png}
+    } 
+    \caption{Average accuracy of sequences of different ranks as a function of iterations. 
+    The sequences are sampled from a Zipfian distribution with probability proportional to their rank.
+    Different colors represent different models with different number of parameters (shown in log 10 scale). 
+    We observe that for a fixed rank, larger models learn the sequences to higher accuracy (higher capacity). 
+    We also observe that for a fixed rank, larger models learn the sequences faster (higher speed), i.e. 
+    they reach the same accuracy in fewer iterations. 
+    Halfway through training, we switch the sequences. 
+    Therefore accuracy of sequences of the same rank drops back to chance level (0.5), 
+    before starting to increase again as the model learns the new sequences. 
+    We note that after the switch, the model learns the new sequences faster, i.e. 
+    it reaches the same accuracy in fewer iterations. 
+    Furthermore, after the switch, the model can learn more sequences in the same number of iterations, i.e. 
+    it can learn sequences at a higher rank in the same number of iterations. 
+    Larger models also learn faster and have higher capacity to learn more sequences after the switch. \gr{(1) I would show fewer panels instead of six. Perhaps (a), (c), (e) or even just (a)? The rest can go in the Supplementary. (2) Show vertical line and write text on the plot that dataset was switched at that point. (3) The same colors for the different models as in Figure 2. (4) One legend for all panels, legend goes inside the panel and there should be a legend title saying it is $\log_{10} (\text{params})$.}
+    }
+    \label{fig:switching-ranks-panel}
+\end{figure}
+
+\textbf{TO DO: a) Recompute accuracy for ranks 0-1000,1000-2000,2000-3000. b) Plot should have 3 panels of these ranks arranged in 1 row. c) Use same color scheme as in Figure 2. d) Show vertical bar when the switch happens. Write text "Dataset switch" in the first panel.} 
+
+\subsection{Probing}
+\subsubsection{One-layer attention model recapitulates the phenomena of memorization}
+
+We have shown that transformers learn to memorize: as training progresses, they  
+can learn new sequences faster and can learn more sequences in the same number of iterations, i.e. higher 
+speed of learning and higher capacity to learn.
+We now want to probe the model to understand how it learns to memorize. 
+We hypothesize that the model learns to memorize  
+by developing structural mechanisms that 
+allow it to learn more quickly. 
+To localize these mechanisms, we 
+develop a simplified transformer model that reproduces the phenomenology of memorization.
+The model has a one-layer attention mechanism followed by a 3-layer MLP.
+The attention mechanism is a standard transformer attention mechanism.
+The MLP is a 3-layer MLP with 1024 hidden units.
+The model is trained on a dataset of 100000 sequences of length 100 following the Zipfian distribution.
+
+First we show that the one-layer attention model recapitulates the phenomena of memorization.
+
+\textbf{Claim: One-layer attention model recapitulates the phenomena of memorization}
+
+\textbf{Claim: One-layer attention model learns to memorize faster after the switch}: 
+After the switch, the model learns equirank sequences faster 
+(i.e. A sequence of rank k is learned faster post-switch than a pre-switch rank k sequence)
+
+\textbf{Claim:One-layer attention model can memorize more sequences after the switch}: 
+After the switch, the model can learn more sequences in the same number of iterations
+
+\subsubsection{Probe sequences show that as training proceeds, the attention heads present more informative input into the MLP}
+
+We hypothesize that within the transformer architecture, the 
+attention heads develop structural mechanisms that allow them to learn to memorize faster.
+To test this hypothesis, every epoch (50 iterations), 
+we fork the model, freeze the attention weights and train the MLP weights on a new 
+dataset of 1000 probe sequences.
+On the left, we show the average accuracy of the model on the probe sequences as a function of iterations
+and model size. 
+On the right, we show the number of probe iterations required to learn the probe sequences to 90\% accuracy as a function of model size
+and as the model training iterations.
+\begin{figure}[H]
+    \centering
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-probe-accuracy.png}
+    }
+    \subfigure[]{
+        \includegraphics[width=0.48\linewidth]{images/fig-probe-number-iterations.png}
+    }
+    \caption{Accuracy of the model on the probe sequences as a function of iterations. \gr{I think both panels give roughly the same information. Can we make these more concise? Perhaps instead of two heat maps, we can show a scatter plot with x-axis as the log of the number of parameters, and the y-axis the probe accuracy and the number of iterations (with a twin axis) after 1000 and/or 2000 iterations. This figure will then have one plot rather than two heatmaps.}}
+    \label{fig:probe-accuracy-panel}
+\end{figure}
+
+\textbf{TO DO: Panel b for new figure will show attention weight set to 0. Panel c) Show the rescue experiments. Stack the panels vertically, so we should make them rectangles}
+
+\textbf{TO DO: Decorrelation of attention heads plots can go into the supplementary.}
+
+We see that as the model learns better attention weights, 
+the model can learn to memorize the probe sequences faster. 
+i.e. The number of probe iterations required to learn the probe sequences to 90\% accuracy is reduced.
+However, this is only true for larger models. Smaller models 
+are incapable of learning.
+
+\subsubsection{If we set attention weights to zero, model does not memorize}
+\textbf{Claim: If we initialize attention weights to zero and fix it at zero, the model does not memorize.} 
+\textcolor{red}{To Do: Analyze \text{memo\_jan4\_fork\_progress\_set\_attn\_weights\_to\_zero\_K\_100000}.}
+
+\textbf{Claim: If we initialize attention weights to zero and allow them to learn, the model ??.} 
+\textcolor{red}{To Do: Analyze \text{memo\_jan4\_fork\_progress\_set\_zero\_all\_attn\_allow\_learning\_K\_100000}.}
+Make the same plots as the above subsection.     
+
+\subsubsection{After the swap phase, the model has catastrophically forgotten the sequences it learned pre-switch}
+
+
+\subsection{Phenomenological Model of Memorization}
+ 
+Suppose our dataset has $K$ sequences, $\xi^{(1)}, \xi^{(2)}, \ldots, \xi^{(K)}$ 
+
+The probability of drawing sequence $\alpha$ is $p_{\alpha}$. 
+
+Each sequence has $N$ bits, where each bit is $\pm 1$.
+
+The dataset is generated by sampling each bit in each sequence uniformly and independently. 
+
+We denote $\xi_{n}^{(\alpha)}$ as the state of the $n$th bit in the $\alpha$th sequence. 
+
+
+We will use Greek letters to indicate sequence index and Latin letters to indicate positions within a sequence. 
+
+\clearpage 
+We would like to model the probability that the transformer correctly predicts the $n+1$th bit of a given sequence $\zeta$, given the prefix $\zeta_{0:n}$, denoted $P(\zeta_{n+1}= +1 | \zeta_{0:n})$. 
+
+Suppose the model has a dense associative memory (DAM) with a capacity to store at most $M$ binary sequences of length $N$ ($M$ can be thought of as much greater than $K$).
+
+The $M$ sequences $\chi_1,\chi_2,\dots,\chi_M$ are stored in the DAM as $H$-dimensional vectors  $\varphi_1,\varphi_2,\dots,\varphi_M$,
+
+$\mkern 50mu \bullet $ where $\varphi_{\mu} = B \chi_{\mu}$  for $\mu = 1,2,\dots, M$. 
+
+$\mkern 50mu \bullet $ where $H$ can be thought of as the number of heads in the transformer. 
+
+
+The $H\times N$ matrix $B$ can be thought of as the key matrix, important for encoding each sequence for storage into the DAM.
+
+% is normalized such that all its elements are non-negative and the elements of each row sum to one. 
+
+The state of the DAM at a particular time $t$ is summarized by the set of sequences stored in it, $\mathcal{M}_t = (\chi^{(1)},\chi^{(2)},\dots,\chi^{(M)})$. 
+
+
+The procedure for updating the DAM is discussed further below. 
+
+During retrieval, the model is given $\zeta_{0:n}$ (i.e. the first $n$ bits in the sequence) and it has to predict the $n+1$-th bit.
+
+We assume the model computes the $H$ dimensional vector $\hat{\varphi}$:
+\begin{align}
+\hat{\varphi} = \sum_{i=1}^n A_{i}(n) \zeta_i,
+\end{align}
+
+where $A(n)$ is a query $H \times n$ matrix such that $A_i(n) \ge 0$ and $\sum_{i = 1}^n A_i(n) = \bm{1}$, 
+where $\bm{1}$ is a length $H$ vector of all ones. 
+
+One can view each row of $A_i(n)$ as a position-specific attention map.  
+
+% This model has $H$ attention heads. 
+
+% The $n$ dependence is included to highlight that 
+
+The attention maps are in general dependent on the length of the sequence unmasked thus far. 
+
+\textbf{Predicting the next bit:} 
+
+Given the cue (i.e. partial sequence) $\zeta_{0:n}$, the probability of retrieving sequence $\mu$ from the DAM is 
+\begin{align}
+\pi_{\mu} = \frac{e^{\eta \hat{\varphi}^T \varphi_{\mu} }}{\sum_{\mu'} e^{\eta \hat{\varphi}^T \varphi_{\mu'} }} = \frac{e^{\eta \zeta_{0:n}^T A(n)^T B \chi_{\mu} }}{\sum_{\mu'} e^{\eta \zeta_{0:n}^T A(n)^T B \chi_{\mu'}  }},
+\end{align}
+where $\eta$ is a fixed positive constant, serving as the temperature.
+
+Equation 2 is just the softmax equation.
+
+The probability that the model assigns to the $n+1$th bit being $+1$ is given by
+\begin{align}
+P(\zeta_{n+1}= +1 | \zeta_{0:n}) = \sum_{\mu \in M_{n+1}^{+}} \pi_{\mu},
+\end{align}
+where $M_n^{+}$ is the set of sequences in the DAM that have $+1$ at the $n$th position. 
+
+The interpretation is that the model first computes a probability distribution $\pi$ over sequences in the DAM based on their match with the observed partial sequence $\zeta_{0:n}$, and predicts the next bit by computing the total probability of those sequences that have a $+1$ bit in the $n+1$th location. That is, this is a two-step Bayes-like procedure, where a Bayesian posterior over possible sequences is replaced by a distribution generated from one DAM retrieval step. 
+
+\textbf{Updating the DAM:} The DAM is structured as a queue. That is, once the full sequence $\zeta$ is observed, the DAM is updated by adding $\zeta$ as the last element. If the queue is full (i.e., it has $M$ sequences in it), the first element is removed when $\zeta$ is added. 
+
+\clearpage
+
+\textbf{Updating $A,B$:} 
+
+% This is a continual learning setup. 
+
+If sequence $\xi^{(\alpha)}$ is drawn (with probability $p_{\alpha}$), the loss at step $t$ during training is
+\begin{align}
+\mathcal{L}_t(\alpha; A(n), B, \mathcal{M}_t) = \left( \frac{1}{N} \sum_{n=0}^{N-1} \mathcal {L}_{\text{BCE}}( {\alpha,n} ; A(n), B, \mathcal{M}_t)\right),
+\end{align} where $\mathcal {L}_{\text{BCE}}(\alpha, n; A(n), B, \mathcal{M}_t)$ is the binary cross-entropy loss of predicting the $n+1$th bit of sequence $\xi^{(\alpha)}$ given $A(n), B$ and the current state of the DAM $\mathcal{M}_t$. 
+
+% In practice, it is reasonable to 
+
+In our simulations, we use batched learning: We compute the loss over a batch of sequences and add these sequences together to the DAM after the update. 
+
+We loop through $n=1,\ldots,N$
+
+\section{Boilerplate}
+Submission to ICML 2025 will be entirely electronic, via a web site
+(not email). Information about the submission process and \LaTeX\ templates
+are available on the conference web site at:
+\begin{center}
+\textbf{\texttt{http://icml.cc/}}
+\end{center}
+
+The guidelines below will be enforced for initial submissions and
+camera-ready copies. Here is a brief summary:
+\begin{itemize}
+\item Submissions must be in PDF\@. 
+\item If your paper has appendices, submit the appendix together with the main body and the references \textbf{as a single file}. Reviewers will not look for appendices as a separate PDF file. So if you submit such an extra file, reviewers will very likely miss it.
+\item Page limit: The main body of the paper has to be fitted to 8 pages, excluding references and appendices; the space for the latter two is not limited in pages, but the total file size may not exceed 10MB. For the final version of the paper, authors can add one extra page to the main body.
+\item \textbf{Do not include author information or acknowledgements} in your
+    initial submission.
+\item Your paper should be in \textbf{10 point Times font}.
+\item Make sure your PDF file only uses Type-1 fonts.
+\item Place figure captions \emph{under} the figure (and omit titles from inside
+    the graphic file itself). Place table captions \emph{over} the table.
+\item References must include page numbers whenever possible and be as complete
+    as possible. Place multiple citations in chronological order.
+\item Do not alter the style template; in particular, do not compress the paper
+    format by reducing the vertical spaces.
+\item Keep your abstract brief and self-contained, one paragraph and roughly
+    4--6 sentences. Gross violations will require correction at the
+    camera-ready phase. The title should have content words capitalized.
+\end{itemize}
+
+\subsection{Submitting Papers}
+
+\textbf{Anonymous Submission:} ICML uses double-blind review: no identifying
+author information may appear on the title page or in the paper
+itself. \cref{author info} gives further details.
+
+\medskip
+
+Authors must provide their manuscripts in \textbf{PDF} format.
+Furthermore, please make sure that files contain only embedded Type-1 fonts
+(e.g.,~using the program \texttt{pdffonts} in linux or using
+File/DocumentProperties/Fonts in Acrobat). Other fonts (like Type-3)
+might come from graphics files imported into the document.
+
+Authors using \textbf{Word} must convert their document to PDF\@. Most
+of the latest versions of Word have the facility to do this
+automatically. Submissions will not be accepted in Word format or any
+format other than PDF\@. Really. We're not joking. Don't send Word.
+
+Those who use \textbf{\LaTeX} should avoid including Type-3 fonts.
+Those using \texttt{latex} and \texttt{dvips} may need the following
+two commands:
+
+{\footnotesize
+\begin{verbatim}
+dvips -Ppdf -tletter -G0 -o paper.ps paper.dvi
+ps2pdf paper.ps
+\end{verbatim}}
+It is a zero following the ``-G'', which tells dvips to use
+the config.pdf file. Newer \TeX\ distributions don't always need this
+option.
+
+Using \texttt{pdflatex} rather than \texttt{latex}, often gives better
+results. This program avoids the Type-3 font problem, and supports more
+advanced features in the \texttt{microtype} package.
+
+\textbf{Graphics files} should be a reasonable size, and included from
+an appropriate format. Use vector formats (.eps/.pdf) for plots,
+lossless bitmap formats (.png) for raster graphics with sharp lines, and
+jpeg for photo-like images.
+
+The style file uses the \texttt{hyperref} package to make clickable
+links in documents. If this causes problems for you, add
+\texttt{nohyperref} as one of the options to the \texttt{icml2025}
+usepackage statement.
+
+
+\subsection{Submitting Final Camera-Ready Copy}
+
+The final versions of papers accepted for publication should follow the
+same format and naming convention as initial submissions, except that
+author information (names and affiliations) should be given. See
+\cref{final author} for formatting instructions.
+
+The footnote, ``Preliminary work. Under review by the International
+Conference on Machine Learning (ICML). Do not distribute.'' must be
+modified to ``\textit{Proceedings of the
+$\mathit{42}^{nd}$ International Conference on Machine Learning},
+Vancouver, Canada, PMLR 267, 2025.
+Copyright 2025 by the author(s).''
+
+For those using the \textbf{\LaTeX} style file, this change (and others) is
+handled automatically by simply changing
+$\mathtt{\backslash usepackage\{icml2025\}}$ to
+$$\mathtt{\backslash usepackage[accepted]\{icml2025\}}$$
+Authors using \textbf{Word} must edit the
+footnote on the first page of the document themselves.
+
+Camera-ready copies should have the title of the paper as running head
+on each page except the first one. The running title consists of a
+single line centered above a horizontal rule which is $1$~point thick.
+The running head should be centered, bold and in $9$~point type. The
+rule should be $10$~points above the main text. For those using the
+\textbf{\LaTeX} style file, the original title is automatically set as running
+head using the \texttt{fancyhdr} package which is included in the ICML
+2025 style file package. In case that the original title exceeds the
+size restrictions, a shorter form can be supplied by using
+
+\verb|\icmltitlerunning{...}|
+
+just before $\mathtt{\backslash begin\{document\}}$.
+Authors using \textbf{Word} must edit the header of the document themselves.
+
+\section{Format of the Paper}
+
+All submissions must follow the specified format.
+
+\subsection{Dimensions}
+
+
+
+
+The text of the paper should be formatted in two columns, with an
+overall width of 6.75~inches, height of 9.0~inches, and 0.25~inches
+between the columns. The left margin should be 0.75~inches and the top
+margin 1.0~inch (2.54~cm). The right and bottom margins will depend on
+whether you print on US letter or A4 paper, but all final versions
+must be produced for US letter size.
+Do not write anything on the margins.
+
+The paper body should be set in 10~point type with a vertical spacing
+of 11~points. Please use Times typeface throughout the text.
+
+\subsection{Title}
+
+The paper title should be set in 14~point bold type and centered
+between two horizontal rules that are 1~point thick, with 1.0~inch
+between the top rule and the top edge of the page. Capitalize the
+first letter of content words and put the rest of the title in lower
+case.
+
+\subsection{Author Information for Submission}
+\label{author info}
+
+ICML uses double-blind review, so author information must not appear. If
+you are using \LaTeX\/ and the \texttt{icml2025.sty} file, use
+\verb+\icmlauthor{...}+ to specify authors and \verb+\icmlaffiliation{...}+ to specify affiliations. (Read the TeX code used to produce this document for an example usage.) The author information
+will not be printed unless \texttt{accepted} is passed as an argument to the
+style file.
+Submissions that include the author information will not
+be reviewed.
+
+\subsubsection{Self-Citations}
+
+If you are citing published papers for which you are an author, refer
+to yourself in the third person. In particular, do not use phrases
+that reveal your identity (e.g., ``in previous work \cite{langley00}, we
+have shown \ldots'').
+
+Do not anonymize citations in the reference section. The only exception are manuscripts that are
+not yet published (e.g., under submission). If you choose to refer to
+such unpublished manuscripts \cite{anonymous}, anonymized copies have
+to be submitted
+as Supplementary Material via OpenReview\@. However, keep in mind that an ICML
+paper should be self contained and should contain sufficient detail
+for the reviewers to evaluate the work. In particular, reviewers are
+not required to look at the Supplementary Material when writing their
+review (they are not required to look at more than the first $8$ pages of the submitted document).
+
+\subsubsection{Camera-Ready Author Information}
+\label{final author}
+
+If a paper is accepted, a final camera-ready copy must be prepared.
+%
+For camera-ready papers, author information should start 0.3~inches below the
+bottom rule surrounding the title. The authors' names should appear in 10~point
+bold type, in a row, separated by white space, and centered. Author names should
+not be broken across lines. Unbolded superscripted numbers, starting 1, should
+be used to refer to affiliations.
+
+Affiliations should be numbered in the order of appearance. A single footnote
+block of text should be used to list all the affiliations. (Academic
+affiliations should list Department, University, City, State/Region, Country.
+Similarly for industrial affiliations.)
+
+Each distinct affiliations should be listed once. If an author has multiple
+affiliations, multiple superscripts should be placed after the name, separated
+by thin spaces. If the authors would like to highlight equal contribution by
+multiple first authors, those authors should have an asterisk placed after their
+name in superscript, and the term ``\textsuperscript{*}Equal contribution"
+should be placed in the footnote block ahead of the list of affiliations. A
+list of corresponding authors and their emails (in the format Full Name
+\textless{}email@domain.com\textgreater{}) can follow the list of affiliations.
+Ideally only one or two names should be listed.
+
+A sample file with author names is included in the ICML2025 style file
+package. Turn on the \texttt{[accepted]} option to the stylefile to
+see the names rendered. All of the guidelines above are implemented
+by the \LaTeX\ style file.
+
+\subsection{Abstract}
+
+The paper abstract should begin in the left column, 0.4~inches below the final
+address. The heading `Abstract' should be centered, bold, and in 11~point type.
+The abstract body should use 10~point type, with a vertical spacing of
+11~points, and should be indented 0.25~inches more than normal on left-hand and
+right-hand margins. Insert 0.4~inches of blank space after the body. Keep your
+abstract brief and self-contained, limiting it to one paragraph and roughly 4--6
+sentences. Gross violations will require correction at the camera-ready phase.
+
+\subsection{Partitioning the Text}
+
+You should organize your paper into sections and paragraphs to help
+readers place a structure on the material and understand its
+contributions.
+
+\subsubsection{Sections and Subsections}
+
+Section headings should be numbered, flush left, and set in 11~pt bold
+type with the content words capitalized. Leave 0.25~inches of space
+before the heading and 0.15~inches after the heading.
+
+Similarly, subsection headings should be numbered, flush left, and set
+in 10~pt bold type with the content words capitalized. Leave
+0.2~inches of space before the heading and 0.13~inches afterward.
+
+Finally, subsubsection headings should be numbered, flush left, and
+set in 10~pt small caps with the content words capitalized. Leave
+0.18~inches of space before the heading and 0.1~inches after the
+heading.
+
+Please use no more than three levels of headings.
+
+\subsubsection{Paragraphs and Footnotes}
+
+Within each section or subsection, you should further partition the
+paper into paragraphs. Do not indent the first line of a given
+paragraph, but insert a blank line between succeeding ones.
+
+You can use footnotes\footnote{Footnotes
+should be complete sentences.} to provide readers with additional
+information about a topic without interrupting the flow of the paper.
+Indicate footnotes with a number in the text where the point is most
+relevant. Place the footnote in 9~point type at the bottom of the
+column in which it appears. Precede the first footnote in a column
+with a horizontal rule of 0.8~inches.\footnote{Multiple footnotes can
+appear in each column, in the same order as they appear in the text,
+but spread them across columns and pages if possible.}
+
+\begin{figure}[ht]
+\vskip 0.2in
+\begin{center}
+\centerline{\includegraphics[width=\columnwidth]{icml_numpapers}}
+\caption{Historical locations and number of accepted papers for International
+Machine Learning Conferences (ICML 1993 -- ICML 2008) and International
+Workshops on Machine Learning (ML 1988 -- ML 1992). At the time this figure was
+produced, the number of accepted papers for ICML 2008 was unknown and instead
+estimated.}
+\label{icml-historical}
+\end{center}
+\vskip -0.2in
+\end{figure}
+
+\subsection{Figures}
+
+You may want to include figures in the paper to illustrate
+your approach and results. Such artwork should be centered,
+legible, and separated from the text. Lines should be dark and at
+least 0.5~points thick for purposes of reproduction, and text should
+not appear on a gray background.
+
+Label all distinct components of each figure. If the figure takes the
+form of a graph, then give a name for each axis and include a legend
+that briefly describes each curve. Do not include a title inside the
+figure; instead, the caption should serve this function.
+
+Number figures sequentially, placing the figure number and caption
+\emph{after} the graphics, with at least 0.1~inches of space before
+the caption and 0.1~inches after it, as in
+\cref{icml-historical}. The figure caption should be set in
+9~point type and centered unless it runs two or more lines, in which
+case it should be flush left. You may float figures to the top or
+bottom of a column, and you may set wide figures across both columns
+(use the environment \texttt{figure*} in \LaTeX). Always place
+two-column figures at the top or bottom of the page.
+
+\subsection{Algorithms}
+
+If you are using \LaTeX, please use the ``algorithm'' and ``algorithmic''
+environments to format pseudocode. These require
+the corresponding stylefiles, algorithm.sty and
+algorithmic.sty, which are supplied with this package.
+\cref{alg:example} shows an example.
+
+\begin{algorithm}[tb]
+   \caption{Bubble Sort}
+   \label{alg:example}
+\begin{algorithmic}
+   \STATE {\bfseries Input:} data $x_i$, size $m$
+   \REPEAT
+   \STATE Initialize $noChange = true$.
+   \FOR{$i=1$ {\bfseries to} $m-1$}
+   \IF{$x_i > x_{i+1}$}
+   \STATE Swap $x_i$ and $x_{i+1}$
+   \STATE $noChange = false$
+   \ENDIF
+   \ENDFOR
+   \UNTIL{$noChange$ is $true$}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Tables}
+
+You may also want to include tables that summarize material. Like
+figures, these should be centered, legible, and numbered consecutively.
+However, place the title \emph{above} the table with at least
+0.1~inches of space before the title and the same after it, as in
+\cref{sample-table}. The table title should be set in 9~point
+type and centered unless it runs two or more lines, in which case it
+should be flush left.
+
+% Note use of \abovespace and \belowspace to get reasonable spacing
+% above and below tabular lines.
+
+\begin{table}[t]
+\caption{Classification accuracies for naive Bayes and flexible
+Bayes on various data sets.}
+\label{sample-table}
+\vskip 0.15in
+\begin{center}
+\begin{small}
+\begin{sc}
+\begin{tabular}{lcccr}
+\toprule
+Data set & Naive & Flexible & Better? \\
+\midrule
+Breast    & 95.9$\pm$ 0.2& 96.7$\pm$ 0.2& $\surd$ \\
+Cleveland & 83.3$\pm$ 0.6& 80.0$\pm$ 0.6& $\times$\\
+Glass2    & 61.9$\pm$ 1.4& 83.8$\pm$ 0.7& $\surd$ \\
+Credit    & 74.8$\pm$ 0.5& 78.3$\pm$ 0.6&         \\
+Horse     & 73.3$\pm$ 0.9& 69.7$\pm$ 1.0& $\times$\\
+Meta      & 67.1$\pm$ 0.6& 76.5$\pm$ 0.5& $\surd$ \\
+Pima      & 75.1$\pm$ 0.6& 73.9$\pm$ 0.5&         \\
+Vehicle   & 44.9$\pm$ 0.6& 61.5$\pm$ 0.4& $\surd$ \\
+\bottomrule
+\end{tabular}
+\end{sc}
+\end{small}
+\end{center}
+\vskip -0.1in
+\end{table}
+
+Tables contain textual material, whereas figures contain graphical material.
+Specify the contents of each row and column in the table's topmost
+row. Again, you may float tables to a column's top or bottom, and set
+wide tables across both columns. Place two-column tables at the
+top or bottom of the page.
+
+\subsection{Theorems and such}
+The preferred way is to number definitions, propositions, lemmas, etc. consecutively, within sections, as shown below.
+\begin{definition}
+\label{def:inj}
+A function $f:X \to Y$ is injective if for any $x,y\in X$ different, $f(x)\ne f(y)$.
+\end{definition}
+Using \cref{def:inj} we immediate get the following result:
+\begin{proposition}
+If $f$ is injective mapping a set $X$ to another set $Y$, 
+the cardinality of $Y$ is at least as large as that of $X$
+\end{proposition}
+\begin{proof} 
+Left as an exercise to the reader. 
+\end{proof}
+\cref{lem:usefullemma} stated next will prove to be useful.
+\begin{lemma}
+\label{lem:usefullemma}
+For any $f:X \to Y$ and $g:Y\to Z$ injective functions, $f \circ g$ is injective.
+\end{lemma}
+\begin{theorem}
+\label{thm:bigtheorem}
+If $f:X\to Y$ is bijective, the cardinality of $X$ and $Y$ are the same.
+\end{theorem}
+An easy corollary of \cref{thm:bigtheorem} is the following:
+\begin{corollary}
+If $f:X\to Y$ is bijective, 
+the cardinality of $X$ is at least as large as that of $Y$.
+\end{corollary}
+\begin{assumption}
+The set $X$ is finite.
+\label{ass:xfinite}
+\end{assumption}
+\begin{remark}
+According to some, it is only the finite case (cf. \cref{ass:xfinite}) that is interesting.
+\end{remark}
+%restatable
+
+\subsection{Citations and References}
+
+Please use APA reference format regardless of your formatter
+or word processor. If you rely on the \LaTeX\/ bibliographic
+facility, use \texttt{natbib.sty} and \texttt{icml2025.bst}
+included in the style-file package to obtain this format.
+
+Citations within the text should include the authors' last names and
+year. If the authors' names are included in the sentence, place only
+the year in parentheses, for example when referencing Arthur Samuel's
+pioneering work \yrcite{Samuel59}. Otherwise place the entire
+reference in parentheses with the authors and year separated by a
+comma \cite{Samuel59}. List multiple references separated by
+semicolons \cite{kearns89,Samuel59,mitchell80}. Use the `et~al.'
+construct only for citations with three or more authors or after
+listing all authors to a publication in an earlier reference \cite{MachineLearningI}.
+
+Authors should cite their own work in the third person
+in the initial version of their paper submitted for blind review.
+Please refer to \cref{author info} for detailed instructions on how to
+cite your own papers.
+
+Use an unnumbered first-level section heading for the references, and use a
+hanging indent style, with the first line of the reference flush against the
+left margin and subsequent lines indented by 10 points. The references at the
+end of this document give examples for journal articles \cite{Samuel59},
+conference publications \cite{langley00}, book chapters \cite{Newell81}, books
+\cite{DudaHart2nd}, edited volumes \cite{MachineLearningI}, technical reports
+\cite{mitchell80}, and dissertations \cite{kearns89}.
+
+Alphabetize references by the surnames of the first authors, with
+single author entries preceding multiple author entries. Order
+references for the same authors by year of publication, with the
+earliest first. Make sure that each reference includes all relevant
+information (e.g., page numbers).
+
+Please put some effort into making references complete, presentable, and
+consistent, e.g. use the actual current name of authors.
+If using bibtex, please protect capital letters of names and
+abbreviations in titles, for example, use \{B\}ayesian or \{L\}ipschitz
+in your .bib file.
+
+\section*{Accessibility}
+Authors are kindly asked to make their submissions as accessible as possible for everyone including people with disabilities and sensory or neurological differences.
+Tips of how to achieve this and what to pay attention to will be provided on the conference website \url{http://icml.cc/}.
+
+\section*{Software and Data}
+
+If a paper is accepted, we strongly encourage the publication of software and data with the
+camera-ready version of the paper whenever appropriate. This can be
+done by including a URL in the camera-ready copy. However, \textbf{do not}
+include URLs that reveal your institution or identity in your
+submission for review. Instead, provide an anonymous URL or upload
+the material as ``Supplementary Material'' into the OpenReview reviewing
+system. Note that reviewers are not required to look at this material
+when writing their review.
+
+% Acknowledgements should only appear in the accepted version.
+\section*{Acknowledgements}
+
+\textbf{Do not} include acknowledgements in the initial version of
+the paper submitted for blind review.
+
+If a paper is accepted, the final camera-ready version can (and
+usually should) include acknowledgements.  Such acknowledgements
+should be placed at the end of the section, in an unnumbered section
+that does not count towards the paper page limit. Typically, this will 
+include thanks to reviewers who gave useful comments, to colleagues 
+who contributed to the ideas, and to funding agencies and corporate 
+sponsors that provided financial support.
+
+\section*{Impact Statement}
+
+Authors are \textbf{required} to include a statement of the potential 
+broader impact of their work, including its ethical aspects and future 
+societal consequences. This statement should be in an unnumbered 
+section at the end of the paper (co-located with Acknowledgements -- 
+the two may appear in either order, but both must be before References), 
+and does not count toward the paper page limit. In many cases, where 
+the ethical impacts and expected societal implications are those that 
+are well established when advancing the field of Machine Learning, 
+substantial discussion is not required, and a simple statement such 
+as the following will suffice:
+
+``This paper presents work whose goal is to advance the field of 
+Machine Learning. There are many potential societal consequences 
+of our work, none which we feel must be specifically highlighted here.''
+
+The above statement can be used verbatim in such cases, but we 
+encourage authors to think about whether there is content which does 
+warrant further discussion, as this statement will be apparent if the 
+paper is later flagged for ethics review.
+
+
+% In the unusual situation where you want a paper to appear in the
+% references without citing it in the main text, use \nocite
+\nocite{langley00}
+
+\bibliography{example_paper}
+\bibliographystyle{icml2025}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% APPENDIX
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\newpage
+\appendix
+\onecolumn
+\section{You \emph{can} have an appendix here.}
+
+You can have as much text here as you want. The main body must be at most $8$ pages long.
+For the final version, one more page can be added.
+If you want, you can use an appendix like this one.  
+
+The $\mathtt{\backslash onecolumn}$ command above can be kept in place if you prefer a one-column appendix, or can be removed if you prefer a two-column appendix.  Apart from this possible change, the style (font size, spacing, margins, page numbering, etc.) should be kept the same as the main body.
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+
+\end{document}
+
+
+% This document was modified from the file originally made available by
+% Pat Langley and Andrea Danyluk for ICML-2K. This version was created
+% by Iain Murray in 2018, and modified by Alexandre Bouchard in
+% 2019 and 2021 and by Csaba Szepesvari, Gang Niu and Sivan Sabato in 2022.
+% Modified again in 2023 and 2024 by Sivan Sabato and Jonathan Scarlett.
+% Previous contributors include Dan Roy, Lise Getoor and Tobias
+% Scheffer, which was slightly modified from the 2010 version by
+% Thorsten Joachims & Johannes Fuernkranz, slightly modified from the
+% 2009 version by Kiri Wagstaff and Sam Roweis's 2008 version, which is
+% slightly modified from Prasad Tadepalli's 2007 version which is a
+% lightly changed version of the previous year's version by Andrew
+% Moore, which was in turn edited from those of Kristian Kersting and
+% Codrina Lauth. Alex Smola contributed to the algorithmic style files.
