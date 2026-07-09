@@ -15,11 +15,11 @@ hostname="$(hostname)"
 if [[ "$hostname" == *della* ]]; then
   python="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/python"
   venv_activate="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate"
-  savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
+  savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam/fewshot"
 else
   python="/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri/bin/python"
   venv_activate=""
-  savedir="/scratch/qanguyen/gautam"
+  savedir="/scratch/qanguyen/gautam/fewshot"
 fi
 
 if [[ ! -x "$python" ]]; then
@@ -47,13 +47,13 @@ print_python_diagnostics() {
 
 print_python_diagnostics
 
-num_heads_vals=(1 2 4 8)
-num_layers_vals=(1 2 4 8)
+num_heads_vals=(1 2 4 8 12 16)
+num_hidden_features_vals=(8 16 32 64 128 256)
 idx=${SLURM_ARRAY_TASK_ID:-0}
 num_heads=${num_heads_vals[$(( idx % ${#num_heads_vals[@]} ))]}
-num_layers=${num_layers_vals[$(( idx / ${#num_heads_vals[@]} ))]}
-
-fileprefix="regression_zipf_alpha1"
+num_hidden_features=${num_hidden_features_vals[$(( idx / ${#num_heads_vals[@]} ))]}
+arch="gpt"
+fileprefix="regression_${arch}_zipf"
 
 $python -u main.py \
   --savedir "$savedir" \
@@ -63,11 +63,11 @@ $python -u main.py \
   --optimizer Adam \
   --lr 1e-3 \
   --wd 0.0 \
-  --arch gpt \
+  --arch "$arch" \
   --gpt_bias True \
-  --num_hidden_features 16 \
+  --num_hidden_features "$num_hidden_features" \
   --num_heads "$num_heads" \
-  --num_layers "$num_layers" \
+  --num_layers 12 \
   --len_context 100 \
   --input_dim 16 \
   --noise_std 0.1 \

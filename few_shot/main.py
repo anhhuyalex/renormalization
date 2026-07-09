@@ -384,7 +384,6 @@ def main():
     optimizer = build_optimizer(args, model, lr=args.lr)
     train_loss_meter = utils.AverageMeter("train_mse", ":.4e")
 
-    seen_best_mse = None
     save_root = os.path.join(args.savedir, "cache", args.fileprefix)
     os.makedirs(save_root, exist_ok=True)
     timestamp = int(time.time())
@@ -396,7 +395,6 @@ def main():
         "pretraining_logs": [],
         "capacity_metrics": [],
         "generalization_metrics": [],
-        "interference_histories": [],
         "fewshot_adaptation": None,
     }
 
@@ -421,30 +419,6 @@ def main():
             args.batch_size,
             args.num_rank_buckets,
         )
-        seen_current = seen_metrics["per_task_mse"]
-        if seen_best_mse is None:
-            seen_best_mse = seen_current.copy()
-        seen_best_mse = np.minimum(seen_best_mse, seen_current)
-        interference = seen_current - seen_best_mse
-        interference_summary = {
-            "step": step,
-            "mean_interference": float(np.maximum(interference, 0.0).mean()),
-            "per_task_interference": interference,
-            "task_ids": seen_metrics["task_ids"],
-        }
-        if "rank_buckets" in seen_metrics:
-            bucket_values = []
-            for bucket in bucketize_indices(len(interference), args.num_rank_buckets):
-                ranks = seen_metrics["task_ids"][bucket]
-                bucket_values.append(
-                    {
-                        "rank_start": int(ranks[0]) + 1,
-                        "rank_end": int(ranks[-1]) + 1,
-                        "mean_interference": float(np.maximum(interference[bucket], 0.0).mean()),
-                    }
-                )
-            interference_summary["rank_buckets"] = bucket_values
-
         record["pretraining_logs"].append(
             {
                 "step": step,
@@ -456,7 +430,6 @@ def main():
         )
         record["capacity_metrics"].append({"step": step, **seen_metrics})
         record["generalization_metrics"].append({"step": step, **heldout_metrics})
-        record["interference_histories"].append(interference_summary)
         print(
             f"step {step:6d} train_mse {train_loss_meter.avg:.6f} "
             f"seen_mse {seen_metrics['overall_mse']:.6f} "

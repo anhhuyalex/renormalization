@@ -3,11 +3,20 @@
 This repo trains regression models on a finite pool of tasks sampled from a rank-frequency distribution, then measures:
 
 - capacity on seen tasks
-- interference on seen tasks over training
 - generalization to held-out tasks
 - few-shot adaptation via mixed fine-tuning batches and an MSE threshold
 
 The main entrypoint is [main.py](/jukebox/norman/qanguyen/renormalization/few_shot/main.py:1). The cluster launch example is [main.sh](/jukebox/norman/qanguyen/renormalization/few_shot/main.sh:1).
+
+## Training notes
+
+**Few-Shot Adaptation (Fine-Tuning)**
+After the main pretraining loop, the model can undergo a few-shot fine-tuning (adaptation) phase. This process evaluates how quickly the model adapts to a specific task or subset of tasks:
+- A new optimizer is instantiated using a dedicated adaptation learning rate (`--fewshot_lr`).
+- Fine-tuning runs for a maximum of `--fewshot_num_batches` steps.
+- In each step, the model trains on a batch sampled either from the fine-tuning tasks (with probability `--fewshot_mix_probability`) or from the original pretraining pool. This mixed-batch approach helps to mitigate catastrophic forgetting during adaptation.
+- Following each gradient update, the model is evaluated on a fixed fine-tuning evaluation set.
+- The primary metric recorded is the number of fine-tuning examples the model must see before its evaluation MSE drops below a predefined success threshold (`--fewshot_mse_threshold`).
 
 ## Quick Start
 
@@ -101,7 +110,6 @@ It stores:
 - pretraining logs
 - capacity metrics
 - held-out generalization metrics
-- interference histories
 - few-shot adaptation trace
 
 ## Important Flags
