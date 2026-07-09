@@ -16,6 +16,7 @@ import utils
 
 
 parser = argparse.ArgumentParser(description="Finite-task regression pretraining with few-shot fine-tuning eval")
+parser.add_argument("--experiment_name", default="default_exp", type=str, help="grouping name for experiments")
 parser.add_argument("--data", default="./data", help="unused legacy arg kept for compatibility")
 parser.add_argument("--cache", default="./cache", help="unused legacy arg kept for compatibility")
 parser.add_argument("--savedir", default=".", type=str, help="directory where results are written")
@@ -66,7 +67,7 @@ parser.add_argument("--fewshot_eval_batches", default=2, type=int, help="number 
 
 if utils.is_interactive():
     jupyter_args = (
-        "--savedir ./cache --fileprefix debug_regression --seed 0 --batch-size 32 "
+        "--savedir ./cache --experiment_name debug_group --fileprefix debug_regression --seed 0 --batch-size 32 "
         "--num_iters 200 --eval_every 50 --lr 1e-3 --len_context 16 --input_dim 8 --K 128 "
         "--task_distribution zipf --zipf_alpha 1.0 --num_eval_seen_tasks 64 --num_eval_heldout_tasks 64 "
         "--num_hidden_features 8 --num_layers 2 --num_heads 2 --fewshot_num_batches 10 "
@@ -76,6 +77,10 @@ if utils.is_interactive():
 else:
     args = parser.parse_args()
 
+if args.experiment_name == "gpt":
+    args.arch = "gpt"
+elif args.experiment_name == "OneLayer":
+    args.arch = "OneLayerAttention"
 
 def parse_bool(value):
     return str(value).lower() in {"1", "true", "yes", "y"}
@@ -384,11 +389,15 @@ def main():
     optimizer = build_optimizer(args, model, lr=args.lr)
     train_loss_meter = utils.AverageMeter("train_mse", ":.4e")
 
-    save_root = os.path.join(args.savedir, "cache", args.fileprefix)
-    os.makedirs(save_root, exist_ok=True)
+    experiment_group_dir = os.path.join(args.savedir, "cache", args.experiment_name)
+    os.makedirs(experiment_group_dir, exist_ok=True)
+    
     timestamp = int(time.time())
-    exp_name = f"{args.fileprefix}_K_{args.K}_L_{args.len_context}_H_{args.num_heads}_D_{args.num_layers}_{timestamp}.pkl"
-    exp_path = os.path.join(save_root, exp_name)
+    fileprefix = f"{args.experiment_name}_{args.fileprefix}_K_{args.K}_L_{args.len_context}_H_{args.num_heads}_D_{args.num_layers}_{timestamp}"
+    dirprefix = os.path.join(experiment_group_dir, fileprefix)
+    os.makedirs(dirprefix, exist_ok=True)
+    
+    exp_path = os.path.join(dirprefix, f"{fileprefix}.pkl")
     record = {
         "args": vars(args),
         "num_parameters": num_parameters,

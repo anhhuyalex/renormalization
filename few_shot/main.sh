@@ -5,9 +5,7 @@
 #SBATCH --time=72:00:00
 #SBATCH -o slurms/%j-regression.out
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-15
-
-set -euo pipefail
+#SBATCH --array=0-35
 
 source ~/.bashrc
 
@@ -52,24 +50,25 @@ num_hidden_features_vals=(8 16 32 64 128 256)
 idx=${SLURM_ARRAY_TASK_ID:-0}
 num_heads=${num_heads_vals[$(( idx % ${#num_heads_vals[@]} ))]}
 num_hidden_features=${num_hidden_features_vals[$(( idx / ${#num_heads_vals[@]} ))]}
-arch="gpt"
-fileprefix="regression_${arch}_zipf"
+# Set experiment_name to "gpt" or "OneLayer"
+experiment_name="gpt"
+fileprefix="regression_${experiment_name}_zipf"
 
 $python -u main.py \
   --savedir "$savedir" \
+  --experiment_name "$experiment_name" \
   --fileprefix "$fileprefix" \
   --seed "$idx" \
   --batch-size 256 \
   --optimizer Adam \
   --lr 1e-3 \
   --wd 0.0 \
-  --arch "$arch" \
   --gpt_bias True \
   --num_hidden_features "$num_hidden_features" \
   --num_heads "$num_heads" \
   --num_layers 12 \
   --len_context 100 \
-  --input_dim 16 \
+  --input_dim 64 \
   --noise_std 0.1 \
   --K 1000 \
   --task_distribution zipf \
