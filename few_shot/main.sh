@@ -51,8 +51,9 @@ idx=${SLURM_ARRAY_TASK_ID:-0}
 num_heads=${num_heads_vals[$(( idx % ${#num_heads_vals[@]} ))]}
 num_hidden_features=${num_hidden_features_vals[$(( idx / ${#num_heads_vals[@]} ))]}
 # Set experiment_name to "gpt" or "OneLayer"
-experiment_name="gpt"
-fileprefix="regression_${experiment_name}_zipf"
+K=100000
+experiment_name="OneLayer_K_${K}"
+fileprefix="regression_${experiment_name}_zipf_K_${K}"
 
 $python -u main.py \
   --savedir "$savedir" \
@@ -70,12 +71,13 @@ $python -u main.py \
   --len_context 100 \
   --input_dim 64 \
   --noise_std 0.1 \
-  --K 1000 \
+  --K "$K" \
   --task_distribution zipf \
   --zipf_alpha 1.0 \
-  --num_iters 50000 \
+  --num_iters 100000 \
   --eval_every 1000 \
-  --num_eval_seen_tasks 256 \
+  --num_eval_seen_tasks 100000 \
+  --eval_task_stride 10 \
   --num_eval_heldout_tasks 256 \
   --num_rank_buckets 5 \
   --fewshot_num_batches 50 \

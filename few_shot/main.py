@@ -44,6 +44,7 @@ parser.add_argument(
 )
 parser.add_argument("--zipf_alpha", default=1.0, type=float, help="Zipf skew parameter")
 parser.add_argument("--num_eval_seen_tasks", default=256, type=int, help="number of seen tasks used in capacity/interference eval")
+parser.add_argument("--eval_task_stride", type=int, default=1, help="stride for evaluating seen tasks")
 parser.add_argument("--num_eval_heldout_tasks", default=256, type=int, help="number of held-out tasks used in generalization eval")
 parser.add_argument("--num_rank_buckets", default=5, type=int, help="number of rank buckets for seen-task summaries")
 parser.add_argument("--num_hidden_features", default=32, type=int, help="per-head hidden width")
@@ -59,7 +60,9 @@ parser.add_argument(
     help="where fine-tuning tasks come from",
 )
 parser.add_argument("--fewshot_num_batches", default=50, type=int, help="number of adaptation batches")
-parser.add_argument("--fewshot_mix_probability", default=0.5, type=float, help="probability that an adaptation batch comes from the fine-tuning stream")
+parser.add_argument("--fewshot_mix_probability", default=12.0/256.0, type=float, help="probability that an item in adaptation batch comes from the fine-tuning stream")
+parser.add_argument("--num_finetune_tasks", default=50, type=int, help="number of fixed fine-tuning tasks")
+parser.add_argument("--steps_per_epoch", default=1000, type=int, help="number of pretraining gradient steps per epoch")
 parser.add_argument("--fewshot_mse_threshold", default=0.05, type=float, help="few-shot success threshold on fine-tuning eval MSE")
 parser.add_argument("--fewshot_eval_num_tasks", default=64, type=int, help="number of fixed tasks used in fine-tuning evaluation")
 parser.add_argument("--fewshot_eval_batches", default=2, type=int, help="number of evaluation batches per fine-tuning checkpoint")
@@ -77,9 +80,9 @@ if utils.is_interactive():
 else:
     args = parser.parse_args()
 
-if args.experiment_name == "gpt":
+if args.experiment_name in ["gpt", "gpt_K_100000"]:
     args.arch = "gpt"
-elif args.experiment_name == "OneLayer":
+elif args.experiment_name in ["OneLayer", "OneLayer_K_100000"]:
     args.arch = "OneLayerAttention"
 
 def parse_bool(value):
@@ -167,15 +170,18 @@ class FixedEvalSet:
     task_ranks: Optional[torch.Tensor] = None
 
 
-def make_seen_eval_set(task_pool, num_tasks, len_context, device):
+def make_seen_eval_set(task_pool, num_tasks, len_context, device, stride=1):
     num_tasks = min(num_tasks, task_pool.num_tasks)
     if task_pool.distribution == "zipf":
-        weights = task_pool.probabilities.cpu().numpy()
-        sampled = np.random.choice(task_pool.num_tasks, size=num_tasks, replace=False, p=weights / weights.sum())
-        task_ids = torch.as_tensor(np.sort(sampled), dtype=torch.long)
+        if stride > 1:
+            task_ids = torch.arange(0, num_tasks, stride, dtype=torch.long)
+        else:
+            weights = task_pool.probabilities.cpu().numpy()
+            sampled = np.random.choice(task_pool.num_tasks, size=num_tasks, replace=False, p=weights / weights.sum())
+            task_ids = torch.as_tensor(np.sort(sampled), dtype=torch.long)
     else:
-        task_ids = torch.arange(num_tasks, dtype=torch.long)
-    xs, ys, task_ids = task_pool.sample_batch(num_tasks, len_context, device, task_ids=task_ids)
+        task_ids = torch.arange(0, num_tasks, stride, dtype=torch.long)
+    xs, ys, task_ids = task_pool.sample_batch(len(task_ids), len_context, device, task_ids=task_ids)
     return FixedEvalSet(xs=xs, ys=ys, task_ids=task_ids, task_ranks=task_ids.detach().cpu())
 
 
@@ -278,53 +284,53 @@ def evaluate_pretraining(model, seen_eval_set, heldout_eval_set, batch_size, num
     return seen_metrics, heldout_metrics
 
 
-def run_fewshot_adaptation(args, device, base_model, train_pool, finetune_train_sampler, finetune_eval_set):
+def run_fewshot_adaptation(args, device, base_model, train_pool, finetune_task_pool):
     adapted_model = copy.deepcopy(base_model).to(device)
     optimizer = build_optimizer(args, adapted_model, lr=args.fewshot_lr)
-    cumulative_presentations = 0
-    threshold_crossed_at = None
-    trace = []
+    
+    num_tasks = finetune_task_pool.num_tasks
+    loss_trace = np.full((num_tasks, args.fewshot_num_batches), np.nan)
+    
     for batch_idx in range(args.fewshot_num_batches):
-        use_finetune = random.random() < args.fewshot_mix_probability
-        if use_finetune:
-            xs, ys, _ = finetune_train_sampler.sample_batch(args.fewshot_batch_size, args.len_context, device)
-            cumulative_presentations += xs.shape[0]
-        else:
-            xs, ys, _ = train_pool.sample_batch(args.fewshot_batch_size, args.len_context, device)
-
         adapted_model.train()
+        
+        num_finetune = np.random.binomial(args.fewshot_batch_size, args.fewshot_mix_probability)
+        num_pretrain = args.fewshot_batch_size - num_finetune
+        
+        xs_list, ys_list = [], []
+        tids_f = None
+        
+        if num_pretrain > 0:
+            xs_p, ys_p, _ = train_pool.sample_batch(num_pretrain, args.len_context, device)
+            xs_list.append(xs_p)
+            ys_list.append(ys_p)
+            
+        if num_finetune > 0:
+            xs_f, ys_f, tids_f = finetune_task_pool.sample_batch(num_finetune, args.len_context, device)
+            xs_list.append(xs_f)
+            ys_list.append(ys_f)
+            
+        xs = torch.cat(xs_list, dim=0)
+        ys = torch.cat(ys_list, dim=0)
+        
         optimizer.zero_grad()
         predictions = adapted_model(xs, ys)
-        loss = F.mse_loss(predictions, ys)
+        
+        # Calculate loss per sequence: shape (batch_size,)
+        per_seq_loss = ((predictions - ys) ** 2).mean(dim=(1, 2))
+        loss = per_seq_loss.mean()
         loss.backward()
         optimizer.step()
-
-        finetune_metrics = evaluate_fixed_set(
-            adapted_model,
-            finetune_eval_set,
-            args.fewshot_batch_size,
-            args.num_rank_buckets,
-        )
-        current_mse = finetune_metrics["overall_mse"]
-        if threshold_crossed_at is None and current_mse < args.fewshot_mse_threshold:
-            threshold_crossed_at = cumulative_presentations
-        trace.append(
-            {
-                "batch_idx": batch_idx,
-                "used_finetune_batch": use_finetune,
-                "batch_loss": float(loss.item()),
-                "cumulative_finetune_presentations": int(cumulative_presentations),
-                "finetune_eval_mse": float(current_mse),
-            }
-        )
-
-    final_mse = trace[-1]["finetune_eval_mse"] if trace else float("nan")
+        
+        if num_finetune > 0:
+            ft_losses = per_seq_loss[-num_finetune:].detach().cpu().numpy()
+            tids = tids_f.cpu().numpy()
+            for t_idx in np.unique(tids):
+                mask = (tids == t_idx)
+                loss_trace[t_idx, batch_idx] = ft_losses[mask].mean()
+                
     return {
-        "threshold_crossed": threshold_crossed_at is not None,
-        "presentations_to_threshold": threshold_crossed_at,
-        "final_finetune_eval_mse": final_mse,
-        "total_finetune_presentations": cumulative_presentations,
-        "trace": trace,
+        "loss_trace": loss_trace
     }
 
 
@@ -346,7 +352,7 @@ def main():
         zipf_alpha=args.zipf_alpha,
         seed=args.seed,
     )
-    seen_eval_set = make_seen_eval_set(train_pool, args.num_eval_seen_tasks, args.len_context, device)
+    seen_eval_set = make_seen_eval_set(train_pool, args.num_eval_seen_tasks, args.len_context, device, stride=args.eval_task_stride)
     heldout_eval_sampler = HeldoutTaskSampler(
         input_dim=args.input_dim,
         noise_std=args.noise_std,
@@ -355,34 +361,12 @@ def main():
     )
     heldout_eval_set = make_heldout_eval_set(heldout_eval_sampler, args.num_eval_heldout_tasks, args.len_context, device)
 
-    if args.fewshot_source == "heldout":
-        finetune_train_sampler = HeldoutTaskSampler(
-            input_dim=args.input_dim,
-            noise_std=args.noise_std,
-            num_tasks=args.fewshot_eval_num_tasks,
-            seed=args.seed + 2,
-        )
-        finetune_eval_set = make_heldout_eval_set(
-            finetune_train_sampler,
-            args.fewshot_eval_num_tasks,
-            args.len_context,
-            device,
-        )
-    else:
-        finetune_ids = torch.arange(min(args.fewshot_eval_num_tasks, args.K), dtype=torch.long)
-        xs, ys, task_ids = train_pool.sample_batch(len(finetune_ids), args.len_context, device, task_ids=finetune_ids)
-        finetune_eval_set = FixedEvalSet(xs=xs, ys=ys, task_ids=task_ids, task_ranks=task_ids.detach().cpu())
-
-        class SeenFineTuneSampler:
-            def __init__(self, task_pool, task_ids):
-                self.task_pool = task_pool
-                self.task_ids = task_ids
-
-            def sample_batch(self, batch_size, len_context, device):
-                sampled = self.task_ids[torch.randint(len(self.task_ids), (batch_size,))]
-                return self.task_pool.sample_batch(batch_size, len_context, device, task_ids=sampled)
-
-        finetune_train_sampler = SeenFineTuneSampler(train_pool, finetune_ids)
+    finetune_task_pool = HeldoutTaskSampler(
+        input_dim=args.input_dim,
+        noise_std=args.noise_std,
+        num_tasks=args.num_finetune_tasks,
+        seed=args.seed + 100,
+    )
 
     model = build_model(args, device)
     num_parameters = model.get_num_params()
@@ -404,7 +388,7 @@ def main():
         "pretraining_logs": [],
         "capacity_metrics": [],
         "generalization_metrics": [],
-        "fewshot_adaptation": None,
+        "fewshot_adaptation": [],
     }
 
     print("device", device)
@@ -418,47 +402,49 @@ def main():
         train_loss_meter.update(train_loss, n=xs.shape[0])
 
         should_eval = step == 0 or (step + 1) % args.eval_every == 0 or step == args.num_iters - 1
-        if not should_eval:
-            continue
+        if should_eval:
+            seen_metrics, heldout_metrics = evaluate_pretraining(
+                model,
+                seen_eval_set,
+                heldout_eval_set,
+                args.batch_size,
+                args.num_rank_buckets,
+            )
+            record["pretraining_logs"].append(
+                {
+                    "step": step,
+                    "train_mse": train_loss_meter.avg,
+                    "seen_mse": seen_metrics["overall_mse"],
+                    "heldout_mse": heldout_metrics["overall_mse"],
+                    "generalization_gap": heldout_metrics["generalization_gap"],
+                }
+            )
+            record["capacity_metrics"].append({"step": step, **seen_metrics})
+            record["generalization_metrics"].append({"step": step, **heldout_metrics})
+            print(
+                f"step {step:6d} train_mse {train_loss_meter.avg:.6f} "
+                f"seen_mse {seen_metrics['overall_mse']:.6f} "
+                f"heldout_mse {heldout_metrics['overall_mse']:.6f}"
+            )
+            with open(exp_path, "wb") as handle:
+                pickle.dump(record, handle)
 
-        seen_metrics, heldout_metrics = evaluate_pretraining(
-            model,
-            seen_eval_set,
-            heldout_eval_set,
-            args.batch_size,
-            args.num_rank_buckets,
-        )
-        record["pretraining_logs"].append(
-            {
+        if (step + 1) % args.steps_per_epoch == 0:
+            fewshot_res = run_fewshot_adaptation(
+                args,
+                device,
+                model,
+                train_pool,
+                finetune_task_pool,
+            )
+            record["fewshot_adaptation"].append({
+                "epoch": (step + 1) // args.steps_per_epoch,
                 "step": step,
-                "train_mse": train_loss_meter.avg,
-                "seen_mse": seen_metrics["overall_mse"],
-                "heldout_mse": heldout_metrics["overall_mse"],
-                "generalization_gap": heldout_metrics["generalization_gap"],
-            }
-        )
-        record["capacity_metrics"].append({"step": step, **seen_metrics})
-        record["generalization_metrics"].append({"step": step, **heldout_metrics})
-        print(
-            f"step {step:6d} train_mse {train_loss_meter.avg:.6f} "
-            f"seen_mse {seen_metrics['overall_mse']:.6f} "
-            f"heldout_mse {heldout_metrics['overall_mse']:.6f}"
-        )
-        with open(exp_path, "wb") as handle:
-            pickle.dump(record, handle)
+                **fewshot_res
+            })
+            with open(exp_path, "wb") as handle:
+                pickle.dump(record, handle)
 
-    record["fewshot_adaptation"] = run_fewshot_adaptation(
-        args,
-        device,
-        model,
-        train_pool,
-        finetune_train_sampler,
-        finetune_eval_set,
-    )
-
-    with open(exp_path, "wb") as handle:
-        pickle.dump(record, handle)
-    print("fewshot_threshold_crossed", record["fewshot_adaptation"]["threshold_crossed"])
     print("finished")
 
 
