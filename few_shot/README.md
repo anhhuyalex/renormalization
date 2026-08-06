@@ -11,12 +11,11 @@ The main entrypoint is [main.py](/jukebox/norman/qanguyen/renormalization/few_sh
 ## Training notes
 
 **Few-Shot Adaptation (Fine-Tuning)**
-After the main pretraining loop, the model can undergo a few-shot fine-tuning (adaptation) phase. This process evaluates how quickly the model adapts to a specific task or subset of tasks:
-- A new optimizer is instantiated using a dedicated adaptation learning rate (`--fewshot_lr`).
-- Fine-tuning runs for a maximum of `--fewshot_num_batches` steps.
-- In each step, the model trains on a batch sampled either from the fine-tuning tasks (with probability `--fewshot_mix_probability`) or from the original pretraining pool. This mixed-batch approach helps to mitigate catastrophic forgetting during adaptation.
-- Following each gradient update, the model is evaluated on a fixed fine-tuning evaluation set.
-- The primary metric recorded is the number of fine-tuning examples the model must see before its evaluation MSE drops below a predefined success threshold (`--fewshot_mse_threshold`).
+At the end of every epoch (determined by `--steps_per_epoch`), the model undergoes a few-shot fine-tuning (adaptation) experiment to evaluate how quickly it adapts to a specific set of fixed tasks:
+- A new optimizer is instantiated for a copy of the model using a dedicated learning rate (`--fewshot_lr`).
+- Fine-tuning runs for `--fewshot_num_batches` steps.
+- In each step, the model trains on a mixed batch. Each sequence in the batch is sampled from the `--num_finetune_tasks` fixed tasks with probability `--fewshot_mix_probability`, and from the original pretraining pool otherwise.
+- The primary metric recorded is the `loss_trace`, a time series matrix tracking the MSE of each fine-tuning task whenever it is presented during the adaptation batches.
 
 ## Quick Start
 
@@ -55,12 +54,10 @@ $python -u main.py \
   --num_heads 4 \
   --num_layers 4 \
   --fewshot_num_batches 50 \
-  --fewshot_mix_probability 0.5 \
-  --fewshot_mse_threshold 0.05 \
-  --fewshot_eval_num_tasks 64 \
+  --steps_per_epoch 1000 \
+  --num_finetune_tasks 50 \
   --fewshot_lr 5e-4 \
-  --fewshot_batch_size 128 \
-  --fewshot_source heldout
+  --fewshot_batch_size 128
 ```
 
 ### Run a OneLayerAttention experiment
@@ -89,12 +86,10 @@ $python -u main.py \
   --num_heads 4 \
   --num_layers 4 \
   --fewshot_num_batches 50 \
-  --fewshot_mix_probability 0.5 \
-  --fewshot_mse_threshold 0.05 \
-  --fewshot_eval_num_tasks 64 \
+  --steps_per_epoch 1000 \
+  --num_finetune_tasks 50 \
   --fewshot_lr 5e-4 \
-  --fewshot_batch_size 128 \
-  --fewshot_source heldout
+  --fewshot_batch_size 128
 ```
 
 The output pickle is written to:
@@ -121,8 +116,9 @@ It stores:
 - `--K`: number of tasks in the finite training pool
 - `--task_distribution`: `uniform` or `zipf`
 - `--zipf_alpha`: Zipf skew, default `1.0`
-- `--fewshot_mix_probability`: fraction of adaptation batches drawn from the fine-tuning stream in expectation
-- `--fewshot_mse_threshold`: threshold used to declare few-shot success
+- `--steps_per_epoch`: number of pretraining gradient steps per epoch
+- `--num_finetune_tasks`: number of fixed fine-tuning tasks generated at the start of training
+- `--fewshot_mix_probability`: probability that an individual sequence in an adaptation batch comes from the fine-tuning set
 
 ## Sweep Model Size
 
@@ -163,12 +159,10 @@ for arch in gpt OneLayerAttention; do
           --num_heads ${num_heads} \
           --num_layers ${num_layers} \
           --fewshot_num_batches 50 \
-          --fewshot_mix_probability 0.5 \
-          --fewshot_mse_threshold 0.05 \
-          --fewshot_eval_num_tasks 64 \
+          --steps_per_epoch 1000 \
+          --num_finetune_tasks 50 \
           --fewshot_lr 5e-4 \
-          --fewshot_batch_size 128 \
-          --fewshot_source heldout
+          --fewshot_batch_size 128
       done
     done
   done
@@ -221,5 +215,4 @@ and set the SLURM array size to cover the full Cartesian product.
 ## Notes
 
 - `gpt` and `OneLayerAttention` share the same regression task pipeline and evaluation code.
-- The few-shot metric is the number of fine-tuning presentations needed before fine-tuning-set MSE falls below `--fewshot_mse_threshold`.
-- If the threshold is never crossed within `--fewshot_num_batches`, the run records that failure along with the final MSE.
+- The few-shot metric is a `loss_trace` matrix that records the exact MSE for each fine-tuning task whenever it is included in an adaptation batch.

@@ -137,8 +137,8 @@ class GPT(nn.Module):
 
     def build_sequence(self, xs, ys):
         batch_size, seq_len, _ = xs.shape
-        x_tokens = torch.cat([xs, torch.zeros(batch_size, seq_len, 1, device=xs.device, dtype=xs.dtype)], dim=-1)
-        y_tokens = torch.cat([torch.zeros(batch_size, seq_len, xs.size(-1), device=xs.device, dtype=xs.dtype), ys], dim=-1)
+        x_tokens = torch.cat([torch.zeros(batch_size, seq_len, 1, device=xs.device, dtype=xs.dtype), xs], dim=-1)
+        y_tokens = torch.cat([ys, torch.zeros(batch_size, seq_len, xs.size(-1), device=xs.device, dtype=xs.dtype)], dim=-1)
         sequence = torch.stack([x_tokens, y_tokens], dim=2).reshape(batch_size, seq_len * 2, xs.size(-1) + 1)
         return sequence
 
@@ -214,8 +214,8 @@ class OneLayerAttention(nn.Module):
 
     def build_sequence(self, xs, ys):
         batch_size, seq_len, _ = xs.shape
-        x_tokens = torch.cat([xs, torch.zeros(batch_size, seq_len, 1, device=xs.device, dtype=xs.dtype)], dim=-1)
-        y_tokens = torch.cat([torch.zeros(batch_size, seq_len, xs.size(-1), device=xs.device, dtype=xs.dtype), ys], dim=-1)
+        x_tokens = torch.cat([torch.zeros(batch_size, seq_len, 1, device=xs.device, dtype=xs.dtype), xs], dim=-1)
+        y_tokens = torch.cat([ys, torch.zeros(batch_size, seq_len, xs.size(-1), device=xs.device, dtype=xs.dtype)], dim=-1)
         return torch.stack([x_tokens, y_tokens], dim=2).reshape(batch_size, seq_len * 2, xs.size(-1) + 1)
 
     def get_qkv(self, hidden_states):

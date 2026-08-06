@@ -46,14 +46,14 @@ print_python_diagnostics() {
 print_python_diagnostics
 
 num_heads_vals=(1 2 4 8 12 16)
-num_hidden_features_vals=(8 16 32 64 128 256)
+num_hidden_features_vals=(7 14 30 60 90 120)
 idx=${SLURM_ARRAY_TASK_ID:-0}
 num_heads=${num_heads_vals[$(( idx % ${#num_heads_vals[@]} ))]}
 num_hidden_features=${num_hidden_features_vals[$(( idx / ${#num_heads_vals[@]} ))]}
 # Set experiment_name to "gpt" or "OneLayer"
 K=100000
-experiment_name="OneLayer_K_${K}"
-fileprefix="regression_${experiment_name}_zipf_K_${K}"
+experiment_name="gpt_K_${K}"
+fileprefix="regression_forget_${experiment_name}_zipf_K_${K}"
 
 $python -u main.py \
   --savedir "$savedir" \
@@ -68,22 +68,22 @@ $python -u main.py \
   --num_hidden_features "$num_hidden_features" \
   --num_heads "$num_heads" \
   --num_layers 12 \
-  --len_context 100 \
-  --input_dim 64 \
-  --noise_std 0.1 \
+  --len_context 32 \
+  --input_dim 16 \
+  --noise_std 0.5 \
   --K "$K" \
   --task_distribution zipf \
   --zipf_alpha 1.0 \
-  --num_iters 100000 \
-  --eval_every 1000 \
+  --num_iters 500000 \
+  --eval_every 10000 \
   --num_eval_seen_tasks 100000 \
   --eval_task_stride 10 \
   --num_eval_heldout_tasks 256 \
   --num_rank_buckets 5 \
-  --fewshot_num_batches 50 \
-  --fewshot_mix_probability 0.5 \
-  --fewshot_mse_threshold 0.05 \
-  --fewshot_eval_num_tasks 64 \
+  --fewshot_num_batches 1000 \
+  --steps_per_epoch 10000 \
+  --num_finetune_tasks 50 \
   --fewshot_lr 5e-4 \
   --fewshot_batch_size 256 \
-  --fewshot_source heldout
+  --rank_forget_sequence 100 \
+  --forget_sequence_eval 50

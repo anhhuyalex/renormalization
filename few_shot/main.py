@@ -66,6 +66,8 @@ parser.add_argument("--steps_per_epoch", default=1000, type=int, help="number of
 parser.add_argument("--fewshot_mse_threshold", default=0.05, type=float, help="few-shot success threshold on fine-tuning eval MSE")
 parser.add_argument("--fewshot_eval_num_tasks", default=64, type=int, help="number of fixed tasks used in fine-tuning evaluation")
 parser.add_argument("--fewshot_eval_batches", default=2, type=int, help="number of evaluation batches per fine-tuning checkpoint")
+parser.add_argument("--rank_forget_sequence", default=0, type=int, help="number of highest ranked tasks to exclude during adaptation and track for forgetting")
+parser.add_argument("--forget_sequence_eval", default=10, type=int, help="evaluate forgetting every N adaptation batches")
 
 
 if utils.is_interactive():
@@ -112,7 +114,6 @@ class FiniteTaskPool:
         self.zipf_alpha = zipf_alpha
         self.generator = torch.Generator().manual_seed(seed)
         self.task_weights = torch.randn(num_tasks, input_dim, generator=self.generator)
-        self.task_bias = torch.randn(num_tasks, 1, generator=self.generator)
         self.probabilities = self._build_probabilities()
 
     def _build_probabilities(self):
@@ -122,18 +123,23 @@ class FiniteTaskPool:
         probs = ranks.pow(-self.zipf_alpha)
         return probs / probs.sum()
 
-    def sample_task_ids(self, batch_size):
-        return torch.multinomial(self.probabilities, batch_size, replacement=True, generator=self.generator)
+    def sample_task_ids(self, batch_size, uniform=False, exclude_up_to_rank=0):
+        if not uniform and exclude_up_to_rank == 0:
+            return torch.multinomial(self.probabilities, batch_size, replacement=True, generator=self.generator)
+        probs = torch.ones(self.num_tasks, dtype=torch.float32) if uniform else self.probabilities.clone()
+        if exclude_up_to_rank > 0:
+            probs[:exclude_up_to_rank] = 0.0
+        probs = probs / probs.sum()
+        return torch.multinomial(probs, batch_size, replacement=True, generator=self.generator)
 
-    def sample_batch(self, batch_size, len_context, device, task_ids=None):
+    def sample_batch(self, batch_size, len_context, device, task_ids=None, uniform=False, exclude_up_to_rank=0):
         if task_ids is None:
-            task_ids = self.sample_task_ids(batch_size)
+            task_ids = self.sample_task_ids(batch_size, uniform, exclude_up_to_rank)
         else:
             task_ids = task_ids.to(dtype=torch.long)
         xs = torch.randn(batch_size, len_context, self.input_dim, generator=self.generator)
         weights = self.task_weights[task_ids]
-        bias = self.task_bias[task_ids].unsqueeze(1)
-        ys = (xs * weights.unsqueeze(1)).sum(dim=-1, keepdim=True) + bias
+        ys = xs @ weights.unsqueeze(-1)
         noise = self.noise_std * torch.randn(batch_size, len_context, 1, generator=self.generator)
         ys = ys + noise
         return xs.to(device), ys.to(device), task_ids.to(device)
@@ -146,7 +152,6 @@ class HeldoutTaskSampler:
         self.num_tasks = num_tasks
         self.generator = torch.Generator().manual_seed(seed)
         self.task_weights = torch.randn(num_tasks, input_dim, generator=self.generator)
-        self.task_bias = torch.randn(num_tasks, 1, generator=self.generator)
 
     def sample_batch(self, batch_size, len_context, device, task_ids=None):
         if task_ids is None:
@@ -155,8 +160,7 @@ class HeldoutTaskSampler:
             task_ids = task_ids.to(dtype=torch.long)
         xs = torch.randn(batch_size, len_context, self.input_dim, generator=self.generator)
         weights = self.task_weights[task_ids]
-        bias = self.task_bias[task_ids].unsqueeze(1)
-        ys = (xs * weights.unsqueeze(1)).sum(dim=-1, keepdim=True) + bias
+        ys = xs @ weights.unsqueeze(-1)
         noise = self.noise_std * torch.randn(batch_size, len_context, 1, generator=self.generator)
         ys = ys + noise
         return xs.to(device), ys.to(device), task_ids.to(device)
@@ -189,6 +193,12 @@ def make_heldout_eval_set(task_sampler, num_tasks, len_context, device):
     task_ids = torch.arange(min(num_tasks, task_sampler.num_tasks), dtype=torch.long)
     xs, ys, task_ids = task_sampler.sample_batch(len(task_ids), len_context, device, task_ids=task_ids)
     return FixedEvalSet(xs=xs, ys=ys, task_ids=task_ids)
+
+
+def make_forget_eval_set(task_pool, rank_forget_sequence, len_context, device):
+    task_ids = torch.arange(0, rank_forget_sequence, dtype=torch.long)
+    xs, ys, task_ids = task_pool.sample_batch(len(task_ids), len_context, device, task_ids=task_ids)
+    return FixedEvalSet(xs=xs, ys=ys, task_ids=task_ids, task_ranks=task_ids.detach().cpu())
 
 
 def iter_eval_batches(eval_set, batch_size):
@@ -284,12 +294,13 @@ def evaluate_pretraining(model, seen_eval_set, heldout_eval_set, batch_size, num
     return seen_metrics, heldout_metrics
 
 
-def run_fewshot_adaptation(args, device, base_model, train_pool, finetune_task_pool):
+def run_fewshot_adaptation(args, device, base_model, train_pool, finetune_task_pool, forget_eval_set=None):
     adapted_model = copy.deepcopy(base_model).to(device)
     optimizer = build_optimizer(args, adapted_model, lr=args.fewshot_lr)
     
     num_tasks = finetune_task_pool.num_tasks
     loss_trace = np.full((num_tasks, args.fewshot_num_batches), np.nan)
+    forgetting_logs = []
     
     for batch_idx in range(args.fewshot_num_batches):
         adapted_model.train()
@@ -301,7 +312,7 @@ def run_fewshot_adaptation(args, device, base_model, train_pool, finetune_task_p
         tids_f = None
         
         if num_pretrain > 0:
-            xs_p, ys_p, _ = train_pool.sample_batch(num_pretrain, args.len_context, device)
+            xs_p, ys_p, _ = train_pool.sample_batch(num_pretrain, args.len_context, device, uniform=True, exclude_up_to_rank=args.rank_forget_sequence)
             xs_list.append(xs_p)
             ys_list.append(ys_p)
             
@@ -329,8 +340,18 @@ def run_fewshot_adaptation(args, device, base_model, train_pool, finetune_task_p
                 mask = (tids == t_idx)
                 loss_trace[t_idx, batch_idx] = ft_losses[mask].mean()
                 
+        if forget_eval_set is not None and (batch_idx % args.forget_sequence_eval == 0 or batch_idx == args.fewshot_num_batches - 1):
+            forget_metrics = evaluate_fixed_set(adapted_model, forget_eval_set, args.batch_size, args.num_rank_buckets)
+            forgetting_logs.append({
+                "batch_idx": batch_idx,
+                "overall_mse": forget_metrics["overall_mse"],
+                "per_task_mse": forget_metrics["per_task_mse"].tolist(),
+                "task_ids": forget_metrics["task_ids"].tolist()
+            })
+                
     return {
-        "loss_trace": loss_trace
+        "loss_trace": loss_trace,
+        "forgetting_logs": forgetting_logs
     }
 
 
@@ -361,6 +382,10 @@ def main():
     )
     heldout_eval_set = make_heldout_eval_set(heldout_eval_sampler, args.num_eval_heldout_tasks, args.len_context, device)
 
+    forget_eval_set = None
+    if args.rank_forget_sequence > 0:
+        forget_eval_set = make_forget_eval_set(train_pool, args.rank_forget_sequence, args.len_context, device)
+
     finetune_task_pool = HeldoutTaskSampler(
         input_dim=args.input_dim,
         noise_std=args.noise_std,
@@ -371,6 +396,14 @@ def main():
     model = build_model(args, device)
     num_parameters = model.get_num_params()
     optimizer = build_optimizer(args, model, lr=args.lr)
+    
+    def lr_lambda(current_step: int):
+        warmup_steps = args.num_iters // 2
+        if current_step < warmup_steps:
+            return float(current_step) / float(max(1, warmup_steps))
+        return max(0.0, float(args.num_iters - current_step) / float(max(1, args.num_iters - warmup_steps)))
+        
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     train_loss_meter = utils.AverageMeter("train_mse", ":.4e")
 
     experiment_group_dir = os.path.join(args.savedir, "cache", args.experiment_name)
@@ -399,6 +432,7 @@ def main():
         model.train()
         xs, ys, _ = train_pool.sample_batch(args.batch_size, args.len_context, device)
         train_loss = pretrain_step(model, optimizer, xs, ys)
+        scheduler.step()
         train_loss_meter.update(train_loss, n=xs.shape[0])
 
         should_eval = step == 0 or (step + 1) % args.eval_every == 0 or step == args.num_iters - 1
@@ -436,6 +470,7 @@ def main():
                 model,
                 train_pool,
                 finetune_task_pool,
+                forget_eval_set=forget_eval_set,
             )
             record["fewshot_adaptation"].append({
                 "epoch": (step + 1) // args.steps_per_epoch,
