@@ -115,6 +115,10 @@ parser.add_argument('--no-cuda', action='store_true', default=False,
  
 parser.add_argument('--K', default=1, type=int, 
                     help='number of tasks') 
+parser.add_argument('--cluster_size', default=1, type=int,
+                    help='number of memories per cluster')
+parser.add_argument('--cluster_similarity', default=0.0, type=float,
+                    help='probability that a bit in a cluster member sequence matches the prototype sequence')
 parser.add_argument('--sequence_sampling_distribution', type=str,
                     default="uniform", 
                     choices = ["uniform", "zipf"],
@@ -140,6 +144,8 @@ parser.add_argument('--resume', type=str, default=None,
                     help='resume from checkpoint')
 parser.add_argument('--is_save_model_every', default=-1, type=int,
                     help='save model every k iterations; -1 means never')
+parser.add_argument('--is_save_model_final', default=False, type=bool,
+                    help='save model final iteration')
     
 
 
@@ -579,6 +585,28 @@ elif args.wandb_group_name == "memo_may25_zipf_onelayerattention_large_doresampl
     print("Model has", num_parameters, "parameters")
     if num_parameters > 1e9:
         sys.exit()
+elif args.wandb_group_name == "memo_aug8_onelayer_cluster_size_2_doresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    args.cluster_size = 2
+    
+    similarities = [0.5]
+    num_heads_list = np.linspace(2, 16, 8, dtype=int)
+    num_hidden_features_list = 2 ** np.linspace(2, 10, 8, dtype=int)
+    
+    t = args.SLURM_ARRAY_TASK_ID
+    
+    args.cluster_similarity = similarities[t % len(similarities)]
+    args.num_heads = int(num_heads_list[(t // len(similarities)) % len(num_heads_list)])
+    args.num_hidden_features = int(num_hidden_features_list[t // (len(similarities) * len(num_heads_list))])
+    
+    args.num_layers = 12
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features)
+    
+    set_zipf_exp_params_resample(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+    args.is_save_model_final = True
+
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
@@ -675,6 +703,61 @@ class Sequence(torch.utils.data.Dataset):
 
 # -
 
+class HierarchicalSequence(torch.utils.data.Dataset):
+    def __init__(self, K, cluster_size, cluster_similarity,
+                 len_context = 1,
+                 len_data = 60000, skip=False,
+                 sequence_sampling_distribution = "uniform"):
+
+        self.len_context = len_context
+        self.K = K 
+        self.cluster_size = cluster_size
+        self.cluster_similarity = cluster_similarity
+        self.len_data = len_data
+        self.sequence_sampling_distribution = sequence_sampling_distribution
+        if skip == False:
+            self.generate_sequences()
+            
+        if self.sequence_sampling_distribution == "zipf":
+            self.p = 1.0 / np.arange(1, self.K + 1)
+            self.p /= np.sum(self.p)
+        else:
+            assert self.sequence_sampling_distribution == "uniform", f"sequence_sampling_distribution must be uniform or zipf, got {self.sequence_sampling_distribution}"
+        self.skip = skip
+        
+    def generate_sequences(self):
+        num_clusters = self.K // self.cluster_size
+        prototypes = torch.randint(0, 2, (num_clusters, self.len_context))
+        
+        self.sequences = torch.zeros((self.K, self.len_context), dtype=torch.long)
+        
+        for c in range(num_clusters):
+            for i in range(self.cluster_size):
+                if i == 0:
+                    self.sequences[c * self.cluster_size + i] = prototypes[c]
+                else:
+                    flip_mask = torch.rand(self.len_context) > self.cluster_similarity
+                    self.sequences[c * self.cluster_size + i] = torch.where(
+                        flip_mask, 
+                        1 - prototypes[c], 
+                        prototypes[c]
+                    )
+        
+    def __len__(self): 
+        if self.skip == True:
+            return len(self.sequences)
+        else:
+            return self.len_data
+
+    def __getitem__(self, task: int):
+        if (self.sequence_sampling_distribution == "uniform") or (self.skip == True):
+            i = task % self.K
+        elif self.sequence_sampling_distribution == "zipf":
+            i = np.random.choice(self.K, p= self.p)
+        samples = self.sequences[i]
+        return samples.type(torch.long), i 
+
+
 # importlib.reload(gpt)
 import gpt
 criterion = nn.NLLLoss(reduction="none")
@@ -731,14 +814,23 @@ if use_cuda:
                     'pin_memory': True}
     train_kwargs.update(cuda_kwargs)
     test_kwargs.update(cuda_kwargs)
-train_dataset = Sequence(K=args.K, 
+if args.cluster_size > 1:
+    DatasetClass = HierarchicalSequence
+    dataset_kwargs = {'cluster_size': args.cluster_size, 'cluster_similarity': args.cluster_similarity}
+else:
+    DatasetClass = Sequence
+    dataset_kwargs = {}
+
+train_dataset = DatasetClass(K=args.K, 
                          len_data = args.batch_size * args.num_iters_per_epoch,
                          len_context=args.len_context,
-                         sequence_sampling_distribution = args.sequence_sampling_distribution
+                         sequence_sampling_distribution = args.sequence_sampling_distribution,
+                         **dataset_kwargs
                          )
-iwl_dataset = Sequence(K=args.K, len_context=args.len_context,  skip=True, 
+iwl_dataset = DatasetClass(K=args.K, len_context=args.len_context,  skip=True, 
                        len_data = args.K // 10,
-                       sequence_sampling_distribution = "uniform")
+                       sequence_sampling_distribution = "uniform",
+                       **dataset_kwargs)
 _iwl_cutoff = min(200000, args.K)
 iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
 iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
@@ -1063,5 +1155,8 @@ with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
     # save model state_dict
     # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
         # pickle.dump(model.state_dict(), f)
+if args.is_save_model_final > 0:
+    with open(f"{dirprefix}/{fileprefix}_model_final.pkl", "wb") as f:
+        pickle.dump(model.state_dict(), f)
 print("Finished training")
 sys.exit(0)
