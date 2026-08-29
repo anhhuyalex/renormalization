@@ -2,7 +2,7 @@
 #SBATCH --job-name=memo
 #SBATCH --cpus-per-task=3
 #SBATCH --mem-per-cpu=30G
-#SBATCH --time=72:00:00
+#SBATCH --time=48:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
 #SBATCH --array=15-30
@@ -76,7 +76,7 @@ num_mlp_layers=3
 # wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
 # wandb_group_name="memo_dec8_zipf_heads_mlp_gpt_lr_1e_3"
 # wandb_group_name="memo_apr3_zipf_onelayerattention_lr_1e-3_swapmlp_eval" 
-wandb_group_name="memo_aug8_onelayer_cluster_size_2_doresample"
+wandb_group_name="memo_aug10_highsimilarity_onelayer_cluster_size_2_doresample"
 # memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
 # memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
 # wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"

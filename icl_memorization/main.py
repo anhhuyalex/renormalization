@@ -146,7 +146,16 @@ parser.add_argument('--is_save_model_every', default=-1, type=int,
                     help='save model every k iterations; -1 means never')
 parser.add_argument('--is_save_model_final', default=False, type=bool,
                     help='save model final iteration')
-    
+parser.add_argument('--is_loss_unique_features', default="False", type=str,
+                    choices=["True", "False"],
+                    help='whether to add a loss component considering unique units only')
+parser.add_argument('--unique_loss_weight', default=1.0, type=float,
+                    help='weight multiplier for unique feature loss component')
+parser.add_argument('--unique_loss_mode', default="add", type=str,
+                    choices=["add", "only", "weighted"],
+                    help='mode for combining unique feature loss: add, only, or weighted')
+parser.add_argument('--unique_loss_alpha', default=0.5, type=float,
+                    help='mixing alpha for weighted unique loss mode: (1-alpha)*shared + alpha*unique')
 
 
 # if running this interactively, can specify jupyter_args here for argparser to use
@@ -585,7 +594,7 @@ elif args.wandb_group_name == "memo_may25_zipf_onelayerattention_large_doresampl
     print("Model has", num_parameters, "parameters")
     if num_parameters > 1e9:
         sys.exit()
-elif args.wandb_group_name == "memo_aug8_onelayer_cluster_size_2_doresample":
+elif args.wandb_group_name == "memo_aug9_onelayer_cluster_size_2_doresample":
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
     args.cluster_size = 2
@@ -606,6 +615,51 @@ elif args.wandb_group_name == "memo_aug8_onelayer_cluster_size_2_doresample":
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
     args.is_save_model_final = True
+elif args.wandb_group_name == "memo_aug10_highsimilarity_onelayer_cluster_size_2_doresample":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    args.cluster_size = 2
+    
+    similarities = [0.92]
+    num_heads_list = np.linspace(2, 12, 6, dtype=int)
+    num_hidden_features_list = 2 ** np.linspace(4, 10, 6, dtype=int)
+    
+    t = args.SLURM_ARRAY_TASK_ID
+    
+    args.cluster_similarity = similarities[t % len(similarities)]
+    args.num_heads = int(num_heads_list[(t // len(similarities)) % len(num_heads_list)])
+    args.num_hidden_features = int(num_hidden_features_list[t // (len(similarities) * len(num_heads_list))])
+    
+    args.num_layers = 12
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features)
+    
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+    args.is_save_model_final = True 
+elif args.wandb_group_name == "memo_aug28_highsimilarity_onelayer_cluster_size_2_uniqueloss":
+    args.arch = "OneLayerAttention"
+    args.vocab_size = 2
+    args.cluster_size = 2
+    
+    similarities = [0.92]
+    num_heads_list = np.linspace(2, 12, 6, dtype=int)
+    num_hidden_features_list = 2 ** np.linspace(4, 10, 6, dtype=int)
+    
+    t = args.SLURM_ARRAY_TASK_ID
+    
+    args.cluster_similarity = similarities[t % len(similarities)]
+    args.num_heads = int(num_heads_list[(t // len(similarities)) % len(num_heads_list)])
+    args.num_hidden_features = int(num_hidden_features_list[t // (len(similarities) * len(num_heads_list))])
+    
+    args.num_layers = 12
+    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features)
+    
+    set_zipf_exp_params(args)
+    set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3)
+    args.is_save_model_final = True
+    args.num_mlp_layers = 1
+    args.is_loss_unique_features = "True"
+    args.unique_loss_weight = 3.0
 
 # assert args.K % args.L == 0, "K must be divisible by L"
 if args.seed is None:
@@ -684,6 +738,15 @@ class Sequence(torch.utils.data.Dataset):
     def generate_sequences(self):
         self.sequences = torch.randint(0, 2, (self.K, self.len_context)) 
         
+    def get_pairmate_task(self, task):
+        return task
+
+    def get_pairmate_sequence(self, task):
+        if isinstance(task, torch.Tensor):
+            return self.sequences[task.cpu()]
+        else:
+            return self.sequences[task]
+
     def __len__(self): 
         if self.skip == True:
             return len(self.sequences)
@@ -728,6 +791,7 @@ class HierarchicalSequence(torch.utils.data.Dataset):
     def generate_sequences(self):
         num_clusters = self.K // self.cluster_size
         prototypes = torch.randint(0, 2, (num_clusters, self.len_context))
+        self.prototypes = prototypes
         
         self.sequences = torch.zeros((self.K, self.len_context), dtype=torch.long)
         
@@ -742,6 +806,24 @@ class HierarchicalSequence(torch.utils.data.Dataset):
                         1 - prototypes[c], 
                         prototypes[c]
                     )
+
+    def get_pairmate_task(self, task):
+        if self.cluster_size == 2:
+            return task ^ 1
+        elif self.cluster_size > 1:
+            cluster_id = task // self.cluster_size
+            member_id = task % self.cluster_size
+            other_member = torch.where(member_id == 0, 1, 0) if isinstance(task, torch.Tensor) else (1 if member_id == 0 else 0)
+            return cluster_id * self.cluster_size + other_member
+        else:
+            return task
+
+    def get_pairmate_sequence(self, task):
+        pair_task = self.get_pairmate_task(task)
+        if isinstance(pair_task, torch.Tensor):
+            return self.sequences[pair_task.cpu()]
+        else:
+            return self.sequences[pair_task]
         
     def __len__(self): 
         if self.skip == True:
@@ -835,6 +917,7 @@ _iwl_cutoff = min(200000, args.K)
 iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
 iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
 iwl_dataset.original_indices = iwl_indices
+iwl_dataset.train_dataset = train_dataset
 print ("sequences.sequence_sampling_distribution", iwl_dataset.sequence_sampling_distribution)
 train_sampler = None
 val_sampler = None 
@@ -924,10 +1007,14 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     test_top1 = []
     test_metrics = defaultdict(list)
     model.eval() # switch to eval mode
-    sequence_ranks = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.long).to(device)
-    lengths = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.long).to(device)
-    logsoftmaxlosses = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.float).to(device) 
-    accuracys = torch.zeros((len(val_loader.dataset.sequences),args.len_context-1), dtype=torch.float).to(device)
+    num_seqs = len(val_loader.dataset.sequences)
+    sequence_ranks = torch.zeros((num_seqs, args.len_context-1), dtype=torch.long).to(device)
+    lengths = torch.zeros((num_seqs, args.len_context-1), dtype=torch.long).to(device)
+    logsoftmaxlosses = torch.zeros((num_seqs, args.len_context-1), dtype=torch.float).to(device) 
+    accuracys = torch.zeros((num_seqs, args.len_context-1), dtype=torch.float).to(device)
+    if args.is_loss_unique_features == "True":
+        unique_masks = torch.zeros((num_seqs, args.len_context-1), dtype=torch.bool).to(device)
+        shared_masks = torch.zeros((num_seqs, args.len_context-1), dtype=torch.bool).to(device)
     vertical_bars_metric = 0
     decorrelation_metric = 0 
     num_batches = 15
@@ -938,12 +1025,20 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
         for i, (seq, task) in enumerate(val_loader):
             seq, task = seq.to(device), task.to(device) 
             
-            # print("seq", seq.shape, "task", task.shape, "sequence_ranks", sequence_ranks.shape, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
             output = model(seq, task) # shape: B, N, D
-            
-            # print ("seq", seq.shape, "task", task.shape, "output", output.shape )
             preds = output 
             B, N, D = output.shape  
+
+            if args.is_loss_unique_features == "True":
+                # Get true pairmate sequence for validation samples
+                if hasattr(val_loader.dataset, 'original_indices') and hasattr(val_loader.dataset, 'train_dataset'):
+                    orig_tasks = torch.as_tensor(val_loader.dataset.original_indices, device=task.device)[task]
+                    pair_seq = val_loader.dataset.train_dataset.get_pairmate_sequence(orig_tasks).to(device)
+                elif hasattr(val_loader.dataset, 'get_pairmate_sequence'):
+                    pair_seq = val_loader.dataset.get_pairmate_sequence(task).to(device)
+                else:
+                    pair_seq = seq
+
             if args.is_save_attn_reps == "True" and i == 0:
                 _, attn = model.get_attention_weights(seq, task)
                 attn_reps.append(attn.detach().cpu().numpy())
@@ -956,27 +1051,26 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
                 mlp_reps_per_layer["label"].extend(task.detach().cpu().numpy())
                 for ilayer, mlp_rep in enumerate(mlp_reps_batch):
                     mlp_reps_per_layer[ilayer].extend(mlp_rep.detach().cpu().numpy())
-                # print("vertical_bars_metric", vertical_bars_metric.shape)
-                # print("decorrelation_metric", decorrelation_metric.shape)
-                # print("utils.__file__", utils.__file__)
-                # print("corr_heads_at_ts defaults", utils.corr_heads_at_ts.__defaults__)
             for i_seq in range(args.len_context-1): 
                 preds_query = preds[:, i_seq,:].reshape(-1, D)
                 seqs_query = seq[:,(i_seq+1)].reshape(-1)
-                # losstest = criterion(preds_query, seqs_query)
-                # acc1 = utils.accuracy(preds_query, seqs_query, topk=[1]) 
-                # print ("preds_max", preds_query.argmax(dim=-1).shape, "seqs_query", seqs_query.shape)
+
                 is_correct = (preds_query.argmax(dim=-1) == seqs_query)
                 logsoftmax = F.log_softmax(preds_query, dim=1)
                 logsoftmaxloss = F.nll_loss(logsoftmax, seqs_query, reduction="none") 
-                # if args.K < 10000: # for small K, we can save the whole tensor 
-                # test_metrics["sequence_rank"].append(task.detach().cpu().numpy())
+
                 sequence_ranks[i*args.batch_size:i*args.batch_size+len(task), i_seq] = task 
                 lengths[i*args.batch_size:i*args.batch_size+len(task), i_seq] = i_seq + 1 
                 logsoftmaxlosses[i*args.batch_size:i*args.batch_size+len(task), i_seq] = logsoftmaxloss 
                 accuracys[i*args.batch_size:i*args.batch_size+len(task), i_seq] = is_correct.float() 
-    # print("sequence_ranks", sequence_ranks, "lengths", lengths.shape, "logsoftmaxlosses", logsoftmaxlosses.shape, "accuracys", accuracys.shape)
-    # print("accuracys", accuracys)
+
+                if args.is_loss_unique_features == "True":
+                    pair_seqs_query = pair_seq[:,(i_seq+1)].reshape(-1)
+                    is_unique = (seqs_query != pair_seqs_query)
+                    is_shared = (seqs_query == pair_seqs_query)
+                    unique_masks[i*args.batch_size:i*args.batch_size+len(task), i_seq] = is_unique
+                    shared_masks[i*args.batch_size:i*args.batch_size+len(task), i_seq] = is_shared
+
     subset_idx = sequence_ranks[:,0].detach().cpu().numpy()
     if hasattr(val_loader.dataset, 'original_indices'):
         test_metrics["sequence_rank"] = val_loader.dataset.original_indices[subset_idx]
@@ -985,6 +1079,26 @@ def validate_gradient_descent_zipf(epoch, val_loader, model, args, criterion, de
     test_metrics["length"] = 50
     test_metrics["logsoftmaxloss"] = logsoftmaxlosses.mean(dim=1).detach().cpu().numpy()
     test_metrics["accuracy"] = accuracys.mean(dim=1).detach().cpu().numpy()
+
+    # Unique and shared token metrics per sequence (only if enabled)
+    if args.is_loss_unique_features == "True":
+        u_counts = unique_masks.sum(dim=1).float().clamp(min=1.0)
+        s_counts = shared_masks.sum(dim=1).float().clamp(min=1.0)
+
+        acc_u = ((accuracys * unique_masks.float()).sum(dim=1) / u_counts).detach().cpu().numpy()
+        acc_s = ((accuracys * shared_masks.float()).sum(dim=1) / s_counts).detach().cpu().numpy()
+        loss_u = ((logsoftmaxlosses * unique_masks.float()).sum(dim=1) / u_counts).detach().cpu().numpy()
+        loss_s = ((logsoftmaxlosses * shared_masks.float()).sum(dim=1) / s_counts).detach().cpu().numpy()
+
+        test_metrics["accuracy_unique"] = acc_u
+        test_metrics["accuracy_shared"] = acc_s
+        test_metrics["logsoftmaxloss_unique"] = loss_u
+        test_metrics["logsoftmaxloss_shared"] = loss_s
+        test_metrics["num_unique_tokens"] = unique_masks.sum(dim=1).detach().cpu().numpy()
+
+        print(f"Validation: overall acc = {test_metrics['accuracy'].mean():.4f}, unique acc = {acc_u.mean():.4f}, shared acc = {acc_s.mean():.4f}")
+    else:
+        print(f"Validation: overall acc = {test_metrics['accuracy'].mean():.4f}")
 
     # vertical bars metric and decorrelation metric 
     if args.is_get_vertical_bars_metric == "True":
@@ -1039,6 +1153,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
             iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
             iwl_dataset.original_indices = iwl_indices
+            iwl_dataset.train_dataset = train_dataset
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
                                             sampler=val_sampler,
                                             **{'batch_size': args.batch_size, 'num_workers': args.workers,
@@ -1062,6 +1177,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
             iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
             iwl_dataset.original_indices = iwl_indices
+            iwl_dataset.train_dataset = train_dataset
             iwl_dataset.len_data = len(iwl_dataset.sequences)
             # print("iter", iter, "len(iwl_dataset.sequences)", iwl_dataset.sequences.shape)
             iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
@@ -1078,50 +1194,142 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         test_metrics = {}    
     
     losses = utils.AverageMeter('Loss', ':.4e')
-    ridge_losses = utils.AverageMeter('Ridge Loss', ':.4e')
     top1 = utils.AverageMeter('Acc@1', ':6.2f')
-    
+    if args.is_loss_unique_features == "True":
+        unique_losses = utils.AverageMeter('Unique Loss', ':.4e')
+        shared_losses = utils.AverageMeter('Shared Loss', ':.4e')
+        acc_unique_meter = utils.AverageMeter('Acc@Unique', ':6.2f')
+        acc_shared_meter = utils.AverageMeter('Acc@Shared', ':6.2f')
     
     model.train() # switch to train mode
     # train iteration
     appearances = []
     loss_per_appearance = []
+    if args.is_loss_unique_features == "True":
+        acc_unique_per_appearance = []
+        acc_shared_per_appearance = []
     for i, (seq, task) in enumerate(train_loader):
         optimizer.zero_grad()
         seq, task = seq.to(device), task.to(device)
         batch_num_appearances = torch.bincount(task, minlength=args.K).detach().cpu().numpy()
         num_apppearances += batch_num_appearances # update the number of appearances of each task
         
-        # print ("seq", seq.shape, "task", task.shape, batch_num_appearances[:20])
         output = model(seq, task)
         B, N, D = output.shape
         preds = output # shape: (B, L, 2)
-        # loss function: cross-entropy loss
-        # output at position i should be the input at position i+1
         
-        # Write a function to compute the binary cross-entropy for each position in the sequence
-        # But don't compute the mean, keep the vector dimension
+        # Cross-entropy loss per token
         logsoftmax = F.log_softmax(preds[:,:-1,:], dim=-1).reshape(B * (N-1), D)
-        logsoftmaxloss = criterion(logsoftmax, seq[:,1:].reshape(B * (N-1)))
-        logsoftmaxloss = logsoftmaxloss.reshape(B, N-1).mean(dim=-1) # shape: (B,)
+        targets = seq[:,1:].reshape(B * (N-1))
+        token_losses = criterion(logsoftmax, targets).reshape(B, N-1)
+        logsoftmaxloss = token_losses.mean(dim=-1) # shape: (B,)
+        ce_loss = logsoftmaxloss.mean()
+
+        is_correct = (preds[:, :-1, :].argmax(dim=-1) == seq[:, 1:]).float() # shape: (B, N-1)
+        batch_acc_total = is_correct.mean()
+
+        if args.is_loss_unique_features == "True":
+            # Pairmate unique/shared tokens
+            pair_seq = train_dataset.get_pairmate_sequence(task).to(device)
+            unique_mask = (seq[:, 1:] != pair_seq[:, 1:]).float() # shape: (B, N-1)
+            shared_mask = (seq[:, 1:] == pair_seq[:, 1:]).float() # shape: (B, N-1)
+
+            n_unique_tokens = unique_mask.sum()
+            n_shared_tokens = shared_mask.sum()
+
+            if n_unique_tokens > 0:
+                unique_loss = (token_losses * unique_mask).sum() / n_unique_tokens
+                batch_acc_unique = (is_correct * unique_mask).sum() / n_unique_tokens
+            else:
+                unique_loss = torch.tensor(0.0, device=device)
+                batch_acc_unique = torch.tensor(0.0, device=device)
+
+            if n_shared_tokens > 0:
+                shared_loss = (token_losses * shared_mask).sum() / n_shared_tokens
+                batch_acc_shared = (is_correct * shared_mask).sum() / n_shared_tokens
+            else:
+                shared_loss = torch.tensor(0.0, device=device)
+                batch_acc_shared = torch.tensor(0.0, device=device)
+
+            if args.unique_loss_mode == "add":
+                loss = ce_loss + args.unique_loss_weight * unique_loss
+            elif args.unique_loss_mode == "only":
+                loss = unique_loss if n_unique_tokens > 0 else ce_loss
+            elif args.unique_loss_mode == "weighted":
+                loss = (1.0 - args.unique_loss_alpha) * shared_loss + args.unique_loss_alpha * unique_loss
+            else:
+                loss = ce_loss
+
+            # per-sample unique & shared accuracy
+            u_counts = unique_mask.sum(dim=-1).clamp(min=1.0)
+            s_counts = shared_mask.sum(dim=-1).clamp(min=1.0)
+            sample_acc_u = ((is_correct * unique_mask).sum(dim=-1) / u_counts).detach().cpu().numpy()
+            sample_acc_s = ((is_correct * shared_mask).sum(dim=-1) / s_counts).detach().cpu().numpy()
+            acc_unique_per_appearance.append(sample_acc_u)
+            acc_shared_per_appearance.append(sample_acc_s)
+
+            unique_losses.update(unique_loss.item(), seq.size(0))
+            shared_losses.update(shared_loss.item(), seq.size(0))
+            acc_unique_meter.update(batch_acc_unique.item(), seq.size(0))
+            acc_shared_meter.update(batch_acc_shared.item(), seq.size(0))
+        else:
+            loss = ce_loss
+
         appearances.append(task.detach().cpu().numpy())
         loss_per_appearance.append(logsoftmaxloss.detach().cpu().numpy())
-        loss = logsoftmaxloss.mean()
+
         loss.backward()
         optimizer.step()
-        losses.update(loss.item(), seq.size(0)) 
+        losses.update(loss.item(), seq.size(0))
+        acc_top1.update(batch_acc_total.item(), seq.size(0))
         
-    # scheduler.step()
-    # print ("loss" , loss, "preds", preds.shape, "target", seq.shape)
-    
     logs.update({
             "train_loss": losses.avg,
+            "train_acc": acc_top1.avg,
             "epoch": iter,
             "lr": optimizer.param_groups[0]['lr'],  
             "loss_per_appearance": (loss_per_appearance),
             "appearances": (appearances),
         })
-    print("iter", iter, "loss", losses.avg)
+    if args.is_loss_unique_features == "True":
+        logs.update({
+            "train_loss_unique": unique_losses.avg,
+            "train_loss_shared": shared_losses.avg,
+            "train_acc_unique": acc_unique_meter.avg,
+            "train_acc_shared": acc_shared_meter.avg,
+            "acc_unique_per_appearance": (acc_unique_per_appearance),
+            "acc_shared_per_appearance": (acc_shared_per_appearance),
+        })
+        print(f"iter {iter} | train loss: {losses.avg:.4f} (unique: {unique_losses.avg:.4f}, shared: {shared_losses.avg:.4f}) | train acc: {acc_top1.avg:.4f} (unique: {acc_unique_meter.avg:.4f}, shared: {acc_shared_meter.avg:.4f})")
+    else:
+        print(f"iter {iter} | train loss: {losses.avg:.4f} | train acc: {acc_top1.avg:.4f}")
+
+    if local_rank == 0 and args.wandb_log:
+        wandb_dict = {
+            "train/loss": losses.avg,
+            "train/acc": acc_top1.avg,
+            "epoch": iter,
+        }
+        if args.is_loss_unique_features == "True":
+            wandb_dict.update({
+                "train/loss_unique": unique_losses.avg,
+                "train/loss_shared": shared_losses.avg,
+                "train/acc_unique": acc_unique_meter.avg,
+                "train/acc_shared": acc_shared_meter.avg,
+            })
+        if len(test_metrics) > 0:
+            wandb_dict.update({
+                "val/accuracy": np.mean(test_metrics["accuracy"]),
+                "val/logsoftmaxloss": np.mean(test_metrics["logsoftmaxloss"]),
+            })
+            if "accuracy_unique" in test_metrics:
+                wandb_dict.update({
+                    "val/accuracy_unique": np.mean(test_metrics["accuracy_unique"]),
+                    "val/accuracy_shared": np.mean(test_metrics["accuracy_shared"]),
+                    "val/loss_unique": np.mean(test_metrics["logsoftmaxloss_unique"]),
+                    "val/loss_shared": np.mean(test_metrics["logsoftmaxloss_shared"]),
+                })
+        wandb.log(wandb_dict)
     if iter == args.num_iters - 1: 
         test_metrics = validate_gradient_descent_zipf(iter, iwl_test_loader, model, args, criterion, device)
     
@@ -1155,7 +1363,7 @@ with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
     # save model state_dict
     # with open(f"{dirprefix}/{fileprefix}_model_iter_{iter}.pkl", "wb") as f:
         # pickle.dump(model.state_dict(), f)
-if args.is_save_model_final > 0:
+if args.is_save_model_final == True:
     with open(f"{dirprefix}/{fileprefix}_model_final.pkl", "wb") as f:
         pickle.dump(model.state_dict(), f)
 print("Finished training")

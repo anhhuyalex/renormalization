@@ -883,4 +883,3 @@ def add_colorbar(fig, ax, norm, cmap="turbo", label=None, log_ticks=False):
         )
         cbar.update_ticks()
     return cbar
-
