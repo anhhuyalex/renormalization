@@ -1,0 +1,91 @@
+#!/bin/bash
+#SBATCH --job-name=memo
+#SBATCH --cpus-per-task=3
+#SBATCH --mem-per-cpu=30G
+#SBATCH --time=48:00:00
+#SBATCH -o slurms/%j-heads.out
+#SBATCH --gres=gpu:1
+#SBATCH --array=0-35 
+# SBATCH --partition=mig
+# source activate renormalization
+source ~/.bashrc
+hostname="$(hostname)"
+echo "hostname: $hostname"
+if [[ "$hostname" == *della* ]]; then
+  python="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/python"
+  savedir="/scratch/gpfs/KNORMAN/qanguyen/gautam"
+  source /scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/activate
+  jupytext="/scratch/gpfs/KNORMAN/qanguyen/learning_to_learn/l2l/bin/jupytext"
+else
+  python="/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri/bin/python"
+  savedir="/scratch/qanguyen/gautam"
+  conda activate /mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri
+  jupytext="/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri/bin/jupytext"
+fi
+
+print_python_diagnostics() {
+  echo "===== python diagnostics ====="
+  echo "date: $(date)"
+  echo "hostname: $(hostname)"
+  echo "PATH: $PATH"
+  echo "CONDA_PREFIX: ${CONDA_PREFIX:-<unset>}"
+  echo "python variable: $python"
+  echo "jupytext variable: $jupytext"
+  echo "which python: $(which python 2>&1 || true)"
+  echo "which jupytext: $(which jupytext 2>&1 || true)"
+  echo "\$python --version: $($python --version 2>&1 || true)"
+  echo "\$python executable: $($python -c 'import sys; print(sys.executable)' 2>&1 || true)"
+  echo "\$python sys.path:"
+  $python -c 'import pprint, sys; pprint.pprint(sys.path)' 2>&1 || true
+  echo "\$python torch check:"
+  $python -c 'import torch; print(torch.__version__)' 2>&1 || true
+  echo "=============================="
+}
+ 
+
+# wandb login --relogin --host=https://stability.wandb.io
+# srun --pty -p della-gpu -c 2 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
+# srun --pty -p mig -c 1 -t 4:00:00 --gres=gpu:1 --mem-per-cpu=20G bash
+# jupytext --to py main.ipynb
+
+# for i in {0..20}; do sbatch --array=0-95 main.sh 0.01; done
+# i_vals=(0.0 0.005 0.01 0.02 0.03 0.04 0.05 0.06 0.07 0.08 0.09 0.1 0.15 0.2 0.25 0.3 0.35 0.4 0.45 0.5 0.55 0.6 0.65 0.7 0.75 0.8 0.85 0.9 0.95 0.99) # len 30
+# D_visible_frac_vals=(1 3 6 9 12 15 18 21 24 27 30 32) # 12
+# j_vals=(10 50 100 500 1000 10000) # 6
+len_context_vals=(100) # 6
+# i_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
+# j_vals=(10 100 500 1000 2000 5000 7500 10000) # 6
+# SLURM_ARRAY_TASK_ID=0
+len_context=100 #${len_context_vals[$SLURM_ARRAY_TASK_ID / ${#D_visible_frac_vals[@]}]}
+
+
+echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
+gpt_bias=True
+lr=1e-3
+optimizer="Adam"
+num_iters=5000000
+K=1000
+sequence_sampling_distribution="uniform"
+num_mlp_layers=3
+# SLURM_ARRAY_TASK_ID=0
+# memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_weights
+# memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_weights
+# memo_may3_zipf_num_heads_8_num_layers_12_zero_all_attn_except_cproj_weights
+# memo_may3_zipf_num_heads_24_num_layers_36_lr_1e-4_zero_all_attn_except_cproj_weights
+# wandb_group_name="memo_jan23_zipf_onelayerattention_lr_1e-3"
+# wandb_group_name="memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample"
+# wandb_group_name="memo_dec8_zipf_heads_mlp_gpt_lr_1e_3"
+# wandb_group_name="memo_apr3_zipf_onelayerattention_lr_1e-3_swapmlp_eval" 
+wandb_group_name="memo_aug28_highsimilarity_onelayer_cluster_size_2_uniqueloss"
+# memo_jan4_fork_progress_set_attn_weights_to_zero_K_100000
+# memo_jan4_fork_progress_set_zero_all_attn_allow_learning_K_100000
+# wandb_group_name="memo_aug2_zipf_onelayerattention_lr_1e-3_swapmlp_eval"
+print_python_diagnostics
+# $jupytext --to py main.ipynb 
+for run in {0..0}; do WANDB_MODE=offline $python -u main.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias}  --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
+# jupytext --to py main_fork.ipynb  && for run in {0..0}; do WANDB_MODE=offline python -u main_fork.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
+# $jupytext --to py main_probe.ipynb && for run in {0..0}; do WANDB_MODE=offline $python -u main_probe.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias}  --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
+# jupytext --to py main_freeze.ipynb  && for run in {0..0}; do WANDB_MODE=offline python -u main_freeze.py --data ./cache --fileprefix transformer --SLURM_ARRAY_TASK_ID ${SLURM_ARRAY_TASK_ID} --batch-size 256 --optimizer ${optimizer} --lr ${lr} --wd 0.0  --num_iters ${num_iters} --arch gpt --gpt_bias ${gpt_bias} --num_mlp_layers ${num_mlp_layers} --len_context ${len_context} --K ${K} --sequence_sampling_distribution ${sequence_sampling_distribution} --no-wandb_log --wandb_project l2l --wandb_group_name  ${wandb_group_name} --savedir ${savedir} ; done 
+
+
+# python -u analysis4.py

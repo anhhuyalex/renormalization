@@ -1194,7 +1194,7 @@ for iter in range(args.num_iters // num_iters_per_epoch):
         test_metrics = {}    
     
     losses = utils.AverageMeter('Loss', ':.4e')
-    top1 = utils.AverageMeter('Acc@1', ':6.2f')
+    acc_top1 = utils.AverageMeter('Acc@1', ':6.2f')
     if args.is_loss_unique_features == "True":
         unique_losses = utils.AverageMeter('Unique Loss', ':.4e')
         shared_losses = utils.AverageMeter('Shared Loss', ':.4e')

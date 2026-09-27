@@ -166,3 +166,10 @@ Since the model is autoregressive, this representation $v_i$ for the $n$th bit i
 The probability that the model assigns to the $n+1$-th bit being positive is given by $$P(\boldsymbol{\xi}_{n+1}=+1 | \boldsymbol{\xi}_{0..j}) = \sum_{m,n}p_m\sigma(v_j \cdot B)$$ where $\sigma$ is the sigmoid function.
 The loss function is then given by $$L = -\frac{1}{MN}\sum_{m=1}^{M}\sum_{n=0}^{N-1} \mathcal {L}_{BCE}( {m,n} ; A^{(n)}, B)$$ where $\mathcal {L}_{BCE}$ is the binary cross-entropy loss.
 Here $A^{(n)}$ is the matrix of the attention weights for the $n$th bit and $B$ is the matrix corresponding to the query vector.
+
+## Main Grow experiments 
+- Let's run a new experiment where we investigate whether training a smaller model would allow us to better initialize the weights of a larger model. 
+
+
+The idea is that we first train a network (a OneLayerAttention network) where the model is forced to memorize the sequence dataset . 
+Then, we transfer the weights of the trained model to a larger network (a GPT2 network). 
