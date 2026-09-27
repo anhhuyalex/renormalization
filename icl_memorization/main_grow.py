@@ -51,68 +51,73 @@ import sys
 import glob
 from collections import defaultdict
 
-def grow_onelayer_attention_weights(base_model, target_model, base_heads, base_hidden, target_heads, target_hidden):
+def grow_onelayer_attention_weights(base_model, target_model, base_heads, base_hidden, target_heads, target_hidden, transfer_mode="both"):
     base_sd = base_model.state_dict() if hasattr(base_model, "state_dict") else base_model
     target_sd = target_model.state_dict()
     
-    # 1. Embeddings: wte and wpe
-    for h in range(base_heads):
-        t_start = h * target_hidden
-        s_start = h * base_hidden
-        if "wte.weight" in target_sd and "wte.weight" in base_sd:
-            target_sd["wte.weight"][:, t_start : t_start + base_hidden] = base_sd["wte.weight"][:, s_start : s_start + base_hidden]
-        if "wpe.weight" in target_sd and "wpe.weight" in base_sd:
-            target_sd["wpe.weight"][:, t_start : t_start + base_hidden] = base_sd["wpe.weight"][:, s_start : s_start + base_hidden]
-        
-    # 2. LayerNorms: ln_f and pre_attn_ln
-    for ln_name in ["ln_f", "pre_attn_ln"]:
-        for param in ["weight", "bias"]:
-            key = f"{ln_name}.{param}"
-            if key in target_sd and key in base_sd:
-                for h in range(base_heads):
-                    t_start = h * target_hidden
-                    s_start = h * base_hidden
-                    target_sd[key][t_start : t_start + base_hidden] = base_sd[key][s_start : s_start + base_hidden]
-
-    # 3. Attention projection: c_attn
-    C_s = base_heads * base_hidden
-    C_t = target_heads * target_hidden
-    for qkv_idx in range(3):
-        qkv_s_offset = qkv_idx * C_s
-        qkv_t_offset = qkv_idx * C_t
+    transfer_attn = transfer_mode in ["both", "attn_only"]
+    transfer_mlp = transfer_mode in ["both", "mlp_only"]
+    
+    if transfer_attn:
+        # 1. Embeddings: wte and wpe
         for h in range(base_heads):
-            r_s = qkv_s_offset + h * base_hidden
-            r_t = qkv_t_offset + h * target_hidden
-            if "c_attn.bias" in target_sd and "c_attn.bias" in base_sd:
-                target_sd["c_attn.bias"][r_t : r_t + base_hidden] = base_sd["c_attn.bias"][r_s : r_s + base_hidden]
-            for hp in range(base_heads):
-                c_s = hp * base_hidden
-                c_t = hp * target_hidden
-                target_sd["c_attn.weight"][r_t : r_t + base_hidden, c_t : c_t + base_hidden] =                     base_sd["c_attn.weight"][r_s : r_s + base_hidden, c_s : c_s + base_hidden]
-
-    # 4. First MLP layer: linear_modules.0 (maps C -> M)
-    M_s = base_heads * base_hidden
-    if "linear_modules.0.bias" in target_sd and "linear_modules.0.bias" in base_sd:
-        target_sd["linear_modules.0.bias"][:M_s] = base_sd["linear_modules.0.bias"][:M_s]
-    for hp in range(base_heads):
-        c_s = hp * base_hidden
-        c_t = hp * target_hidden
-        target_sd["linear_modules.0.weight"][:M_s, c_t : c_t + base_hidden] =             base_sd["linear_modules.0.weight"][:M_s, c_s : c_s + base_hidden]
-
-    # 5. Subsequent MLP layers: linear_modules.1, etc. (maps M -> M)
-    mlp_idx = 1
-    while f"linear_modules.{mlp_idx}.weight" in target_sd and f"linear_modules.{mlp_idx}.weight" in base_sd:
-        target_sd[f"linear_modules.{mlp_idx}.weight"][:M_s, :M_s] = base_sd[f"linear_modules.{mlp_idx}.weight"][:M_s, :M_s]
-        if f"linear_modules.{mlp_idx}.bias" in target_sd and f"linear_modules.{mlp_idx}.bias" in base_sd:
-            target_sd[f"linear_modules.{mlp_idx}.bias"][:M_s] = base_sd[f"linear_modules.{mlp_idx}.bias"][:M_s]
-        mlp_idx += 1
-
-    # 6. LM Head: lm_head (maps M -> vocab_size)
-    if "lm_head.weight" in target_sd and "lm_head.weight" in base_sd:
-        target_sd["lm_head.weight"][:, :M_s] = base_sd["lm_head.weight"][:, :M_s]
-    if "lm_head.bias" in target_sd and "lm_head.bias" in base_sd:
-        target_sd["lm_head.bias"][:] = base_sd["lm_head.bias"][:]
-
+            t_start = h * target_hidden
+            s_start = h * base_hidden
+            if "wte.weight" in target_sd and "wte.weight" in base_sd:
+                target_sd["wte.weight"][:, t_start : t_start + base_hidden] = base_sd["wte.weight"][:, s_start : s_start + base_hidden]
+            if "wpe.weight" in target_sd and "wpe.weight" in base_sd:
+                target_sd["wpe.weight"][:, t_start : t_start + base_hidden] = base_sd["wpe.weight"][:, s_start : s_start + base_hidden]
+        
+        # 2. LayerNorms: ln_f and pre_attn_ln
+        for ln_name in ["ln_f", "pre_attn_ln"]:
+            for param in ["weight", "bias"]:
+                key = f"{ln_name}.{param}"
+                if key in target_sd and key in base_sd:
+                    for h in range(base_heads):
+                        t_start = h * target_hidden
+                        s_start = h * base_hidden
+                        target_sd[key][t_start : t_start + base_hidden] = base_sd[key][s_start : s_start + base_hidden]
+        
+        # 3. Attention projection: c_attn
+        C_s = base_heads * base_hidden
+        C_t = target_heads * target_hidden
+        for qkv_idx in range(3):
+            qkv_s_offset = qkv_idx * C_s
+            qkv_t_offset = qkv_idx * C_t
+            for h in range(base_heads):
+                r_s = qkv_s_offset + h * base_hidden
+                r_t = qkv_t_offset + h * target_hidden
+                if "c_attn.bias" in target_sd and "c_attn.bias" in base_sd:
+                    target_sd["c_attn.bias"][r_t : r_t + base_hidden] = base_sd["c_attn.bias"][r_s : r_s + base_hidden]
+                for hp in range(base_heads):
+                    c_s = hp * base_hidden
+                    c_t = hp * target_hidden
+                    target_sd["c_attn.weight"][r_t : r_t + base_hidden, c_t : c_t + base_hidden] =                         base_sd["c_attn.weight"][r_s : r_s + base_hidden, c_s : c_s + base_hidden]
+                        
+    if transfer_mlp:
+        # 4. First MLP layer: linear_modules.0 (maps C -> M)
+        M_s = base_heads * base_hidden
+        if "linear_modules.0.bias" in target_sd and "linear_modules.0.bias" in base_sd:
+            target_sd["linear_modules.0.bias"][:M_s] = base_sd["linear_modules.0.bias"][:M_s]
+        for hp in range(base_heads):
+            c_s = hp * base_hidden
+            c_t = hp * target_hidden
+            target_sd["linear_modules.0.weight"][:M_s, c_t : c_t + base_hidden] =                 base_sd["linear_modules.0.weight"][:M_s, c_s : c_s + base_hidden]
+        
+        # 5. Subsequent MLP layers: linear_modules.1, etc. (maps M -> M)
+        mlp_idx = 1
+        while f"linear_modules.{mlp_idx}.weight" in target_sd and f"linear_modules.{mlp_idx}.weight" in base_sd:
+            target_sd[f"linear_modules.{mlp_idx}.weight"][:M_s, :M_s] = base_sd[f"linear_modules.{mlp_idx}.weight"][:M_s, :M_s]
+            if f"linear_modules.{mlp_idx}.bias" in target_sd and f"linear_modules.{mlp_idx}.bias" in base_sd:
+                target_sd[f"linear_modules.{mlp_idx}.bias"][:M_s] = base_sd[f"linear_modules.{mlp_idx}.bias"][:M_s]
+            mlp_idx += 1
+            
+        # 6. LM Head: lm_head (maps M -> vocab_size)
+        if "lm_head.weight" in target_sd and "lm_head.weight" in base_sd:
+            target_sd["lm_head.weight"][:, :M_s] = base_sd["lm_head.weight"][:, :M_s]
+        if "lm_head.bias" in target_sd and "lm_head.bias" in base_sd:
+            target_sd["lm_head.bias"][:] = base_sd["lm_head.bias"][:]
+            
     target_model.load_state_dict(target_sd)
     return target_model
 
@@ -218,6 +223,9 @@ parser.add_argument('--unique_loss_mode', default="add", type=str,
                     help='mode for combining unique feature loss: add, only, or weighted')
 parser.add_argument('--unique_loss_alpha', default=0.5, type=float,
                     help='mixing alpha for weighted unique loss mode: (1-alpha)*shared + alpha*unique')
+parser.add_argument('--transfer_mode', default=None, type=str,
+                    choices=['both', 'attn_only', 'mlp_only'],
+                    help='transfer mode at growth/transition: both, attn_only, mlp_only')
 parser.add_argument('--grow_condition', default=None, type=str,
                     choices=['base', 'width_growth', 'head_growth', 'both_growth'],
                     help='growth condition: base, width_growth, head_growth, both_growth')
@@ -529,32 +537,55 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
     args.base_num_hidden_features = 32
     args.base_num_hidden_features_mlp = args.base_num_heads * args.base_num_hidden_features
     
-    # Growth conditions:
-    # 0: base control baseline (no growth, H=8, d=32)
-    # 1: a) only width growth (H=8, d=64)
-    # 2: b) only head growth (H=16, d=32)
-    # 3: c) both width and head growth (H=16, d=64)
-    grow_conditions = [
+    # 4 Architectures x 3 Transfer Modes = 12 Settings
+    # 36 array jobs -> 12 settings x 3 seeds (SLURM_ARRAY_TASK_ID % 12 for setting, // 12 for seed)
+    arch_conditions = [
         {"name": "base", "num_heads": 8, "num_hidden_features": 32, "desc": "base_8h_32d"},
         {"name": "width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "width_growth_8h_64d"},
         {"name": "head_growth", "num_heads": 16, "num_hidden_features": 32, "desc": "head_growth_16h_32d"},
         {"name": "both_growth", "num_heads": 16, "num_hidden_features": 64, "desc": "both_growth_16h_64d"},
     ]
+    transfer_modes = ["attn_only", "mlp_only", "both"]
     
-    if getattr(args, "grow_condition", None) is not None:
-        selected_cond = next((c for c in grow_conditions if c["name"] == args.grow_condition), None)
-        if selected_cond is None:
-            raise ValueError(f"Unknown grow_condition: {args.grow_condition}")
+    grow_settings = []
+    for arch in arch_conditions:
+        for t_mode in transfer_modes:
+            grow_settings.append({
+                "grow_condition": arch["name"],
+                "num_heads": arch["num_heads"],
+                "num_hidden_features": arch["num_hidden_features"],
+                "transfer_mode": t_mode,
+                "desc": f"{arch['desc']}_{t_mode}",
+            })
+            
+    if getattr(args, "grow_condition", None) is not None and getattr(args, "transfer_mode", None) is not None:
+        selected_setting = next((s for s in grow_settings if s["grow_condition"] == args.grow_condition and s["transfer_mode"] == args.transfer_mode), None)
+        if selected_setting is None:
+            raise ValueError(f"Unknown setting: grow_condition={args.grow_condition}, transfer_mode={args.transfer_mode}")
+        seed_offset = 0
+    elif getattr(args, "grow_condition", None) is not None:
+        matching = [s for s in grow_settings if s["grow_condition"] == args.grow_condition]
+        setting_idx = args.SLURM_ARRAY_TASK_ID % len(matching)
+        seed_offset = args.SLURM_ARRAY_TASK_ID // len(matching)
+        selected_setting = matching[setting_idx]
+    elif getattr(args, "transfer_mode", None) is not None:
+        matching = [s for s in grow_settings if s["transfer_mode"] == args.transfer_mode]
+        setting_idx = args.SLURM_ARRAY_TASK_ID % len(matching)
+        seed_offset = args.SLURM_ARRAY_TASK_ID // len(matching)
+        selected_setting = matching[setting_idx]
     else:
-        cond_idx = args.SLURM_ARRAY_TASK_ID % len(grow_conditions)
-        selected_cond = grow_conditions[cond_idx]
+        setting_idx = args.SLURM_ARRAY_TASK_ID % len(grow_settings)
+        seed_offset = args.SLURM_ARRAY_TASK_ID // len(grow_settings)
+        selected_setting = grow_settings[setting_idx]
         
-    args.grow_condition = selected_cond["name"]
-    args.grow_desc = selected_cond["desc"]
+    args.grow_condition = selected_setting["grow_condition"]
+    args.transfer_mode = selected_setting["transfer_mode"]
+    args.grow_desc = selected_setting["desc"]
+    args.seed_offset = seed_offset
     
     # Target architecture parameters
-    args.target_num_heads = selected_cond["num_heads"]
-    args.target_num_hidden_features = selected_cond["num_hidden_features"]
+    args.target_num_heads = selected_setting["num_heads"]
+    args.target_num_hidden_features = selected_setting["num_hidden_features"]
     args.target_num_hidden_features_mlp = args.target_num_heads * args.target_num_hidden_features
     
     # Initial architecture: start with base model (H=8, d=32)
@@ -567,12 +598,12 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
-    args.num_iters = 300000
+    args.num_iters = 100000
     args.K = 500000
     
-    # Scheduled growth epoch (default halfway: 150 epochs = 150,000 iterations)
+    # Step 1: Epochs 0 to 49 (0 to 50,000 iters). Growth & sequence resampling at epoch 50.
     if getattr(args, "grow_iter", -1) == -1:
-        args.grow_iter = (args.num_iters // args.num_iters_per_epoch) // 2
+        args.grow_iter = 50
         
     print(f"SLURM_ARRAY_TASK_ID: {args.SLURM_ARRAY_TASK_ID} -> Condition: {args.grow_condition} ({args.grow_desc})")
     print(f"Base: H={args.base_num_heads}, d={args.base_num_hidden_features} (mlp_dim={args.base_num_hidden_features_mlp})")
@@ -588,8 +619,9 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
     num_parameters = sum(p.numel() for k, p in model.state_dict().items())
     print("Base model has", num_parameters, "parameters")
 
-# if args.seed is None:
-    args.seed = np.random.randint(0, 10000000)
+if args.seed is None:
+    seed_offset = getattr(args, "seed_offset", 0)
+    args.seed = 42 + seed_offset * 1000
 
 random.seed(args.seed)
 np.random.seed(args.seed)
@@ -613,7 +645,7 @@ print("args:\n",vars(args))
 # setup weights and biases (optional)
 if local_rank==0 and args.wandb_log: # only use main process for wandb logging
     print(f"wandb {args.wandb_project} run")
-    wandb_model_name = f"{args.fileprefix}"
+    wandb_model_name = f"{args.fileprefix}_{getattr(args, 'grow_condition', 'base')}_{getattr(args, 'transfer_mode', 'both')}_task_{args.SLURM_ARRAY_TASK_ID}"
     wandb_config = vars(args)
     os.environ["WANDB_MODE"] = "offline" # turn off wandb logging for now
     os.environ["WANDB_API_KEY"] = "a421cbcaff87506c1eadd3b9e4d6424996432e38"
@@ -970,7 +1002,7 @@ import pickle
 # import matplotlib.pyplot as plt
 if os.path.exists(f"{args.savedir}/cache/{args.wandb_group_name}") == False:
     os.makedirs(f"{args.savedir}/cache/{args.wandb_group_name}", exist_ok=True)
-fileprefix = f"{args.wandb_group_name}_{args.fileprefix}_K_{args.K}_L_{args.len_context}_hidden_{args.num_hidden_features}_nheads_{args.num_heads}_nlayers_{args.num_layers}_{time.time()}"
+fileprefix = f"{args.wandb_group_name}_{args.fileprefix}_{getattr(args, 'grow_condition', 'base')}_{getattr(args, 'transfer_mode', 'both')}_task_{args.SLURM_ARRAY_TASK_ID}_K_{args.K}_L_{args.len_context}_{int(time.time())}"
 dirprefix = f"{args.savedir}/cache/{args.wandb_group_name}/{fileprefix}"
 if os.path.exists(dirprefix) == False:
     os.makedirs(dirprefix, exist_ok=True)
@@ -1009,7 +1041,8 @@ if getattr(args, "base_checkpoint", None) is not None and os.path.exists(args.ba
         base_heads=args.base_num_heads,
         base_hidden=args.base_num_hidden_features,
         target_heads=args.target_num_heads,
-        target_hidden=args.target_num_hidden_features
+        target_hidden=args.target_num_hidden_features,
+        transfer_mode=getattr(args, "transfer_mode", "both")
     ).to(device)
     args.num_heads = args.target_num_heads
     args.num_hidden_features = args.target_num_hidden_features
@@ -1018,70 +1051,79 @@ if getattr(args, "base_checkpoint", None) is not None and os.path.exists(args.ba
     print(f"Pretrained base model weights transferred! Target model params: {sum(p.numel() for p in model.parameters()):,}")
 
 for iter in range(args.num_iters // num_iters_per_epoch): 
-    # Check for model growth transition
-    if hasattr(args, "grow_iter") and iter == args.grow_iter and getattr(args, "grow_condition", None) not in [None, "base"]:
-        print("\n" + "="*60)
-        print(f"GROWING MODEL AT EPOCH {iter} (iter {iter * num_iters_per_epoch})")
-        print(f"Condition: {args.grow_condition} ({args.grow_desc})")
-        print(f"From: H={args.num_heads}, d={args.num_hidden_features}, mlp={args.num_hidden_features_mlp}")
-        print(f"To:   H={args.target_num_heads}, d={args.target_num_hidden_features}, mlp={args.target_num_hidden_features_mlp}")
-        
-        base_ckpt_path = f"{dirprefix}/{fileprefix}_base_model_epoch_{iter}.pkl"
-        with open(base_ckpt_path, "wb") as f:
-            pickle.dump(model.state_dict(), f)
-        print(f"Saved base model checkpoint to {base_ckpt_path}")
-        
-        target_model = gpt.OneLayerAttention(
-            len_context=args.len_context,
-            num_heads=args.target_num_heads,
-            num_hidden_features=args.target_num_hidden_features,
-            vocab_size=args.vocab_size,
-            num_mlp_layers=args.num_mlp_layers,
-            num_hidden_features_mlp=args.target_num_hidden_features_mlp
-        )
-        target_model = grow_onelayer_attention_weights(
-            base_model=model,
-            target_model=target_model,
-            base_heads=args.base_num_heads,
-            base_hidden=args.base_num_hidden_features,
-            target_heads=args.target_num_heads,
-            target_hidden=args.target_num_hidden_features
-        ).to(device)
-        
-        model = target_model
-        args.num_heads = args.target_num_heads
-        args.num_hidden_features = args.target_num_hidden_features
-        args.num_hidden_features_mlp = args.target_num_hidden_features_mlp
-        
-        if args.optimizer == "SGD":
-            optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
-        elif args.optimizer == "Adam":
-            optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # Check for model growth and sequence resampling transition
+    if hasattr(args, "grow_iter") and iter == args.grow_iter:
+        if getattr(args, "grow_condition", None) is not None:
+            print("\n" + "="*60)
+            print(f"GROWING / TRANSITION MODEL AT EPOCH {iter} (iter {iter * num_iters_per_epoch})")
+            print(f"Condition: {args.grow_condition} ({args.grow_desc}), Transfer Mode: {args.transfer_mode}")
+            print(f"From: H={args.num_heads}, d={args.num_hidden_features}, mlp={args.num_hidden_features_mlp}")
+            print(f"To:   H={args.target_num_heads}, d={args.target_num_hidden_features}, mlp={args.target_num_hidden_features_mlp}")
             
-        print(f"Grown model initialized! New parameters: {sum(p.numel() for p in model.parameters()):,}")
-        print("="*60 + "\n")
-        all_sequences_across_switches["grow_epoch"] = iter
-        all_sequences_across_switches["grow_condition"] = args.grow_condition
+            base_ckpt_path = f"{dirprefix}/{fileprefix}_base_model_epoch_{iter}.pkl"
+            with open(base_ckpt_path, "wb") as f:
+                pickle.dump(model.state_dict(), f)
+            print(f"Saved base model checkpoint to {base_ckpt_path}")
+            
+            target_model = gpt.OneLayerAttention(
+                len_context=args.len_context,
+                num_heads=args.target_num_heads,
+                num_hidden_features=args.target_num_hidden_features,
+                vocab_size=args.vocab_size,
+                num_mlp_layers=args.num_mlp_layers,
+                num_hidden_features_mlp=args.target_num_hidden_features_mlp
+            )
+            target_model = grow_onelayer_attention_weights(
+                base_model=model,
+                target_model=target_model,
+                base_heads=args.base_num_heads,
+                base_hidden=args.base_num_hidden_features,
+                target_heads=args.target_num_heads,
+                target_hidden=args.target_num_hidden_features,
+                transfer_mode=args.transfer_mode
+            ).to(device)
+            
+            model = target_model
+            args.num_heads = args.target_num_heads
+            args.num_hidden_features = args.target_num_hidden_features
+            args.num_hidden_features_mlp = args.target_num_hidden_features_mlp
+            
+            if args.optimizer == "SGD":
+                optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            elif args.optimizer == "Adam":
+                optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+                
+            print(f"Transition model initialized! Parameters: {sum(p.numel() for p in model.parameters()):,}")
+            print("="*60 + "\n")
+            all_sequences_across_switches["grow_epoch"] = iter
+            all_sequences_across_switches["grow_condition"] = args.grow_condition
+            all_sequences_across_switches["transfer_mode"] = args.transfer_mode
 
-    # Switch the sequences half way through the training
-    if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
+        # Resample all sequences when model size changes (or at switch epoch for base model)
+        print("\n" + "="*60)
+        print(f"RESAMPLING ALL SEQUENCES AT EPOCH {iter} (iter {iter * num_iters_per_epoch})")
         train_dataset.generate_sequences()
-        # all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
-        # with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
-        #     pickle.dump(all_sequences_across_switches, f)
-        
+        all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
+        all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences))
+        with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+            pickle.dump(all_sequences_across_switches, f)
+
         if args.sequence_sampling_distribution == "zipf":
             _iwl_cutoff = min(200000, args.K)
             iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
             iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
             iwl_dataset.original_indices = iwl_indices
             iwl_dataset.train_dataset = train_dataset
-            iwl_test_loader = torch.utils.data.DataLoader(iwl_dataset,
-                                            sampler=val_sampler,
-                                            **{'batch_size': args.batch_size, 'num_workers': args.workers,
-                                        "shuffle": False,
-                                        'pin_memory': True})
+            iwl_dataset.len_data = len(iwl_dataset.sequences)
+            iwl_test_loader = torch.utils.data.DataLoader(
+                iwl_dataset,
+                sampler=val_sampler,
+                **{'batch_size': args.batch_size, 'num_workers': args.workers,
+                   "shuffle": False, 'pin_memory': True}
+            )
         num_apppearances = np.zeros(args.K)
+        print(f"Resampled all {args.K} sequences! Appearance counts reset to 0.")
+        print("="*60 + "\n")
         
         
     # Switch the sequences several times throughout the training

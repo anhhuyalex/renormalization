@@ -67,7 +67,7 @@ echo "SLURM_ARRAY_TASK_ID $SLURM_ARRAY_TASK_ID, i = $i, j = $j"
 gpt_bias=True
 lr=1e-3
 optimizer="Adam"
-num_iters=5000000
+num_iters=100000
 K=1000
 sequence_sampling_distribution="uniform"
 num_mlp_layers=3
