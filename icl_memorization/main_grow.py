@@ -51,6 +51,72 @@ import sys
 import glob
 from collections import defaultdict
 
+def grow_onelayer_attention_weights(base_model, target_model, base_heads, base_hidden, target_heads, target_hidden):
+    base_sd = base_model.state_dict() if hasattr(base_model, "state_dict") else base_model
+    target_sd = target_model.state_dict()
+    
+    # 1. Embeddings: wte and wpe
+    for h in range(base_heads):
+        t_start = h * target_hidden
+        s_start = h * base_hidden
+        if "wte.weight" in target_sd and "wte.weight" in base_sd:
+            target_sd["wte.weight"][:, t_start : t_start + base_hidden] = base_sd["wte.weight"][:, s_start : s_start + base_hidden]
+        if "wpe.weight" in target_sd and "wpe.weight" in base_sd:
+            target_sd["wpe.weight"][:, t_start : t_start + base_hidden] = base_sd["wpe.weight"][:, s_start : s_start + base_hidden]
+        
+    # 2. LayerNorms: ln_f and pre_attn_ln
+    for ln_name in ["ln_f", "pre_attn_ln"]:
+        for param in ["weight", "bias"]:
+            key = f"{ln_name}.{param}"
+            if key in target_sd and key in base_sd:
+                for h in range(base_heads):
+                    t_start = h * target_hidden
+                    s_start = h * base_hidden
+                    target_sd[key][t_start : t_start + base_hidden] = base_sd[key][s_start : s_start + base_hidden]
+
+    # 3. Attention projection: c_attn
+    C_s = base_heads * base_hidden
+    C_t = target_heads * target_hidden
+    for qkv_idx in range(3):
+        qkv_s_offset = qkv_idx * C_s
+        qkv_t_offset = qkv_idx * C_t
+        for h in range(base_heads):
+            r_s = qkv_s_offset + h * base_hidden
+            r_t = qkv_t_offset + h * target_hidden
+            if "c_attn.bias" in target_sd and "c_attn.bias" in base_sd:
+                target_sd["c_attn.bias"][r_t : r_t + base_hidden] = base_sd["c_attn.bias"][r_s : r_s + base_hidden]
+            for hp in range(base_heads):
+                c_s = hp * base_hidden
+                c_t = hp * target_hidden
+                target_sd["c_attn.weight"][r_t : r_t + base_hidden, c_t : c_t + base_hidden] =                     base_sd["c_attn.weight"][r_s : r_s + base_hidden, c_s : c_s + base_hidden]
+
+    # 4. First MLP layer: linear_modules.0 (maps C -> M)
+    M_s = base_heads * base_hidden
+    if "linear_modules.0.bias" in target_sd and "linear_modules.0.bias" in base_sd:
+        target_sd["linear_modules.0.bias"][:M_s] = base_sd["linear_modules.0.bias"][:M_s]
+    for hp in range(base_heads):
+        c_s = hp * base_hidden
+        c_t = hp * target_hidden
+        target_sd["linear_modules.0.weight"][:M_s, c_t : c_t + base_hidden] =             base_sd["linear_modules.0.weight"][:M_s, c_s : c_s + base_hidden]
+
+    # 5. Subsequent MLP layers: linear_modules.1, etc. (maps M -> M)
+    mlp_idx = 1
+    while f"linear_modules.{mlp_idx}.weight" in target_sd and f"linear_modules.{mlp_idx}.weight" in base_sd:
+        target_sd[f"linear_modules.{mlp_idx}.weight"][:M_s, :M_s] = base_sd[f"linear_modules.{mlp_idx}.weight"][:M_s, :M_s]
+        if f"linear_modules.{mlp_idx}.bias" in target_sd and f"linear_modules.{mlp_idx}.bias" in base_sd:
+            target_sd[f"linear_modules.{mlp_idx}.bias"][:M_s] = base_sd[f"linear_modules.{mlp_idx}.bias"][:M_s]
+        mlp_idx += 1
+
+    # 6. LM Head: lm_head (maps M -> vocab_size)
+    if "lm_head.weight" in target_sd and "lm_head.weight" in base_sd:
+        target_sd["lm_head.weight"][:, :M_s] = base_sd["lm_head.weight"][:, :M_s]
+    if "lm_head.bias" in target_sd and "lm_head.bias" in base_sd:
+        target_sd["lm_head.bias"][:] = base_sd["lm_head.bias"][:]
+
+    target_model.load_state_dict(target_sd)
+    return target_model
+
+
 # +
 parser = argparse.ArgumentParser(description='GMM L2L Training with Sequence Model')
 parser.add_argument('--data', metavar='DIR', nargs='?', default='./data',
@@ -152,6 +218,13 @@ parser.add_argument('--unique_loss_mode', default="add", type=str,
                     help='mode for combining unique feature loss: add, only, or weighted')
 parser.add_argument('--unique_loss_alpha', default=0.5, type=float,
                     help='mixing alpha for weighted unique loss mode: (1-alpha)*shared + alpha*unique')
+parser.add_argument('--grow_condition', default=None, type=str,
+                    choices=['base', 'width_growth', 'head_growth', 'both_growth'],
+                    help='growth condition: base, width_growth, head_growth, both_growth')
+parser.add_argument('--grow_iter', default=-1, type=int,
+                    help='epoch iteration at which to grow the model (-1 for halfway)')
+parser.add_argument('--base_checkpoint', default=None, type=str,
+                    help='path to pretrained base model checkpoint (H=8, d=32) to initialize from')
 
 
 # if running this interactively, can specify jupyter_args here for argparser to use
@@ -447,23 +520,65 @@ elif args.wandb_group_name == "memo_may25_zipf_onelayerattention_large_doresampl
     print("Model has", num_parameters, "parameters")
     if num_parameters > 1e9:
         sys.exit() 
-elif args.wandb_group_name == "memo_sep27_zipf_onelayerattention_large_doresample":
+elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresample", "memo_sep27_zipf_onelayerattention_grow", "memo_grow_onelayerattention"] or "grow" in args.wandb_group_name:
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
-    num_heads = list(range(13, 17, 1)) # len: 2
-    num_hidden_features = 2 ** np.linspace(5, 6, 1).astype(int) # len : 2
-    args.num_heads = num_heads[args.SLURM_ARRAY_TASK_ID % len(num_hidden_features)] 
-    args.num_hidden_features = int(num_hidden_features[args.SLURM_ARRAY_TASK_ID // len(num_hidden_features)])
+    
+    # Base model architecture: H=8, d=32 (mlp_dim = 256)
+    args.base_num_heads = 8
+    args.base_num_hidden_features = 32
+    args.base_num_hidden_features_mlp = args.base_num_heads * args.base_num_hidden_features
+    
+    # Growth conditions:
+    # 0: base control baseline (no growth, H=8, d=32)
+    # 1: a) only width growth (H=8, d=64)
+    # 2: b) only head growth (H=16, d=32)
+    # 3: c) both width and head growth (H=16, d=64)
+    grow_conditions = [
+        {"name": "base", "num_heads": 8, "num_hidden_features": 32, "desc": "base_8h_32d"},
+        {"name": "width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "width_growth_8h_64d"},
+        {"name": "head_growth", "num_heads": 16, "num_hidden_features": 32, "desc": "head_growth_16h_32d"},
+        {"name": "both_growth", "num_heads": 16, "num_hidden_features": 64, "desc": "both_growth_16h_64d"},
+    ]
+    
+    if getattr(args, "grow_condition", None) is not None:
+        selected_cond = next((c for c in grow_conditions if c["name"] == args.grow_condition), None)
+        if selected_cond is None:
+            raise ValueError(f"Unknown grow_condition: {args.grow_condition}")
+    else:
+        cond_idx = args.SLURM_ARRAY_TASK_ID % len(grow_conditions)
+        selected_cond = grow_conditions[cond_idx]
+        
+    args.grow_condition = selected_cond["name"]
+    args.grow_desc = selected_cond["desc"]
+    
+    # Target architecture parameters
+    args.target_num_heads = selected_cond["num_heads"]
+    args.target_num_hidden_features = selected_cond["num_hidden_features"]
+    args.target_num_hidden_features_mlp = args.target_num_heads * args.target_num_hidden_features
+    
+    # Initial architecture: start with base model (H=8, d=32)
+    args.num_heads = args.base_num_heads
+    args.num_hidden_features = args.base_num_hidden_features
+    args.num_hidden_features_mlp = args.base_num_hidden_features_mlp
+    args.num_layers = 1
+    
     args.is_save_model_every = 25
-    args.num_hidden_features_mlp = int(args.num_heads * args.num_hidden_features) 
-    print("SLURM_ARRAY_TASK_ID",args.SLURM_ARRAY_TASK_ID, "num_heads", args.num_heads, "num_layers", args.num_layers)
     
     set_zipf_exp_params_resample(args)
     set_num_heads_and_layers_and_lr(args, args.num_heads, args.num_layers, 1e-3) 
     args.num_iters = 300000
     args.K = 500000
-    # assert that cuda exists
-    assert torch.cuda.is_available(), "cuda not available" 
+    
+    # Scheduled growth epoch (default halfway: 150 epochs = 150,000 iterations)
+    if getattr(args, "grow_iter", -1) == -1:
+        args.grow_iter = (args.num_iters // args.num_iters_per_epoch) // 2
+        
+    print(f"SLURM_ARRAY_TASK_ID: {args.SLURM_ARRAY_TASK_ID} -> Condition: {args.grow_condition} ({args.grow_desc})")
+    print(f"Base: H={args.base_num_heads}, d={args.base_num_hidden_features} (mlp_dim={args.base_num_hidden_features_mlp})")
+    print(f"Target: H={args.target_num_heads}, d={args.target_num_hidden_features} (mlp_dim={args.target_num_hidden_features_mlp})")
+    print(f"Growth scheduled at epoch {args.grow_iter} (iter {args.grow_iter * args.num_iters_per_epoch})")
+    assert torch.cuda.is_available() or args.no_cuda, "cuda not available"
     model = gpt.OneLayerAttention(len_context = args.len_context, 
                                   num_heads = args.num_heads, 
                                   num_hidden_features = args.num_hidden_features, 
@@ -471,12 +586,9 @@ elif args.wandb_group_name == "memo_sep27_zipf_onelayerattention_large_doresampl
                                   num_mlp_layers = args.num_mlp_layers,
                                   num_hidden_features_mlp = args.num_hidden_features_mlp) 
     num_parameters = sum(p.numel() for k, p in model.state_dict().items())
-    print("Model has", num_parameters, "parameters")
-    if num_parameters > 1e9:
-        sys.exit() 
+    print("Base model has", num_parameters, "parameters")
 
-# assert args.K % args.L == 0, "K must be divisible by L"
-if args.seed is None:
+# if args.seed is None:
     args.seed = np.random.randint(0, 10000000)
 
 random.seed(args.seed)
@@ -876,7 +988,81 @@ all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.se
 all_sequences_across_switches["switch_start_iter"].append([0] * len(train_dataset.sequences))
 with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
     pickle.dump(all_sequences_across_switches, f)
+
+# If base_checkpoint provided, initialize target model directly
+if getattr(args, "base_checkpoint", None) is not None and os.path.exists(args.base_checkpoint):
+    print(f"Loading pretrained base model checkpoint: {args.base_checkpoint}")
+    with open(args.base_checkpoint, "rb") as f:
+        base_ckpt = utils.CPU_Unpickler(f).load()
+    base_state_dict = base_ckpt["model"] if isinstance(base_ckpt, dict) and "model" in base_ckpt else base_ckpt
+    target_model = gpt.OneLayerAttention(
+        len_context=args.len_context,
+        num_heads=args.target_num_heads,
+        num_hidden_features=args.target_num_hidden_features,
+        vocab_size=args.vocab_size,
+        num_mlp_layers=args.num_mlp_layers,
+        num_hidden_features_mlp=args.target_num_hidden_features_mlp
+    )
+    model = grow_onelayer_attention_weights(
+        base_model=base_state_dict,
+        target_model=target_model,
+        base_heads=args.base_num_heads,
+        base_hidden=args.base_num_hidden_features,
+        target_heads=args.target_num_heads,
+        target_hidden=args.target_num_hidden_features
+    ).to(device)
+    args.num_heads = args.target_num_heads
+    args.num_hidden_features = args.target_num_hidden_features
+    args.num_hidden_features_mlp = args.target_num_hidden_features_mlp
+    args.grow_iter = -1
+    print(f"Pretrained base model weights transferred! Target model params: {sum(p.numel() for p in model.parameters()):,}")
+
 for iter in range(args.num_iters // num_iters_per_epoch): 
+    # Check for model growth transition
+    if hasattr(args, "grow_iter") and iter == args.grow_iter and getattr(args, "grow_condition", None) not in [None, "base"]:
+        print("\n" + "="*60)
+        print(f"GROWING MODEL AT EPOCH {iter} (iter {iter * num_iters_per_epoch})")
+        print(f"Condition: {args.grow_condition} ({args.grow_desc})")
+        print(f"From: H={args.num_heads}, d={args.num_hidden_features}, mlp={args.num_hidden_features_mlp}")
+        print(f"To:   H={args.target_num_heads}, d={args.target_num_hidden_features}, mlp={args.target_num_hidden_features_mlp}")
+        
+        base_ckpt_path = f"{dirprefix}/{fileprefix}_base_model_epoch_{iter}.pkl"
+        with open(base_ckpt_path, "wb") as f:
+            pickle.dump(model.state_dict(), f)
+        print(f"Saved base model checkpoint to {base_ckpt_path}")
+        
+        target_model = gpt.OneLayerAttention(
+            len_context=args.len_context,
+            num_heads=args.target_num_heads,
+            num_hidden_features=args.target_num_hidden_features,
+            vocab_size=args.vocab_size,
+            num_mlp_layers=args.num_mlp_layers,
+            num_hidden_features_mlp=args.target_num_hidden_features_mlp
+        )
+        target_model = grow_onelayer_attention_weights(
+            base_model=model,
+            target_model=target_model,
+            base_heads=args.base_num_heads,
+            base_hidden=args.base_num_hidden_features,
+            target_heads=args.target_num_heads,
+            target_hidden=args.target_num_hidden_features
+        ).to(device)
+        
+        model = target_model
+        args.num_heads = args.target_num_heads
+        args.num_hidden_features = args.target_num_hidden_features
+        args.num_hidden_features_mlp = args.target_num_hidden_features_mlp
+        
+        if args.optimizer == "SGD":
+            optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        elif args.optimizer == "Adam":
+            optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+            
+        print(f"Grown model initialized! New parameters: {sum(p.numel() for p in model.parameters()):,}")
+        print("="*60 + "\n")
+        all_sequences_across_switches["grow_epoch"] = iter
+        all_sequences_across_switches["grow_condition"] = args.grow_condition
+
     # Switch the sequences half way through the training
     if iter == args.num_iters // num_iters_per_epoch / 2 and args.is_resample_tasks == "True": # resample the tasks
         train_dataset.generate_sequences()
