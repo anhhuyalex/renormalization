@@ -167,9 +167,151 @@ The probability that the model assigns to the $n+1$-th bit being positive is giv
 The loss function is then given by $$L = -\frac{1}{MN}\sum_{m=1}^{M}\sum_{n=0}^{N-1} \mathcal {L}_{BCE}( {m,n} ; A^{(n)}, B)$$ where $\mathcal {L}_{BCE}$ is the binary cross-entropy loss.
 Here $A^{(n)}$ is the matrix of the attention weights for the $n$th bit and $B$ is the matrix corresponding to the query vector.
 
-## Main Grow experiments 
-- Let's run a new experiment where we investigate whether training a smaller model would allow us to better initialize the weights of a larger model. 
+## Main Grow experiments
 
+### 1. Research Motivation & Hypothesis
 
-The idea is that we first train a network (a OneLayerAttention network) where the model is forced to memorize the sequence dataset . 
-Then, we transfer the weights of the trained model to a larger network (a GPT2 network). 
+The **Model Growth and Weight Transfer Experiment** investigates whether pretraining a smaller transformer model on an in-context sequence memorization task can provide an effective inductive bias and initialization when scaled into a larger architecture.
+
+Key scientific questions addressed by this experiment:
+1. **Model Expansion vs. Training from Scratch**: Does warm-starting a larger model with submatrices from a trained smaller model accelerate convergence and improve final memorization capacity compared to random initialization?
+2. **Growth Geometry (Width vs. Heads)**: Is performance more sensitive to expanding the head dimension $d$ (width per head), increasing the number of attention heads $H$, or scaling both simultaneously?
+3. **Component Ablation (Attention vs. MLP Transfer)**: Does the learned representation reside predominantly in the **attention routing/query-key-value geometry** or in the **MLP associative key-value memory**? By selectively transferring either attention weights, MLP weights, or both, we isolate the functional contributions of each transformer sub-network to meta-memorization.
+
+---
+
+### 2. Two-Phase Training Protocol
+
+The experiment follows a strict two-phase protocol parameterized by iterations ($1{,}000$ iterations per epoch, $100{,}000$ total iterations):
+
+```
++----------------------------------------------------------------------------------------------------+
+|  Phase 1: Base Model Training (Epochs 0 to 49 / Iterations 0 to 50,000)                             |
+|  - Architecture: OneLayerAttention (H_base = 8, d_base = 32, C_base = 256, mlp_dim = 256)           |
+|  - Dataset: Zipfian sequence library (K = 500,000, context length N = 100, vocab size V = 2)       |
+|  - Optimizer: Adam (lr = 1e-3, weight_decay = 0.0)                                                 |
++----------------------------------------------------------------------------------------------------+
+                                                  |
+                                      [ Epoch 50 Transition ]
+                                                  |
+  1. Base Checkpoint: Save model state dict to {dirprefix}/{fileprefix}_base_model_epoch_50.pkl
+  2. Sequence Resampling: Resample all K = 500,000 sequences via train_dataset.generate_sequences()
+     - Appearance counters reset (num_appearances = 0)
+     - Test evaluation set synchronized
+     - Sequence switch record saved to {dirprefix}/{fileprefix}_all_sequences.pkl
+  3. Model Growth & Weight Transfer: Instantiate target architecture (H_target, d_target)
+     - Transfer submatrices according to transfer_mode ('both', 'attn_only', 'mlp_only')
+  4. Optimizer Reset: Reinitialize Adam optimizer moments for new parameter shapes
+                                                  |
+                                                  v
++----------------------------------------------------------------------------------------------------+
+|  Phase 2: Retraining on Resampled Sequences (Epochs 50 to 99 / Iterations 50,000 to 100,000)       |
+|  - Evaluates how well the transferred subnetwork adapts to / memorizes fresh Zipfian sequences      |
+|  - Tracks per-sequence presentation loss, accuracy, and forgetting dynamics                         |
++----------------------------------------------------------------------------------------------------+
+```
+
+---
+
+### 3. Submatrix Weight Transfer Mechanics
+
+Let the base model have $H_s$ heads and $d_s$ hidden features per head ($C_s = H_s d_s$), and the target model have $H_t \ge H_s$ heads and $d_t \ge d_s$ hidden features per head ($C_t = H_t d_t$). The MLP has $M_s = C_s$ and $M_t = C_t$ hidden dimensions.
+
+The utility `grow_onelayer_attention_weights` in `grow_utils.py` embeds the base parameters into the corresponding subspaces of the target model:
+
+1. **Token and Positional Embeddings** ($W_{te} \in \mathbb{R}^{V 	imes C_t}$, $W_{pe} \in \mathbb{R}^{N 	imes C_t}$):
+   For each head $h \in \{0, \dots, H_s - 1\}$:
+   $$W_{target}[:, h \cdot d_t : h \cdot d_t + d_s] \leftarrow W_{base}[:, h \cdot d_s : (h+1) d_s]$$
+
+2. **Layer Normalizations** ($\gamma, eta \in \mathbb{R}^{C_t}$ for $LN_f$ and $LN_{	ext{pre}}$):
+   $$\gamma_{target}[h \cdot d_t : h \cdot d_t + d_s] \leftarrow \gamma_{base}[h \cdot d_s : (h+1) d_s]$$
+
+3. **Multi-Head Attention Projection** ($W_{qkv} \in \mathbb{R}^{3 C_t 	imes C_t}$):
+   For each projection block $qkv \in \{Q, K, V\}$ and head pair $(h, h') \in \{0, \dots, H_s - 1\}^2$:
+   $$W_{target}[qkv \cdot C_t + h \cdot d_t : qkv \cdot C_t + h \cdot d_t + d_s,\; h' \cdot d_t : h' \cdot d_t + d_s] \leftarrow W_{base}[qkv \cdot C_s + h \cdot d_s : qkv \cdot C_s + (h+1) d_s,\; h' \cdot d_s : (h'+1) d_s]$$
+
+4. **First MLP Layer** ($W_{mlp, 0} \in \mathbb{R}^{M_t 	imes C_t}$, $b_{mlp, 0} \in \mathbb{R}^{M_t}$):
+   $$W_{target}[:M_s,\; h' \cdot d_t : h' \cdot d_t + d_s] \leftarrow W_{base}[:M_s,\; h' \cdot d_s : (h'+1) d_s]$$
+   $$b_{target}[:M_s] \leftarrow b_{base}[:M_s]$$
+
+5. **Intermediate MLP Layers** ($W_{mlp, i} \in \mathbb{R}^{M_t 	imes M_t}$, $b_{mlp, i} \in \mathbb{R}^{M_t}$ for $i \ge 1$):
+   $$W_{target}[:M_s, :M_s] \leftarrow W_{base}[:M_s, :M_s], \quad b_{target}[:M_s] \leftarrow b_{base}[:M_s]$$
+
+6. **LM Prediction Head** ($W_{head} \in \mathbb{R}^{V 	imes M_t}$, $b_{head} \in \mathbb{R}^{V}$):
+   $$W_{target}[:, :M_s] \leftarrow W_{base}[:, :M_s], \quad b_{target}[:] \leftarrow b_{base}[:]$$
+
+Any target parameters outside these sliced ranges retain their fresh random initialization per GPT-2 initialization standards.
+
+---
+
+### 4. Component Ablation Modes (`--transfer_mode`)
+
+To isolate where transferable knowledge is stored, each architecture is tested under three weight transfer modes:
+
+- **`both`**: Transfers both attention projections/embeddings and MLP layers into the target model.
+- **`attn_only`**: Transfers embeddings, layer norms, and attention projections ($W_{qkv}$); all MLP layers and the LM head remain freshly initialized with random weights.
+- **`mlp_only`**: Transfers all MLP layers and the LM head; embeddings, layer norms, and attention projections remain freshly initialized with random weights.
+
+---
+
+### 5. Experimental Design Matrix ($4 	imes 3 = 12$ Conditions)
+
+The experiment crosses 4 target architectures with 3 transfer modes to produce 12 conditions:
+
+| Setting ID | Architecture Condition | Target Heads ($H$) | Target Width ($d$) | Total Hidden ($C$) | MLP Dim ($M$) | Transfer Mode | Description |
+|:---:|:---|:---:|:---:|:---:|:---:|:---:|:---|
+| **0** | `base` | 8 | 32 | 256 | 256 | `attn_only` | Keep attention; reset MLP |
+| **1** | `base` | 8 | 32 | 256 | 256 | `mlp_only` | Keep MLP; reset attention |
+| **2** | `base` | 8 | 32 | 256 | 256 | `both` | Full continuation baseline |
+| **3** | `width_growth` | 8 | 64 | 512 | 512 | `attn_only` | Width growth; transfer attention only |
+| **4** | `width_growth` | 8 | 64 | 512 | 512 | `mlp_only` | Width growth; transfer MLP only |
+| **5** | `width_growth` | 8 | 64 | 512 | 512 | `both` | Width growth; transfer both |
+| **6** | `head_growth` | 16 | 32 | 512 | 512 | `attn_only` | Head growth; transfer attention only |
+| **7** | `head_growth` | 16 | 32 | 512 | 512 | `mlp_only` | Head growth; transfer MLP only |
+| **8** | `head_growth` | 16 | 32 | 512 | 512 | `both` | Head growth; transfer both |
+| **9** | `both_growth` | 16 | 64 | 1024 | 1024 | `attn_only` | Width & head growth; transfer attention only |
+| **10** | `both_growth` | 16 | 64 | 1024 | 1024 | `mlp_only` | Width & head growth; transfer MLP only |
+| **11** | `both_growth` | 16 | 64 | 1024 | 1024 | `both` | Width & head growth; transfer both |
+
+---
+
+### 6. SLURM Array Allocation & Paired Random Seeds
+
+The 36 SLURM array tasks (`#SBATCH --array=0-35`) map to the 12 settings with **3 independent random seeds** per setting:
+
+- **Setting Index**: `setting_idx = SLURM_ARRAY_TASK_ID % 12`
+- **Seed Offset**: `seed_offset = SLURM_ARRAY_TASK_ID // 12`
+  - **Tasks 0–11**: Seed `42` (`seed_offset = 0`)
+  - **Tasks 12–23**: Seed `1042` (`seed_offset = 1`)
+  - **Tasks 24–35**: Seed `2042` (`seed_offset = 2`)
+
+> [!NOTE]
+> Because Tasks 0–11 share Seed `42`, all 12 settings begin from **identical initial weights and identical Step 1 sequence samples**, providing a rigorous paired comparison when models branch off at Epoch 50.
+
+---
+
+### 7. Code Organization & Execution
+
+- **Training Script**: [`main_grow.py`](main_grow.py)
+- **Batch Submission**: [`main_grow.sh`](main_grow.sh)
+- **Growing Utility**: [`grow_utils.py`](grow_utils.py)
+- **Unit Test Suite**: [`tests/test_grow_small.py`](tests/test_grow_small.py)
+
+#### Running the Experiment
+Submit the array job to SLURM:
+```bash
+sbatch main_grow.sh
+```
+
+#### Running Unit Tests
+Execute the unit test suite on small networks:
+```bash
+python tests/test_grow_small.py
+```
+
+#### Output Artifacts
+Each run saves artifacts to `/scratch/qanguyen/gautam/cache/memo_sep27_zipf_onelayerattention_grow/<fileprefix>/`:
+- `<fileprefix>_base_model_epoch_50.pkl`: Base model weights checkpointed immediately prior to growth at Epoch 50.
+- `<fileprefix>_all_sequences.pkl`: Pickled dictionary containing the full sequence lists before and after the Epoch 50 resampling.
+- `<fileprefix>_model_final.pkl`: Final retrained model state dictionary at Iteration 100,000.
+- `<fileprefix>.pkl`: Test evaluation metrics, loss per appearance, and training logs across iterations.
