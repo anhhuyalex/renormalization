@@ -227,7 +227,7 @@ parser.add_argument('--transfer_mode', default=None, type=str,
                     choices=['both', 'attn_only', 'mlp_only'],
                     help='transfer mode at growth/transition: both, attn_only, mlp_only')
 parser.add_argument('--grow_condition', default=None, type=str,
-                    choices=['base', 'width_growth', 'head_growth', 'both_growth'],
+                    choices=['base', 'width_growth', 'head_growth', 'both_growth', 'base_width_growth', 'base_head_growth', 'base_both_growth'],
                     help='growth condition: base, width_growth, head_growth, both_growth')
 parser.add_argument('--grow_iter', default=-1, type=int,
                     help='epoch iteration at which to grow the model (-1 for halfway)')
@@ -537,8 +537,7 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
     args.base_num_hidden_features = 32
     args.base_num_hidden_features_mlp = args.base_num_heads * args.base_num_hidden_features
     
-    # 4 Architectures x 3 Transfer Modes = 12 Settings
-    # 36 array jobs -> 12 settings x 3 seeds (SLURM_ARRAY_TASK_ID % 12 for setting, // 12 for seed)
+    # 1. Growth settings (Tasks 0 to 35: start at 8h/32d, grow at epoch 50 to target size)
     arch_conditions = [
         {"name": "base", "num_heads": 8, "num_hidden_features": 32, "desc": "base_8h_32d"},
         {"name": "width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "width_growth_8h_64d"},
@@ -556,24 +555,52 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
                 "num_hidden_features": arch["num_hidden_features"],
                 "transfer_mode": t_mode,
                 "desc": f"{arch['desc']}_{t_mode}",
+                "is_base_experiment": (arch["name"] == "base"),
             })
+
+    # 2. Base experiment settings for larger models (Tasks 36 to 62: start directly at target size from epoch 0)
+    base_arch_conditions = [
+        {"name": "base_width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "base_width_8h_64d"},
+        {"name": "base_head_growth", "num_heads": 16, "num_hidden_features": 32, "desc": "base_head_16h_32d"},
+        {"name": "base_both_growth", "num_heads": 16, "num_hidden_features": 64, "desc": "base_both_16h_64d"},
+    ]
+    base_settings = []
+    for arch in base_arch_conditions:
+        for t_mode in transfer_modes:
+            base_settings.append({
+                "grow_condition": arch["name"],
+                "num_heads": arch["num_heads"],
+                "num_hidden_features": arch["num_hidden_features"],
+                "transfer_mode": t_mode,
+                "desc": f"{arch['desc']}_{t_mode}",
+                "is_base_experiment": True,
+            })
+
+    all_settings = grow_settings + base_settings
             
     if getattr(args, "grow_condition", None) is not None and getattr(args, "transfer_mode", None) is not None:
-        selected_setting = next((s for s in grow_settings if s["grow_condition"] == args.grow_condition and s["transfer_mode"] == args.transfer_mode), None)
+        selected_setting = next((s for s in all_settings if s["grow_condition"] == args.grow_condition and s["transfer_mode"] == args.transfer_mode), None)
         if selected_setting is None:
             raise ValueError(f"Unknown setting: grow_condition={args.grow_condition}, transfer_mode={args.transfer_mode}")
         seed_offset = 0
     elif getattr(args, "grow_condition", None) is not None:
-        matching = [s for s in grow_settings if s["grow_condition"] == args.grow_condition]
+        matching = [s for s in all_settings if s["grow_condition"] == args.grow_condition]
         setting_idx = args.SLURM_ARRAY_TASK_ID % len(matching)
         seed_offset = args.SLURM_ARRAY_TASK_ID // len(matching)
         selected_setting = matching[setting_idx]
     elif getattr(args, "transfer_mode", None) is not None:
-        matching = [s for s in grow_settings if s["transfer_mode"] == args.transfer_mode]
+        matching = [s for s in all_settings if s["transfer_mode"] == args.transfer_mode]
         setting_idx = args.SLURM_ARRAY_TASK_ID % len(matching)
         seed_offset = args.SLURM_ARRAY_TASK_ID // len(matching)
         selected_setting = matching[setting_idx]
+    elif args.SLURM_ARRAY_TASK_ID >= 36:
+        # Base experiments at larger sizes (Tasks 36 to 62: 9 settings x 3 seeds)
+        offset_task = args.SLURM_ARRAY_TASK_ID - 36
+        setting_idx = offset_task % len(base_settings)
+        seed_offset = offset_task // len(base_settings)
+        selected_setting = base_settings[setting_idx]
     else:
+        # Growth experiments (Tasks 0 to 35: 12 settings x 3 seeds)
         setting_idx = args.SLURM_ARRAY_TASK_ID % len(grow_settings)
         seed_offset = args.SLURM_ARRAY_TASK_ID // len(grow_settings)
         selected_setting = grow_settings[setting_idx]
@@ -582,13 +609,25 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
     args.transfer_mode = selected_setting["transfer_mode"]
     args.grow_desc = selected_setting["desc"]
     args.seed_offset = seed_offset
+    is_base = selected_setting.get("is_base_experiment", False) or args.grow_condition.startswith("base")
     
     # Target architecture parameters
     args.target_num_heads = selected_setting["num_heads"]
     args.target_num_hidden_features = selected_setting["num_hidden_features"]
     args.target_num_hidden_features_mlp = args.target_num_heads * args.target_num_hidden_features
     
-    # Initial architecture: start with base model (H=8, d=32)
+    if is_base:
+        # Base experiment: starts directly at target size from Epoch 0 with base initialization
+        args.base_num_heads = selected_setting["num_heads"]
+        args.base_num_hidden_features = selected_setting["num_hidden_features"]
+        args.base_num_hidden_features_mlp = args.target_num_hidden_features_mlp
+    else:
+        # Growth experiment: starts with base model (H=8, d=32) and grows at epoch 50
+        args.base_num_heads = 8
+        args.base_num_hidden_features = 32
+        args.base_num_hidden_features_mlp = args.base_num_heads * args.base_num_hidden_features
+        
+    # Initial architecture
     args.num_heads = args.base_num_heads
     args.num_hidden_features = args.base_num_hidden_features
     args.num_hidden_features_mlp = args.base_num_hidden_features_mlp

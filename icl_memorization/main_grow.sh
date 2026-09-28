@@ -5,7 +5,7 @@
 #SBATCH --time=48:00:00
 #SBATCH -o slurms/%j-heads.out
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-35 
+#SBATCH --array=36-62 
 # SBATCH --partition=mig
 # source activate renormalization
 source ~/.bashrc

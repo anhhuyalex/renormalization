@@ -277,13 +277,30 @@ The experiment crosses 4 target architectures with 3 transfer modes to produce 1
 
 ### 6. SLURM Array Allocation & Paired Random Seeds
 
-The 36 SLURM array tasks (`#SBATCH --array=0-35`) map to the 12 settings with **3 independent random seeds** per setting:
+The experiment contains two complementary job array blocks:
 
+#### Block 1: Model Growth & Weight Transfer (`#SBATCH --array=0-35`)
+36 tasks evaluating progressive model growth from the small base model (H=8, d=32):
 - **Setting Index**: `setting_idx = SLURM_ARRAY_TASK_ID % 12`
 - **Seed Offset**: `seed_offset = SLURM_ARRAY_TASK_ID // 12`
   - **Tasks 0–11**: Seed `42` (`seed_offset = 0`)
   - **Tasks 12–23**: Seed `1042` (`seed_offset = 1`)
   - **Tasks 24–35**: Seed `2042` (`seed_offset = 2`)
+
+#### Block 2: Base Initialization Controls at Larger Sizes (`#SBATCH --array=36-62`)
+27 tasks evaluating large models trained directly from scratch with standard base initialization from Epoch 0 (resampling data at Epoch 50, controlling for model size without progressive growth):
+- **Arch Conditions**:
+  - `base_width_growth`: H=8, d=64 (1.63M params, base initialization from Epoch 0)
+  - `base_head_growth`: H=16, d=32 (1.63M params, base initialization from Epoch 0)
+  - `base_both_growth`: H=16, d=64 (6.41M params, base initialization from Epoch 0)
+- **Transfer Modes at Epoch 50 Data Resampling**:
+  - `both`: All trained weights retained across the data switch
+  - `attn_only`: Attention weights retained, MLP reinitialized
+  - `mlp_only`: MLP weights retained, attention reinitialized
+- **Task Mapping**:
+  - **Tasks 36–44**: Seed `42` (`seed_offset = 0`)
+  - **Tasks 45–53**: Seed `1042` (`seed_offset = 1`)
+  - **Tasks 54–62**: Seed `2042` (`seed_offset = 2`)
 
 > [!NOTE]
 > Because Tasks 0–11 share Seed `42`, all 12 settings begin from **identical initial weights and identical Step 1 sequence samples**, providing a rigorous paired comparison when models branch off at Epoch 50.
