@@ -301,7 +301,7 @@ pos_e = ax_e.get_position()
 pos_f = ax_f.get_position()
 
 y_top_label = pos_a.y1 + 0.025
-y_bot_label = pos_d.y1 + 0.025
+y_bot_label = pos_d.y1 + 0.048
 
 # Move labels slightly to the right, sitting right at the top-left shoulder of each respective panel:
 # dx = -0.012 in figure coordinates (~0.186 inches to the left of the subplot spine)

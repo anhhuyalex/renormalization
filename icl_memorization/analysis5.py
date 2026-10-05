@@ -2,8 +2,11 @@ import os
 import sys
 import shutil
 import glob
+import argparse
 import math
 import pickle
+import re
+from multiprocessing import Pool
 from collections import defaultdict
 import copy
 
@@ -52,7 +55,7 @@ def create_figure1():
         wspace=0.30,
         left=0.06,
         right=0.97,
-        top=0.88,
+        top=0.80,
         bottom=0.16,
     )
 
@@ -66,6 +69,7 @@ def create_figure1():
         [0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1],
     ])
 
+    axes_a = []
     for i in range(4):
         ax = fig.add_subplot(left_gs[i])
         ax.imshow(seqs[i : i + 1], aspect="equal", cmap="rocket", extent=[0, 20, 0, 1])
@@ -74,6 +78,7 @@ def create_figure1():
         ax.set_yticks([])
         for spine in ax.spines.values():
             spine.set_visible(False)
+        axes_a.append(ax)
 
     # Panel (b): Zipf distribution
     ax_b = fig.add_subplot(outer_gs[1])
@@ -113,8 +118,20 @@ def create_figure1():
         borderpad=0.4,
     )
 
-    fig.text(0.035, 0.96, r"\textbf{a}", fontsize=24, fontweight="bold", va="top")
-    fig.text(0.355, 0.96, r"\textbf{b}", fontsize=24, fontweight="bold", va="top")
+    fig.canvas.draw()
+    pos_a = axes_a[0].get_position()
+    pos_b = ax_b.get_position()
+
+    t_b = ax_b.title.get_window_extent(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted())
+    t_a = axes_a[0].title.get_window_extent(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted())
+
+    # Consistent panel label options matching Figure 4:
+    dx_a = -0.025
+    dx_b = -0.070
+    y_label = max(t_a.y1, t_b.y1) + 0.040
+
+    fig.text(pos_a.x0 + dx_a, y_label, r"\textbf{a}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_b.x0 + dx_b, y_label, r"\textbf{b}", fontsize=22, fontweight="bold", va="bottom", ha="left")
 
     return fig
 
@@ -345,11 +362,21 @@ def plot_broken_axis_panel(ax1, ax2, avg_df, norm, title=None):
 # Figure 2 bottom-row data provenance.  Panels (a) and (b) use the one-layer
 # no-resampling experiment; panel (c) uses the corresponding GPT-2 resampling
 # experiment used for the data-switch evaluation.
+FIGURE2_TOP_EXPERIMENT = (
+    "memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresample"
+)
+FIGURE2_TOP_RECORD_GLOB = (
+    "/scratch/qanguyen/gautam/cache/"
+    f"{FIGURE2_TOP_EXPERIMENT}/*"
+)
+FIGURE2_TOP_A_CACHE = "./cache/df_train_loss_12layer.csv"
+FIGURE2_TOP_B_CACHE = "./cache/df_capacity_12layer.csv"
+FIGURE2_TOP_C_CACHE = "./cache/df_dataswitch_12layer.csv"
 FIGURE2_BOTTOM_AB_EXPERIMENT = (
     "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample"
 )
 FIGURE2_BOTTOM_C_EXPERIMENT = (
-    "memo_jan4_zipf_gpt2_vary_num_hidden_features_num_heads_doresample/"
+    "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample/"
 )
 FIGURE2_BOTTOM_MAX_PARAMETERS = 7e7
 FIGURE2_BOTTOM_AB_RECORD_GLOB = (
@@ -364,6 +391,142 @@ FIGURE2_BOTTOM_B_CACHE = "./cache/df_capacity_1layer_jan4_noresample.csv"
 FIGURE2_BOTTOM_C_CACHE = "./cache/df_dataswitch_1layer_jan4_doresample.csv"
 
 
+class FastFigure2TopUnpickler(pickle.Unpickler):
+    """Load Figure 2 logs while retaining only tensor shape information."""
+
+    def find_class(self, module, name):
+        if module == "torch.storage" and name == "_load_from_bytes":
+            return lambda value: None
+        if module == "torch._utils" and name == "_rebuild_tensor_v2":
+            def dummy_tensor(storage, storage_offset, size, stride,
+                             requires_grad, backward_hooks, metadata=None):
+                class DummyTensor:
+                    def numel(self):
+                        return math.prod(size)
+                return DummyTensor()
+            return dummy_tensor
+        return super().find_class(module, name)
+
+
+def _extract_figure2_top_run(folder):
+    """Extract the three top-row Figure 2 data tables from one raw run."""
+    record_paths = [
+        path for path in glob.glob(os.path.join(folder, "*.pkl"))
+        if not path.endswith("_all_sequences.pkl")
+    ]
+    if len(record_paths) != 1:
+        return None
+    try:
+        with open(record_paths[0], "rb") as file:
+            data = FastFigure2TopUnpickler(file).load()
+    except Exception:
+        return None
+
+    logs = data.get("logs", [])
+    if len(logs) < 60:
+        return None
+    args = data.get("args", {})
+    num_hidden_features = args.get("num_hidden_features", 1)
+    num_heads = args.get("num_heads", 1)
+    model_parameters = sum(
+        parameter.numel() for parameter in data.get("model", {}).values()
+        if hasattr(parameter, "numel")
+    )
+    if model_parameters == 0:
+        return None
+
+    final_loss = logs[-1].get("train_loss")
+    if final_loss is None:
+        return None
+    failed = (
+        (model_parameters > 3e6 and final_loss > 0.21)
+        or (model_parameters > 1e6 and final_loss > 0.4)
+    )
+    capacity_rows = []
+    data_switch_rows = []
+    for log in logs:
+        epoch = log.get("epoch")
+        test_metrics = log.get("test_metrics", {})
+        accuracy = test_metrics.get("accuracy")
+        sequence_rank = test_metrics.get("sequence_rank")
+        if accuracy is None or sequence_rank is None:
+            continue
+        accuracy = np.asarray(accuracy)
+        sequence_rank = np.asarray(sequence_rank) * 10
+
+        if epoch in [60, 120, 190]:
+            learned_ranks = sequence_rank[accuracy > 0.90]
+            if len(learned_ranks):
+                capacity_rows.append({
+                    "num_parameters": model_parameters,
+                    "epoch": epoch,
+                    "iters": epoch * 1000,
+                    "max_rank": int(learned_ranks.max()),
+                    "failed": failed,
+                })
+
+        if epoch is not None and (0 <= epoch <= 10 or 40 <= epoch <= 50):
+            first_3000 = sequence_rank <= 3000
+            if np.any(first_3000):
+                data_switch_rows.append({
+                    "num_parameters": model_parameters,
+                    "iteration": epoch * 1000,
+                    "accuracy": float(accuracy[first_3000].mean()),
+                    "failed": failed,
+                })
+
+    return {
+        "loss": {
+            "folder": os.path.basename(folder),
+            "num_parameters": model_parameters,
+            "num_heads": num_heads,
+            "num_hidden_features": num_hidden_features * num_heads,
+            "train_loss": final_loss,
+            "epoch": logs[-1].get("epoch", len(logs) - 1),
+            "failed": failed,
+        },
+        "capacity": capacity_rows,
+        "data_switch": data_switch_rows,
+    }
+
+
+def regenerate_figure2_top_cache():
+    """Rebuild the top-row Figure 2 caches from raw GPT-2 records."""
+    folders = sorted(glob.glob(FIGURE2_TOP_RECORD_GLOB))
+    if not folders:
+        raise FileNotFoundError(
+            f"No Figure 2 top-row records match {FIGURE2_TOP_RECORD_GLOB}."
+        )
+    print(
+        "Regenerating Figure 2 top-row caches from "
+        f"{FIGURE2_TOP_EXPERIMENT} ({len(folders)} runs)"
+    )
+    with Pool(processes=min(20, len(folders))) as pool:
+        results = [
+            result for result in pool.imap_unordered(_extract_figure2_top_run, folders)
+            if result is not None
+        ]
+    if not results:
+        raise RuntimeError("No usable Figure 2 top-row records were found.")
+
+    loss_frame = pd.DataFrame([result["loss"] for result in results])
+    capacity_frame = pd.DataFrame(
+        row for result in results for row in result["capacity"]
+    )
+    data_switch_frame = pd.DataFrame(
+        row for result in results for row in result["data_switch"]
+    )
+    if capacity_frame.empty or data_switch_frame.empty:
+        raise RuntimeError("The extracted Figure 2 top-row data is incomplete.")
+    os.makedirs("./cache", exist_ok=True)
+    loss_frame.to_csv(FIGURE2_TOP_A_CACHE, index=False)
+    capacity_frame.to_csv(FIGURE2_TOP_B_CACHE, index=False)
+    data_switch_frame.to_csv(FIGURE2_TOP_C_CACHE, index=False)
+    print(f"Wrote {len(loss_frame)} rows to {FIGURE2_TOP_A_CACHE}")
+    print(f"Wrote {len(capacity_frame)} rows to {FIGURE2_TOP_B_CACHE}")
+    print(f"Wrote {len(data_switch_frame)} rows to {FIGURE2_TOP_C_CACHE}")
+
+
 def filter_figure2_bottom_row_models(dataframe):
     """Exclude bottom-row models larger than the camera-ready cutoff."""
     kept_indices = []
@@ -372,6 +535,82 @@ def filter_figure2_bottom_row_models(dataframe):
             continue
         kept_indices.append(index)
     return dataframe.loc[kept_indices].copy()
+
+
+def _extract_figure2_bottom_ab_run(folder):
+    """Extract one raw one-layer run without materializing its model weights."""
+    record_paths = [
+        path for path in glob.glob(os.path.join(folder, "*.pkl"))
+        if not path.endswith("_all_sequences.pkl")
+    ]
+    if len(record_paths) != 1:
+        return [], [], None
+    try:
+        with open(record_paths[0], "rb") as file:
+            record = FastParamUnpickler(file)
+            data = record.load()
+    except Exception as error:
+        return [], [], f"{record_paths[0]}: {error}"
+
+    model_parameters = sum(
+        value for value in data.get("model", {}).values()
+        if isinstance(value, (int, np.integer))
+    )
+    if model_parameters > FIGURE2_BOTTOM_MAX_PARAMETERS:
+        return [], [], None
+
+    loss_rows = []
+    capacity_rows = []
+    args = data.get("args", {})
+    num_heads = args.get("num_heads")
+    num_hidden_features = args.get("num_hidden_features")
+    for log in data.get("logs", []):
+        epoch = log.get("epoch")
+        if epoch is None or "train_loss" not in log:
+            continue
+        test_metrics = log.get("test_metrics", {})
+        accuracy = test_metrics.get("accuracy")
+        test_accuracy = (
+            float(np.asarray(accuracy).mean()) if accuracy is not None else np.nan
+        )
+        loss_rows.append({
+            "train_loss": log["train_loss"],
+            "test_accuracy": test_accuracy,
+            "num_parameters": model_parameters,
+            "num_hidden_features": num_hidden_features,
+            "num_heads": num_heads,
+            "epoch": epoch,
+        })
+
+        if epoch not in [20, 50, 79]:
+            continue
+        sequence_ranks = test_metrics.get("sequence_rank")
+        if accuracy is None or sequence_ranks is None:
+            continue
+        accuracy_array = np.asarray(accuracy)
+        rank_array = np.asarray(sequence_ranks) * 10
+        learned_ranks = rank_array[accuracy_array > 0.90]
+        capacity_rows.append({
+            "num_parameters": model_parameters,
+            "num_heads": num_heads,
+            "num_hidden_features": num_hidden_features,
+            "epoch": epoch,
+            "iters": epoch * 1000,
+            "max_rank": int(learned_ranks.max()) if len(learned_ranks) else 0,
+        })
+    return loss_rows, capacity_rows, None
+
+
+def _one_layer_parameter_count_from_folder(folder):
+    """Read the one-layer width from its run name without opening its pickle."""
+    match = re.search(r"_hidden_(\d+)_nheads_(\d+)_", os.path.basename(folder))
+    if match is None:
+        return None
+    hidden_features, num_heads = map(int, match.groups())
+    width = hidden_features * num_heads
+    # OneLayerAttention with context length 100, vocabulary size 2, and three
+    # MLP layers: 6 * width^2 + 114 * width + 2 parameters.
+    return 6 * width ** 2 + 114 * width + 2
 
 
 def regenerate_figure2_bottom_ab_cache():
@@ -384,71 +623,27 @@ def regenerate_figure2_bottom_ab_cache():
     """
     loss_rows = []
     capacity_rows = []
-    folders = sorted(glob.glob(FIGURE2_BOTTOM_AB_RECORD_GLOB))
+    all_folders = sorted(glob.glob(FIGURE2_BOTTOM_AB_RECORD_GLOB))
+    folders = []
+    for folder in all_folders:
+        parameter_count = _one_layer_parameter_count_from_folder(folder)
+        if parameter_count is not None and parameter_count > FIGURE2_BOTTOM_MAX_PARAMETERS:
+            continue
+        folders.append(folder)
     print(
         "Regenerating Figure 2 bottom-row caches from "
-        f"{FIGURE2_BOTTOM_AB_EXPERIMENT} ({len(folders)} runs)"
+        f"{FIGURE2_BOTTOM_AB_EXPERIMENT} ({len(folders)} of {len(all_folders)} runs)"
     )
 
-    for folder in folders:
-        record_paths = [
-            path for path in glob.glob(os.path.join(folder, "*.pkl"))
-            if not path.endswith("_all_sequences.pkl")
-        ]
-        if len(record_paths) != 1:
-            continue
-        try:
-            with open(record_paths[0], "rb") as file:
-                record = FastParamUnpickler(file)
-                data = record.load()
-        except Exception as error:
-            print(f"Skipping unreadable record {record_paths[0]}: {error}")
-            continue
-
-        model_parameters = sum(
-            value for value in data.get("model", {}).values()
-            if isinstance(value, (int, np.integer))
-        )
-        if model_parameters > FIGURE2_BOTTOM_MAX_PARAMETERS:
-            continue
-
-        args = data.get("args", {})
-        num_heads = args.get("num_heads")
-        num_hidden_features = args.get("num_hidden_features")
-        for log in data.get("logs", []):
-            epoch = log.get("epoch")
-            if epoch is None or "train_loss" not in log:
-                continue
-            test_metrics = log.get("test_metrics", {})
-            accuracy = test_metrics.get("accuracy")
-            test_accuracy = (
-                float(np.asarray(accuracy).mean()) if accuracy is not None else np.nan
-            )
-            loss_rows.append({
-                "train_loss": log["train_loss"],
-                "test_accuracy": test_accuracy,
-                "num_parameters": model_parameters,
-                "num_hidden_features": num_hidden_features,
-                "num_heads": num_heads,
-                "epoch": epoch,
-            })
-
-            if epoch not in [20, 50, 79]:
-                continue
-            sequence_ranks = test_metrics.get("sequence_rank")
-            if accuracy is None or sequence_ranks is None:
-                continue
-            accuracy_array = np.asarray(accuracy)
-            rank_array = np.asarray(sequence_ranks) * 10
-            learned_ranks = rank_array[accuracy_array > 0.90]
-            capacity_rows.append({
-                "num_parameters": model_parameters,
-                "num_heads": num_heads,
-                "num_hidden_features": num_hidden_features,
-                "epoch": epoch,
-                "iters": epoch * 1000,
-                "max_rank": int(learned_ranks.max()) if len(learned_ranks) else 0,
-            })
+    num_workers = min(12, len(folders))
+    with Pool(processes=num_workers) as pool:
+        for run_loss_rows, run_capacity_rows, error in pool.imap_unordered(
+            _extract_figure2_bottom_ab_run, folders
+        ):
+            if error is not None:
+                print(f"Skipping unreadable record {error}")
+            loss_rows.extend(run_loss_rows)
+            capacity_rows.extend(run_capacity_rows)
 
     loss_frame = pd.DataFrame(loss_rows)
     capacity_frame = pd.DataFrame(capacity_rows)
@@ -464,10 +659,35 @@ def regenerate_figure2_bottom_ab_cache():
     print(f"Wrote {len(capacity_frame)} rows to {FIGURE2_BOTTOM_B_CACHE}")
 
 
+def ensure_figure2_caches(force_regenerate=False):
+    """Create missing Figure 2 caches, or replace them when forced."""
+    # Fail before replacing any cache: panel (c) has no raw model results.
+    if not os.path.isfile(FIGURE2_BOTTOM_C_CACHE):
+        raise FileNotFoundError(
+            "Figure 2 panel (c) cache is missing. It cannot be rebuilt from "
+            f"{FIGURE2_BOTTOM_C_EXPERIMENT} because that source has no model "
+            "checkpoints or saved accuracy values."
+        )
+
+    top_caches = [FIGURE2_TOP_A_CACHE, FIGURE2_TOP_B_CACHE, FIGURE2_TOP_C_CACHE]
+    bottom_ab_caches = [FIGURE2_BOTTOM_A_CACHE, FIGURE2_BOTTOM_B_CACHE]
+    if force_regenerate or any(not os.path.isfile(path) for path in top_caches):
+        regenerate_figure2_top_cache()
+    if force_regenerate or any(not os.path.isfile(path) for path in bottom_ab_caches):
+        regenerate_figure2_bottom_ab_cache()
+
+
+def force_regenerate_all_figure_caches():
+    """Rebuild every Figure 2 cache that has complete source records."""
+    print("Figure 1: no data cache to regenerate.")
+    ensure_figure2_caches(force_regenerate=True)
+    print("Figure 5: no data cache to regenerate.")
+
+
 # =============================================================================
 # FIGURE 2: Full Assembly (2 rows x 3 columns)
 # =============================================================================
-def create_figure2():
+def create_figure2(force_regenerate_cache=False):
     """Create publication-quality Figure 2 for NeurIPS submission.
     Combines:
       Column (a): Final train loss vs parameter count (12-layer top, 1-layer bottom)
@@ -476,6 +696,7 @@ def create_figure2():
       Column (c): Average accuracy over first 3000 ranked sequences across data switch
                   with broken axis [0, 1.0] and [4.0, 5.0] x 10^4 (12-layer top, 1-layer bottom)
     """
+    ensure_figure2_caches(force_regenerate=force_regenerate_cache)
     utils.set_plot_style()
     print(
         "Figure 2 bottom-row panels (a, b) experiment: "
@@ -506,7 +727,7 @@ def create_figure2():
     ax_a1 = fig.add_subplot(outer_gs[1, 0])
 
     # 12-layer train loss data (freshly extracted from memo_apr19)
-    df_tl_12 = pd.read_csv("./cache/df_train_loss_12layer.csv")
+    df_tl_12 = pd.read_csv(FIGURE2_TOP_A_CACHE)
     ok_12 = df_tl_12[~df_tl_12["failed"]]
     plot_train_loss_panel(
         ax_a0,
@@ -535,7 +756,7 @@ def create_figure2():
     ax_b1 = fig.add_subplot(outer_gs[1, 1])
 
     # 12-layer capacity data (freshly extracted from memo_apr19, excluding memo_may1)
-    df_cap_12 = pd.read_csv("./cache/df_capacity_12layer.csv")
+    df_cap_12 = pd.read_csv(FIGURE2_TOP_B_CACHE)
     df_cap_12_ok = df_cap_12[~df_cap_12["failed"]] if "failed" in df_cap_12.columns else df_cap_12
     plot_power_law_panel(
         ax_b0,
@@ -568,7 +789,7 @@ def create_figure2():
     ax_c1_right = fig.add_subplot(gs_c1[1], sharey=ax_c1_left)
 
     # 12-layer data switch data (exclusively from memo_may1_zipf_gpt2_vary_num_hidden_features_num_heads_doresample)
-    avg_df_12 = pd.read_csv("./cache/df_dataswitch_12layer_may1.csv")
+    avg_df_12 = pd.read_csv(FIGURE2_TOP_C_CACHE)
 
     # 1-layer data-switch panel from FIGURE2_BOTTOM_C_EXPERIMENT.
     avg_df_1 = pd.read_csv(FIGURE2_BOTTOM_C_CACHE)
@@ -780,9 +1001,12 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
 # =============================================================================
 # MAIN EXECUTION
 # =============================================================================
-def main():
+def main(force_regenerate_cache=False):
     savefigdir = "./figs_camera_ready"
     utils.ensure_dir(savefigdir)
+
+    if force_regenerate_cache:
+        force_regenerate_all_figure_caches()
 
     # 1. Figure 1
     print("Generating Figure 1...")
@@ -826,4 +1050,16 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(
+        description="Generate the camera-ready figures."
+    )
+    parser.add_argument(
+        "--force_regenerate_cache",
+        action="store_true",
+        help=(
+            "Rebuild every cache that has enough raw data, before generating "
+            "the figures."
+        ),
+    )
+    cli_args = parser.parse_args()
+    main(force_regenerate_cache=cli_args.force_regenerate_cache)
