@@ -372,23 +372,29 @@ FIGURE2_TOP_RECORD_GLOB = (
 FIGURE2_TOP_A_CACHE = "./cache/df_train_loss_12layer.csv"
 FIGURE2_TOP_B_CACHE = "./cache/df_capacity_12layer.csv"
 FIGURE2_TOP_C_CACHE = "./cache/df_dataswitch_12layer.csv"
-FIGURE2_BOTTOM_AB_EXPERIMENT = (
-    "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample"
+FIGURE2_BOTTOM_AB_EXPERIMENTS = (
+    "memo_jan24_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample",
+    "memo_jan25_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample",
+    "memo_jan26_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample",
 )
+
+
 FIGURE2_BOTTOM_C_EXPERIMENT = (
-    "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample/"
+    "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample"
 )
 FIGURE2_BOTTOM_MAX_PARAMETERS = 7e7
-FIGURE2_BOTTOM_AB_RECORD_GLOB = (
+FIGURE2_BOTTOM_AB_RECORD_GLOBS = [
+    f"/scratch/qanguyen/gautam/cache/{experiment}/*"
+    for experiment in FIGURE2_BOTTOM_AB_EXPERIMENTS
+]
+FIGURE2_BOTTOM_C_RECORD_GLOB = (
     "/scratch/qanguyen/gautam/cache/"
-    f"{FIGURE2_BOTTOM_AB_EXPERIMENT}/*"
+    f"{FIGURE2_BOTTOM_C_EXPERIMENT}/*"
 )
 FIGURE2_BOTTOM_A_CACHE = "./cache/df_train_loss_1layer_jan4_noresample.csv"
 FIGURE2_BOTTOM_B_CACHE = "./cache/df_capacity_1layer_jan4_noresample.csv"
-# This evaluation cache is keyed by the resampled GPT-2 sequences named above.
-# That experiment stores sequence payloads rather than model checkpoint logs,
-# so its accuracy trajectory cannot be re-derived from that directory alone.
-FIGURE2_BOTTOM_C_CACHE = "./cache/df_dataswitch_1layer_jan4_doresample.csv"
+# This evaluation cache is rebuilt from the Jan 20 one-layer resampling logs.
+FIGURE2_BOTTOM_C_CACHE = "./cache/df_dataswitch_1layer_jan20_doresample.csv"
 
 
 class FastFigure2TopUnpickler(pickle.Unpickler):
@@ -428,12 +434,22 @@ def _extract_figure2_top_run(folder):
     args = data.get("args", {})
     num_hidden_features = args.get("num_hidden_features", 1)
     num_heads = args.get("num_heads", 1)
+    width = num_hidden_features * num_heads
     model_parameters = sum(
         parameter.numel() for parameter in data.get("model", {}).values()
         if hasattr(parameter, "numel")
     )
     if model_parameters == 0:
-        return None
+        num_layers = args.get("num_layers", 12)
+        context_length = args.get("len_context", 100)
+        vocab_size = args.get("vocab_size", 2)
+        # GPT has token and position embeddings, ``num_layers`` transformer
+        # blocks, a final layer norm, and a vocabulary-sized output head.
+        model_parameters = (
+            num_layers * (12 * width ** 2 + 13 * width)
+            + (context_length + 2 * vocab_size + 2) * width
+            + vocab_size
+        )
 
     final_loss = logs[-1].get("train_loss")
     if final_loss is None:
@@ -618,12 +634,21 @@ def regenerate_figure2_bottom_ab_cache():
 
     The fast unpickler reads model tensor shapes without allocating model
     weights, then extracts epoch-wise training loss and 90%-accuracy capacity
-    from ``FIGURE2_BOTTOM_AB_EXPERIMENT``.  Models above the camera-ready
+    from ``FIGURE2_BOTTOM_AB_EXPERIMENTS``.  Models above the camera-ready
     parameter cutoff are excluded before either cache is written.
     """
     loss_rows = []
     capacity_rows = []
-    all_folders = sorted(glob.glob(FIGURE2_BOTTOM_AB_RECORD_GLOB))
+    all_folders = sorted({
+        folder
+        for record_glob in FIGURE2_BOTTOM_AB_RECORD_GLOBS
+        for folder in glob.glob(record_glob)
+    })
+    if not all_folders:
+        raise FileNotFoundError(
+            "No Figure 2 bottom-row records match any of: "
+            f"{FIGURE2_BOTTOM_AB_RECORD_GLOBS}."
+        )
     folders = []
     for folder in all_folders:
         parameter_count = _one_layer_parameter_count_from_folder(folder)
@@ -632,9 +657,15 @@ def regenerate_figure2_bottom_ab_cache():
         folders.append(folder)
     print(
         "Regenerating Figure 2 bottom-row caches from "
-        f"{FIGURE2_BOTTOM_AB_EXPERIMENT} ({len(folders)} of {len(all_folders)} runs)"
+        f"{', '.join(FIGURE2_BOTTOM_AB_EXPERIMENTS)} "
+        f"({len(folders)} of {len(all_folders)} runs)"
     )
 
+    if not folders:
+        raise RuntimeError(
+            "All Figure 2 bottom-row records exceed the "
+            f"{FIGURE2_BOTTOM_MAX_PARAMETERS:g}-parameter limit."
+        )
     num_workers = min(12, len(folders))
     with Pool(processes=num_workers) as pool:
         for run_loss_rows, run_capacity_rows, error in pool.imap_unordered(
@@ -650,7 +681,7 @@ def regenerate_figure2_bottom_ab_cache():
     if loss_frame.empty or capacity_frame.empty:
         raise RuntimeError(
             "No usable Figure 2 bottom-row records were found in "
-            f"{FIGURE2_BOTTOM_AB_RECORD_GLOB}."
+            f"{FIGURE2_BOTTOM_AB_RECORD_GLOBS}."
         )
 
     loss_frame.to_csv(FIGURE2_BOTTOM_A_CACHE, index=False)
@@ -659,28 +690,428 @@ def regenerate_figure2_bottom_ab_cache():
     print(f"Wrote {len(capacity_frame)} rows to {FIGURE2_BOTTOM_B_CACHE}")
 
 
+def _extract_figure2_bottom_c_run(folder):
+    """Extract panel-c accuracy values from one Jan 20 resampling run."""
+    record_paths = [
+        path for path in glob.glob(os.path.join(folder, "*.pkl"))
+        if not path.endswith("_all_sequences.pkl")
+    ]
+    if len(record_paths) != 1:
+        return [], None
+    try:
+        with open(record_paths[0], "rb") as file:
+            data = FastParamUnpickler(file).load()
+    except Exception as error:
+        return [], f"{record_paths[0]}: {error}"
+
+    model_parameters = sum(
+        value for value in data.get("model", {}).values()
+        if isinstance(value, (int, np.integer))
+    )
+    if model_parameters > FIGURE2_BOTTOM_MAX_PARAMETERS:
+        return [], None
+
+    rows = []
+    for log in data.get("logs", []):
+        epoch = log.get("epoch")
+        if epoch is None or not (0 <= epoch <= 10 or 40 <= epoch <= 50):
+            continue
+        test_metrics = log.get("test_metrics", {})
+        accuracy = test_metrics.get("accuracy")
+        sequence_ranks = test_metrics.get("sequence_rank")
+        if accuracy is None or sequence_ranks is None:
+            continue
+        accuracy = np.asarray(accuracy)
+        sequence_ranks = np.asarray(sequence_ranks) * 10
+        first_3000 = sequence_ranks <= 3000
+        if not np.any(first_3000):
+            continue
+        rows.append({
+            "num_parameters": model_parameters,
+            "iteration": epoch * 1000,
+            "accuracy": float(accuracy[first_3000].mean()),
+        })
+    return rows, None
+
+
+def regenerate_figure2_bottom_c_cache():
+    """Rebuild Figure 2 bottom panel (c) from the Jan 20 resampling records."""
+    all_folders = sorted(glob.glob(FIGURE2_BOTTOM_C_RECORD_GLOB))
+    folders = []
+    for folder in all_folders:
+        parameter_count = _one_layer_parameter_count_from_folder(folder)
+        if parameter_count is not None and parameter_count > FIGURE2_BOTTOM_MAX_PARAMETERS:
+            continue
+        folders.append(folder)
+    if not folders:
+        raise FileNotFoundError(
+            "No Figure 2 bottom panel (c) records match "
+            f"{FIGURE2_BOTTOM_C_RECORD_GLOB}."
+        )
+    print(
+        "Regenerating Figure 2 bottom panel (c) cache from "
+        f"{FIGURE2_BOTTOM_C_EXPERIMENT} ({len(folders)} of {len(all_folders)} runs)"
+    )
+
+    rows = []
+    with Pool(processes=min(12, len(folders))) as pool:
+        for run_rows, error in pool.imap_unordered(_extract_figure2_bottom_c_run, folders):
+            if error is not None:
+                print(f"Skipping unreadable record {error}")
+            rows.extend(run_rows)
+    cache_frame = pd.DataFrame(rows)
+    if cache_frame.empty:
+        raise RuntimeError("No usable Figure 2 bottom panel (c) records were found.")
+    cache_frame.to_csv(FIGURE2_BOTTOM_C_CACHE, index=False)
+    print(f"Wrote {len(cache_frame)} rows to {FIGURE2_BOTTOM_C_CACHE}")
+
+
 def ensure_figure2_caches(force_regenerate=False):
     """Create missing Figure 2 caches, or replace them when forced."""
-    # Fail before replacing any cache: panel (c) has no raw model results.
-    if not os.path.isfile(FIGURE2_BOTTOM_C_CACHE):
-        raise FileNotFoundError(
-            "Figure 2 panel (c) cache is missing. It cannot be rebuilt from "
-            f"{FIGURE2_BOTTOM_C_EXPERIMENT} because that source has no model "
-            "checkpoints or saved accuracy values."
-        )
-
     top_caches = [FIGURE2_TOP_A_CACHE, FIGURE2_TOP_B_CACHE, FIGURE2_TOP_C_CACHE]
     bottom_ab_caches = [FIGURE2_BOTTOM_A_CACHE, FIGURE2_BOTTOM_B_CACHE]
     if force_regenerate or any(not os.path.isfile(path) for path in top_caches):
         regenerate_figure2_top_cache()
     if force_regenerate or any(not os.path.isfile(path) for path in bottom_ab_caches):
         regenerate_figure2_bottom_ab_cache()
+    if force_regenerate or not os.path.isfile(FIGURE2_BOTTOM_C_CACHE):
+        regenerate_figure2_bottom_c_cache()
+
+
+# =============================================================================
+# FIGURE 4: Cache Extraction
+# =============================================================================
+FIGURE4_LINEAR_PROBE_EXPERIMENT = "memo_mar9_zipf_onelayerattention_linearprobe"
+FIGURE4_FORK_PROGRESS_EXPERIMENT = (
+    "memo_apr3_zipf_onelayerattention_lr_1e3_swapmlp_eval_fork_progress"
+)
+FIGURE4_LINEAR_PROBE_RECORD_GLOB = (
+    "/scratch/qanguyen/gautam/cache/"
+    f"{FIGURE4_LINEAR_PROBE_EXPERIMENT}/*"
+)
+FIGURE4_FORK_PROGRESS_RECORD_GLOB = (
+    "/scratch/qanguyen/gautam/cache/"
+    f"{FIGURE4_FORK_PROGRESS_EXPERIMENT}/*"
+)
+FIGURE4_LINEAR_PROBE_CACHE = "./cache/df_fig4_linearprobe.csv"
+FIGURE4_FORK_PROGRESS_CACHE = "./cache/df_fig4_fork_progress.csv"
+
+
+def _figure4_record_path(folder):
+    """Return the checkpoint path used by the original Figure 4 extractor."""
+    subdir = os.path.basename(folder)
+    path = os.path.join(folder, f"{subdir}.pkl")
+    return path if os.path.isfile(path) else None
+
+
+def _one_layer_parameter_count_from_args(args):
+    """Count parameters without allocating a OneLayerAttention model."""
+    hidden_width = args["num_heads"] * args["num_hidden_features"]
+    mlp_width = args.get("num_hidden_features_mlp") or hidden_width
+    num_mlp_layers = args["num_mlp_layers"]
+    vocab_size = args["vocab_size"]
+    context_length = args["len_context"]
+
+    # Token/position embeddings, two layer norms, QKV projection, MLP, and
+    # language-model head.  This is the same count as state_dict().values()
+    # for gpt.OneLayerAttention, but avoids allocating its weight tensors.
+    return (
+        (vocab_size + context_length) * hidden_width
+        + 4 * hidden_width
+        + 3 * hidden_width ** 2 + 3 * hidden_width
+        + hidden_width * mlp_width + mlp_width
+        + (num_mlp_layers - 1) * (mlp_width ** 2 + mlp_width)
+        + mlp_width * vocab_size + vocab_size
+    )
+
+
+def _extract_figure4_linear_probe_run(task):
+    """Extract Figure 4 linear-probe rows from one checkpoint."""
+    irun, folder = task
+    record_path = _figure4_record_path(folder)
+    if record_path is None:
+        return [], None
+    try:
+        with open(record_path, "rb") as file:
+            data = FastParamUnpickler(file).load()
+    except Exception as error:
+        return [], f"{record_path}: {error}"
+
+    args = data.get("args", {})
+    model_parameters = sum(
+        value for value in data.get("model", {}).values()
+        if isinstance(value, (int, np.integer))
+    )
+    if not model_parameters:
+        return [], f"{record_path}: missing model parameters"
+
+    rows = []
+    for log in data.get("logs", []):
+        metrics = log.get("test_metrics", {})
+        probe_value = metrics.get("probe_novel_sequences_0")
+        if not isinstance(probe_value, (float, np.floating)):
+            continue
+        try:
+            rows.append({
+                "num_heads": args["num_heads"],
+                "num_hidden_features": args["num_hidden_features"],
+                "num_parameters": model_parameters,
+                "probe_novel_sequences_0": probe_value,
+                "probe_novel_sequences_1": metrics["probe_novel_sequences_1"],
+                "probe_novel_sequences_2": metrics["probe_novel_sequences_2"],
+                "probe_novel_sequences_3": metrics["probe_novel_sequences_3"],
+                "epoch": log["epoch"],
+                "irun": irun,
+                "iteration": log["epoch"] * args["num_iters_per_epoch"],
+            })
+        except (KeyError, TypeError) as error:
+            return rows, f"{record_path}: incomplete linear-probe log ({error})"
+    return rows, None
+
+
+def _extract_figure4_fork_progress_run(task):
+    """Extract Figure 4 fork-progress rows from one checkpoint."""
+    irun, folder = task
+    record_path = _figure4_record_path(folder)
+    if record_path is None:
+        return [], None
+    try:
+        with open(record_path, "rb") as file:
+            data = FastParamUnpickler(file).load()
+        args = data["args"]
+        model_parameters = _one_layer_parameter_count_from_args(args)
+    except Exception as error:
+        return [], f"{record_path}: {error}"
+
+    rows = []
+    for log in data.get("logs", []):
+        probe_metrics = log.get("probe_metrics", {})
+        test_metrics = log.get("test_metrics", {})
+        if "accuracy" not in probe_metrics or "mlp_probe_metrics" not in test_metrics:
+            continue
+        try:
+            rows.append({
+                "num_heads": args["num_heads"],
+                "num_hidden_features": args["num_hidden_features"],
+                "probe_accuracy": float(
+                    np.stack(probe_metrics["accuracy"]).flatten()[-10:].mean()
+                ),
+                "num_parameters": model_parameters,
+                "probe_novel_sequences_0": test_metrics["mlp_probe_metrics"]["accuracy"][0],
+                "probe_novel_sequences_1": test_metrics["mlp_probe_metrics"]["accuracy"][1],
+                "probe_novel_sequences_2": test_metrics["mlp_probe_metrics"]["accuracy"][2],
+                "probe_novel_sequences_3": test_metrics["mlp_probe_metrics"]["accuracy"][3],
+                "epoch": log["epoch"],
+                "irun": irun,
+            })
+        except (KeyError, IndexError, TypeError, ValueError) as error:
+            return rows, f"{record_path}: incomplete fork-progress log ({error})"
+    return rows, None
+
+
+def _regenerate_figure4_cache(record_glob, experiment, extractor, cache_path):
+    """Run a Figure 4 extractor and save its complete table."""
+    folders = sorted(glob.glob(record_glob))
+    if not folders:
+        raise FileNotFoundError(f"No Figure 4 records match {record_glob}.")
+    print(f"Regenerating Figure 4 cache from {experiment} ({len(folders)} runs)")
+
+    rows = []
+    tasks = list(enumerate(folders))
+    with Pool(processes=min(12, len(tasks))) as pool:
+        for run_rows, error in pool.imap_unordered(extractor, tasks):
+            if error is not None:
+                print(f"Skipping unreadable record {error}")
+            rows.extend(run_rows)
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        raise RuntimeError(f"No usable Figure 4 records were found in {record_glob}.")
+    os.makedirs("./cache", exist_ok=True)
+    frame.to_csv(cache_path, index=False)
+    print(f"Wrote {len(frame)} rows to {cache_path}")
+
+
+def regenerate_figure4_caches():
+    """Rebuild both data tables required by generate_figure4.py."""
+    _regenerate_figure4_cache(
+        FIGURE4_LINEAR_PROBE_RECORD_GLOB,
+        FIGURE4_LINEAR_PROBE_EXPERIMENT,
+        _extract_figure4_linear_probe_run,
+        FIGURE4_LINEAR_PROBE_CACHE,
+    )
+    _regenerate_figure4_cache(
+        FIGURE4_FORK_PROGRESS_RECORD_GLOB,
+        FIGURE4_FORK_PROGRESS_EXPERIMENT,
+        _extract_figure4_fork_progress_run,
+        FIGURE4_FORK_PROGRESS_CACHE,
+    )
+
+
+def ensure_figure4_caches(force_regenerate=False):
+    """Create missing Figure 4 caches, or replace both when forced."""
+    cache_paths = [FIGURE4_LINEAR_PROBE_CACHE, FIGURE4_FORK_PROGRESS_CACHE]
+    if force_regenerate or any(not os.path.isfile(path) for path in cache_paths):
+        regenerate_figure4_caches()
+
+
+# =============================================================================
+# FIGURE 4PRE: Saturation Appearances vs Sequence Rank
+# =============================================================================
+FIGURE4PRE_EXPERIMENT = (
+    "memo_jan20_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample"
+)
+FIGURE4PRE_RECORD_GLOB = (
+    "/scratch/qanguyen/gautam/cache/"
+    f"{FIGURE4PRE_EXPERIMENT}/*"
+)
+FIGURE4PRE_CACHE = "./cache/df_fig4pre_saturation.csv"
+
+
+def _extract_figure4pre_folder_saturation(folder):
+    record_paths = [
+        path for path in glob.glob(os.path.join(folder, "*.pkl"))
+        if not path.endswith("_all_sequences.pkl")
+    ]
+    if len(record_paths) != 1:
+        return []
+    try:
+        with open(record_paths[0], "rb") as file:
+            data = FastParamUnpickler(file).load()
+    except Exception:
+        return []
+    if "logs" not in data or len(data["logs"]) < 10:
+        return []
+    model_params = sum(
+        value for value in data.get("model", {}).values()
+        if isinstance(value, (int, np.integer))
+    )
+    if model_params > 1e6 and data["logs"][-1].get("train_loss", 0) > 0.3:
+        return []
+
+    rows = []
+    THRESHOLD = 0.9
+    for log in data["logs"]:
+        if "num_apppearances" not in log or "test_metrics" not in log:
+            continue
+        appearances = log["num_apppearances"][::10]
+        test_metrics = log["test_metrics"]
+        sequence_ranks = np.asarray(test_metrics["sequence_rank"]) * 10
+        accuracy = np.asarray(test_metrics["accuracy"])
+        epoch = log["epoch"]
+        switch_number = int(epoch // (np.round(len(data["logs"]) / 2.0)) + 1.0)
+
+        mask = accuracy > THRESHOLD
+        if not np.any(mask):
+            continue
+        for app, rank, acc in zip(
+            np.asarray(appearances)[mask], sequence_ranks[mask], accuracy[mask]
+        ):
+            rows.append({
+                "num_appearances": int(app),
+                "sequence_rank": int(rank),
+                "accuracy": float(acc),
+                "num_parameters": model_params,
+                "epoch": int(epoch),
+                "switch_number": int(switch_number),
+            })
+    return rows
+
+
+def regenerate_figure4pre_cache():
+    """Extract and rebuild the Figure 4pre saturation cache."""
+    folders = sorted(glob.glob(FIGURE4PRE_RECORD_GLOB))
+    if not folders:
+        raise FileNotFoundError(
+            f"No Figure 4pre records match {FIGURE4PRE_RECORD_GLOB}."
+        )
+    print(
+        f"Regenerating Figure 4pre saturation cache from {FIGURE4PRE_EXPERIMENT} "
+        f"({len(folders)} runs)..."
+    )
+    with Pool(processes=min(12, len(folders))) as pool:
+        all_results = pool.map(_extract_figure4pre_folder_saturation, folders)
+
+    all_rows = [row for run_rows in all_results if run_rows for row in run_rows]
+    if not all_rows:
+        raise RuntimeError("No usable Figure 4pre saturation records found.")
+    df = pd.DataFrame(all_rows)
+    results = (
+        df.sort_values("epoch", ascending=True)
+        .drop_duplicates(subset=["num_parameters", "switch_number", "sequence_rank"])
+        .sort_values(["num_parameters", "switch_number", "sequence_rank"])
+        .reset_index(drop=True)
+    )
+    results["sequence_rank_plus_one"] = results["sequence_rank"] + 1
+    os.makedirs("./cache", exist_ok=True)
+    results.to_csv(FIGURE4PRE_CACHE, index=False)
+    print(f"Wrote {len(results)} rows to {FIGURE4PRE_CACHE}")
+
+
+def ensure_figure4pre_cache(force_regenerate=False):
+    if force_regenerate or not os.path.isfile(FIGURE4PRE_CACHE):
+        regenerate_figure4pre_cache()
+
+
+def create_figure4pre(force_regenerate_cache=False):
+    """Create publication-quality Figure 4pre: saturation appearances vs rank."""
+    ensure_figure4pre_cache(force_regenerate=force_regenerate_cache)
+    results = pd.read_csv(FIGURE4PRE_CACHE)
+
+    utils.set_plot_style()
+    params_to_analyze = [25399298, 56973314]
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+    for ax, num_params in zip(axes, params_to_analyze):
+        for switch_number in [1, 2]:
+            sub = results[
+                (results["num_parameters"] == num_params)
+                & (results["switch_number"] == switch_number)
+            ].copy()
+            sub["sequence_rank_plus_one"] = pd.to_numeric(sub["sequence_rank_plus_one"])
+            sub = sub.sort_values("sequence_rank_plus_one")
+            label = "Pre-switch" if switch_number == 1 else "Post-switch"
+            sns.lineplot(
+                data=sub,
+                x="sequence_rank_plus_one",
+                y="num_appearances",
+                linewidth=2.0,
+                alpha=0.85,
+                label=label,
+                marker="+",
+                markeredgecolor="black",
+                ax=ax,
+            )
+        ax.set_title(f"{num_params} Parameters", fontsize=20, pad=10)
+        ax.set_xscale("log")
+        ax.set_xlim(0.5, 100000)
+        ax.set_yscale("log")
+        ax.set_ylim(0.5, 100000)
+        ax.set_xlabel("Sequence rank", fontsize=20)
+        ax.set_ylabel("Saturation appearances", fontsize=20)
+        ax.legend(fontsize=14, loc="upper right")
+
+    fig.canvas.draw()
+    pos_a = axes[0].get_position()
+    pos_b = axes[1].get_position()
+
+    t_a = axes[0].title.get_window_extent(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted())
+    t_b = axes[1].title.get_window_extent(fig.canvas.get_renderer()).transformed(fig.transFigure.inverted())
+
+    dx = -0.025
+    y_label = max(t_a.y1, t_b.y1) + 0.035
+
+    fig.text(pos_a.x0 + dx, y_label, r"	extbf{a}", fontsize=24, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_b.x0 + dx, y_label, r"	extbf{b}", fontsize=24, fontweight="bold", va="bottom", ha="left")
+
+    return fig
 
 
 def force_regenerate_all_figure_caches():
-    """Rebuild every Figure 2 cache that has complete source records."""
+    """Rebuild every cache used by the camera-ready figures."""
     print("Figure 1: no data cache to regenerate.")
     ensure_figure2_caches(force_regenerate=True)
+    ensure_figure4_caches(force_regenerate=True)
+    ensure_figure4pre_cache(force_regenerate=True)
     print("Figure 5: no data cache to regenerate.")
 
 
@@ -699,8 +1130,8 @@ def create_figure2(force_regenerate_cache=False):
     ensure_figure2_caches(force_regenerate=force_regenerate_cache)
     utils.set_plot_style()
     print(
-        "Figure 2 bottom-row panels (a, b) experiment: "
-        f"{FIGURE2_BOTTOM_AB_EXPERIMENT}"
+        "Figure 2 bottom-row panels (a, b) experiments: "
+        f"{', '.join(FIGURE2_BOTTOM_AB_EXPERIMENTS)}"
     )
     print(
         "Figure 2 bottom-row panel (c) experiment: "
@@ -737,7 +1168,7 @@ def create_figure2(force_regenerate_cache=False):
         d_max=max(ok_12["num_hidden_features"]),
     )
 
-    # 1-layer train loss data from FIGURE2_BOTTOM_AB_EXPERIMENT.
+    # 1-layer train loss data from FIGURE2_BOTTOM_AB_EXPERIMENTS.
     df_tl_1 = pd.read_csv(FIGURE2_BOTTOM_A_CACHE)
     df_tl_1 = df_tl_1[df_tl_1["epoch"] == 50]
     df_tl_1 = filter_figure2_bottom_row_models(df_tl_1)
@@ -766,7 +1197,7 @@ def create_figure2(force_regenerate_cache=False):
         is_12layer=True,
     )
 
-    # 1-layer capacity data from FIGURE2_BOTTOM_AB_EXPERIMENT.
+    # 1-layer capacity data from FIGURE2_BOTTOM_AB_EXPERIMENTS.
     df_cap_1 = pd.read_csv(FIGURE2_BOTTOM_B_CACHE)
     df_cap_1 = filter_figure2_bottom_row_models(df_cap_1)
     plot_power_law_panel(
@@ -940,9 +1371,9 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
     fig, axes = plt.subplots(
         2,
         4,
-        figsize=(7.1, 3.75),
+        figsize=(7.6, 4.0),
         facecolor="white",
-        gridspec_kw={"hspace": 0.30, "wspace": 0.48},
+        gridspec_kw={"hspace": 0.12, "wspace": 0.24},
     )
     axes = axes.ravel()
 
@@ -963,8 +1394,10 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
             aspect="equal",
         )
         axes[head].set_title(f"Head {head + 1}", fontsize=9.5, pad=3)
-        axes[head].set_xlabel("Key position", fontsize=9, labelpad=2)
-        axes[head].set_ylabel("Query position", fontsize=9, labelpad=2)
+        if head >= 4:
+            axes[head].set_xlabel("Key position", fontsize=9, labelpad=2)
+        if head % 4 == 0:
+            axes[head].set_ylabel("Query position", fontsize=9, labelpad=2)
         axes[head].set_xticks([0, 50])
         axes[head].set_yticks([0, 25, 50, 75])
         axes[head].tick_params(
@@ -979,7 +1412,7 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
 
     # Reserve the right margin before placing the colourbar.  Applying this
     # adjustment afterwards would shift the last-column panels underneath it.
-    fig.subplots_adjust(left=0.075, right=0.87, bottom=0.10, top=0.94)
+    fig.subplots_adjust(left=0.065, right=0.88, bottom=0.10, top=0.94)
 
     # A single colourbar, rather than one per panel, preserves panel area and
     # makes the shared normalization apparent at a glance.
@@ -987,6 +1420,277 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
         image,
         ax=axes[:num_heads_to_plot].tolist(),
         fraction=0.024,
+        pad=0.018,
+        aspect=30,
+        ticks=[0.0, 0.25, 0.50, 0.75, 1.0],
+    )
+    colorbar.set_label("Attention weight", fontsize=9, labelpad=5)
+    colorbar.ax.tick_params(labelsize=7.25, length=2.5, width=0.7, pad=1.5)
+    colorbar.outline.set_linewidth(0.8)
+
+    return fig
+
+
+def create_figure_s9(sequence_idx=9, num_heads_to_plot=16,
+                     record_glob=FIGURE5_RECORD_GLOB):
+    """Create the camera-ready Supplemental Figure 9 visualization (all 16 heads).
+
+    Caption:
+        Figure S9: Learned attention maps in a trained one-layer transformer for
+        Sequence 10 (16 heads, 64 features per head). Each panel shows attention
+        maps of one head, evaluated on the lowest-ranked sequence. Rows are query
+        positions and columns are causal key positions.
+
+    Args:
+        sequence_idx: Sequence index to visualize (0-indexed; default 9 corresponds
+            to Sequence 10, the lowest-ranked sequence in the evaluation set).
+        num_heads_to_plot: Number of heads to plot (up to 16, arranged 4x4).
+        record_glob: Glob matching the 16-head width-64 checkpoint.
+
+    Returns:
+        The Matplotlib figure object.
+    """
+    utils.set_plot_style()
+    mpl.rcParams["text.usetex"] = False
+
+    experiment_dirs = sorted(glob.glob(record_glob))
+    if len(experiment_dirs) != 1:
+        raise RuntimeError(
+            "Figure S9 requires exactly one checkpoint directory matching "
+            f"{record_glob!r}; found {len(experiment_dirs)}."
+        )
+
+    experiment_dir = experiment_dirs[0]
+    experiment_name = os.path.basename(experiment_dir)
+    record_path = os.path.join(experiment_dir, f"{experiment_name}.pkl")
+    data_path = os.path.join(experiment_dir, f"{experiment_name}_all_sequences.pkl")
+    if not os.path.isfile(record_path) or not os.path.isfile(data_path):
+        raise FileNotFoundError(
+            "Figure S9 checkpoint is incomplete. Expected both "
+            f"{record_path!r} and {data_path!r}."
+        )
+
+    with open(record_path, "rb") as file:
+        record = utils.CPU_Unpickler(file).load()
+    with open(data_path, "rb") as file:
+        data = pickle.load(file)
+
+    args = record["args"]
+    model = gpt.OneLayerAttention(
+        args["len_context"],
+        args["num_heads"],
+        args["num_hidden_features"],
+        args["vocab_size"],
+        args["num_mlp_layers"],
+    )
+    model.load_state_dict(record["model"])
+    model.eval()
+
+    sequences = data["sequences"][-1]
+    if not 0 <= sequence_idx < len(sequences):
+        raise IndexError(
+            f"sequence_idx={sequence_idx} is outside the saved batch of "
+            f"{len(sequences)} sequences."
+        )
+
+    selected_sequence = sequences[sequence_idx : sequence_idx + 1]
+    with torch.no_grad():
+        _, attention = model.get_attention_weights(selected_sequence, None)
+
+    if attention.ndim != 4:
+        raise ValueError(
+            "Expected attention weights with shape (batch, head, query, key), "
+            f"but received {tuple(attention.shape)}."
+        )
+    num_heads_to_plot = min(num_heads_to_plot, attention.shape[1], 16)
+    if num_heads_to_plot < 1:
+        raise ValueError("The checkpoint has no attention heads to plot.")
+
+    fig, axes = plt.subplots(
+        4,
+        4,
+        figsize=(7.6, 7.6),
+        facecolor="white",
+        gridspec_kw={"hspace": 0.14, "wspace": 0.24},
+    )
+    axes = axes.ravel()
+
+    cmap = plt.get_cmap("rocket").copy()
+    cmap.set_bad(color="white")
+    norm = mpl.colors.Normalize(vmin=0.0, vmax=1.0)
+    image = None
+    for head in range(num_heads_to_plot):
+        attention_map = attention[0, head].detach().cpu().numpy()
+        future_mask = np.triu(np.ones_like(attention_map, dtype=bool), k=1)
+        masked_attention_map = np.ma.array(attention_map, mask=future_mask)
+
+        image = axes[head].imshow(
+            masked_attention_map,
+            cmap=cmap,
+            norm=norm,
+            interpolation="nearest",
+            aspect="equal",
+        )
+        axes[head].set_title(f"Head {head + 1}", fontsize=9.5, pad=3)
+        if head >= 12:
+            axes[head].set_xlabel("Key position", fontsize=9, labelpad=2)
+        if head % 4 == 0:
+            axes[head].set_ylabel("Query position", fontsize=9, labelpad=2)
+        axes[head].set_xticks([0, 50])
+        axes[head].set_yticks([0, 25, 50, 75])
+        axes[head].tick_params(
+            axis="both", which="major", labelsize=7.25, length=2.5, width=0.7,
+            pad=1.5,
+        )
+        for spine in axes[head].spines.values():
+            spine.set_linewidth(0.8)
+
+    for axis in axes[num_heads_to_plot:]:
+        axis.set_visible(False)
+
+    fig.suptitle(
+        "Attention patterns for Sequence 10 - 64 features, 16 heads",
+        fontsize=12,
+        y=0.965,
+        fontweight="normal",
+    )
+
+    fig.subplots_adjust(left=0.065, right=0.88, bottom=0.06, top=0.925)
+
+    colorbar = fig.colorbar(
+        image,
+        ax=axes[:num_heads_to_plot].tolist(),
+        fraction=0.024,
+        pad=0.018,
+        aspect=30,
+        ticks=[0.0, 0.25, 0.50, 0.75, 1.0],
+    )
+    colorbar.set_label("Attention weight", fontsize=9, labelpad=5)
+    colorbar.ax.tick_params(labelsize=7.25, length=2.5, width=0.7, pad=1.5)
+    colorbar.outline.set_linewidth(0.8)
+
+    return fig
+
+
+def create_figure_s10(head_idx=4, num_sequences=10,
+                      record_glob=FIGURE5_RECORD_GLOB):
+    """Create the camera-ready Supplemental Figure 10 visualization.
+
+    Shows attention maps for a single attention head across multiple sequences:
+    Head 5 (0-indexed head_idx=4) evaluated on Sequences 1 through 10.
+
+    Suptitle:
+        Attention patterns for Sequences 1 to 10 (Head 5 in a model with 64 features, 16 heads)
+
+    Args:
+        head_idx: 0-indexed head index (default 4 corresponds to Head 5).
+        num_sequences: Number of held-out sequences to visualize (default 10, arranged 2x5).
+        record_glob: Glob pattern for the checkpoint.
+
+    Returns:
+        The Matplotlib figure object.
+    """
+    utils.set_plot_style()
+    mpl.rcParams["text.usetex"] = False
+
+    experiment_dirs = sorted(glob.glob(record_glob))
+    if len(experiment_dirs) != 1:
+        raise RuntimeError(
+            "Figure S10 requires exactly one checkpoint directory matching "
+            f"{record_glob!r}; found {len(experiment_dirs)}."
+        )
+
+    experiment_dir = experiment_dirs[0]
+    experiment_name = os.path.basename(experiment_dir)
+    record_path = os.path.join(experiment_dir, f"{experiment_name}.pkl")
+    data_path = os.path.join(experiment_dir, f"{experiment_name}_all_sequences.pkl")
+    if not os.path.isfile(record_path) or not os.path.isfile(data_path):
+        raise FileNotFoundError(
+            "Figure S10 checkpoint is incomplete. Expected both "
+            f"{record_path!r} and {data_path!r}."
+        )
+
+    with open(record_path, "rb") as file:
+        record = utils.CPU_Unpickler(file).load()
+    with open(data_path, "rb") as file:
+        data = pickle.load(file)
+
+    args = record["args"]
+    model = gpt.OneLayerAttention(
+        args["len_context"],
+        args["num_heads"],
+        args["num_hidden_features"],
+        args["vocab_size"],
+        args["num_mlp_layers"],
+    )
+    model.load_state_dict(record["model"])
+    model.eval()
+
+    sequences = data["sequences"][-1]
+    if len(sequences) < num_sequences:
+        raise IndexError(
+            f"num_sequences={num_sequences} exceeds available sequences ({len(sequences)})."
+        )
+
+    selected_sequences = sequences[:num_sequences]
+    with torch.no_grad():
+        _, attention = model.get_attention_weights(selected_sequences, None)
+
+    fig, axes = plt.subplots(
+        2,
+        5,
+        figsize=(9.2, 4.0),
+        facecolor="white",
+        gridspec_kw={"hspace": 0.14, "wspace": 0.24},
+    )
+    axes = axes.ravel()
+
+    cmap = plt.get_cmap("rocket").copy()
+    cmap.set_bad(color="white")
+    norm = mpl.colors.PowerNorm(gamma=0.6, vmin=0.0, vmax=1.0)
+    image = None
+    for i in range(num_sequences):
+        attn_map = attention[i, head_idx].detach().cpu().numpy()
+        future_mask = np.triu(np.ones_like(attn_map, dtype=bool), k=1)
+        masked_attention_map = np.ma.array(attn_map, mask=future_mask)
+
+        image = axes[i].imshow(
+            masked_attention_map,
+            cmap=cmap,
+            norm=norm,
+            interpolation="nearest",
+            aspect="equal",
+        )
+        axes[i].set_title(f"Sequence {i + 1}", fontsize=9.5, pad=3)
+        if i >= 5:  # bottom row
+            axes[i].set_xlabel("Key position", fontsize=9, labelpad=2)
+        if i % 5 == 0:  # leftmost column
+            axes[i].set_ylabel("Query position", fontsize=9, labelpad=2)
+        axes[i].set_xticks([0, 50])
+        axes[i].set_yticks([0, 25, 50, 75])
+        axes[i].tick_params(
+            axis="both", which="major", labelsize=7.25, length=2.5, width=0.7,
+            pad=1.5,
+        )
+        for spine in axes[i].spines.values():
+            spine.set_linewidth(0.8)
+
+    for axis in axes[num_sequences:]:
+        axis.set_visible(False)
+
+    fig.suptitle(
+        "Attention patterns for Sequences 1 to 10 (Head 5 in a model with 64 features, 16 heads)",
+        fontsize=11.5,
+        y=0.965,
+        fontweight="normal",
+    )
+
+    fig.subplots_adjust(left=0.06, right=0.90, bottom=0.10, top=0.90)
+
+    colorbar = fig.colorbar(
+        image,
+        ax=axes[:num_sequences].tolist(),
+        fraction=0.020,
         pad=0.018,
         aspect=30,
         ticks=[0.0, 0.25, 0.50, 0.75, 1.0],
@@ -1007,6 +1711,10 @@ def main(force_regenerate_cache=False):
 
     if force_regenerate_cache:
         force_regenerate_all_figure_caches()
+    else:
+        # Figure 4 is generated by generate_figure4.py, but its two input
+        # tables are maintained here alongside the other camera-ready caches.
+        ensure_figure4_caches()
 
     # 1. Figure 1
     print("Generating Figure 1...")
@@ -1018,7 +1726,17 @@ def main(force_regenerate_cache=False):
     print(f"Saved Figure 1 to {savefigdir}")
     plt.close(fig1)
 
-    # 2. Figure 2
+    # 2. Figure 4pre
+    print("Generating Figure 4pre...")
+    fig4pre = create_figure4pre(force_regenerate_cache=force_regenerate_cache)
+    for name in ["Figure4pre_combined", "Figure4pre"]:
+        fig4pre.savefig(f"{savefigdir}/{name}.pdf", format="pdf", bbox_inches="tight")
+        fig4pre.savefig(f"{savefigdir}/{name}.eps", format="eps", bbox_inches="tight")
+        fig4pre.savefig(f"{savefigdir}/{name}.png", format="png", dpi=300, bbox_inches="tight")
+    print(f"Saved Figure 4pre to {savefigdir}")
+    plt.close(fig4pre)
+
+    # 3. Figure 2
     print("Generating Figure 2...")
     fig2 = create_figure2()
     for name in ["Figure2_combined", "Figure2"]:
@@ -1028,7 +1746,7 @@ def main(force_regenerate_cache=False):
     print(f"Saved Figure 2 to {savefigdir}")
     plt.close(fig2)
 
-    # 3. Figure 5
+    # 4. Figure 5
     print("Generating Figure 5...")
     fig5 = create_figure5()
     for extension in ["pdf", "eps"]:
@@ -1047,6 +1765,48 @@ def main(force_regenerate_cache=False):
     )
     print(f"Saved Figure 5 to {savefigdir}")
     plt.close(fig5)
+
+    # 5. Supplemental Figure 9
+    print("Generating Figure Supplemental 9...")
+    fig_s9 = create_figure_s9()
+    for name in ["FigureS9", "FigureS9_combined", "Figure_Supplemental_9"]:
+        for extension in ["pdf", "eps"]:
+            fig_s9.savefig(
+                f"{savefigdir}/{name}.{extension}",
+                format=extension,
+                bbox_inches="tight",
+                facecolor="white",
+            )
+        fig_s9.savefig(
+            f"{savefigdir}/{name}.png",
+            format="png",
+            dpi=300,
+            bbox_inches="tight",
+            facecolor="white",
+        )
+    print(f"Saved Figure Supplemental 9 to {savefigdir}")
+    plt.close(fig_s9)
+
+    # 6. Supplemental Figure 10
+    print("Generating Figure Supplemental 10...")
+    fig_s10 = create_figure_s10()
+    for name in ["FigureS10", "FigureS10_combined", "Figure_Supplemental_10"]:
+        for extension in ["pdf", "eps"]:
+            fig_s10.savefig(
+                f"{savefigdir}/{name}.{extension}",
+                format=extension,
+                bbox_inches="tight",
+                facecolor="white",
+            )
+        fig_s10.savefig(
+            f"{savefigdir}/{name}.png",
+            format="png",
+            dpi=300,
+            bbox_inches="tight",
+            facecolor="white",
+        )
+    print(f"Saved Figure Supplemental 10 to {savefigdir}")
+    plt.close(fig_s10)
 
 
 if __name__ == "__main__":

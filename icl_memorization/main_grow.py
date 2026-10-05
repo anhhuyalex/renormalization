@@ -55,6 +55,7 @@ def grow_onelayer_attention_weights(base_model, target_model, base_heads, base_h
     base_sd = base_model.state_dict() if hasattr(base_model, "state_dict") else base_model
     target_sd = target_model.state_dict()
     
+    # transfer_mode == "none" copies nothing: target_model keeps its fresh random init
     transfer_attn = transfer_mode in ["both", "attn_only"]
     transfer_mlp = transfer_mode in ["both", "mlp_only"]
     
@@ -224,10 +225,11 @@ parser.add_argument('--unique_loss_mode', default="add", type=str,
 parser.add_argument('--unique_loss_alpha', default=0.5, type=float,
                     help='mixing alpha for weighted unique loss mode: (1-alpha)*shared + alpha*unique')
 parser.add_argument('--transfer_mode', default=None, type=str,
-                    choices=['both', 'attn_only', 'mlp_only'],
-                    help='transfer mode at growth/transition: both, attn_only, mlp_only')
+                    choices=['both', 'attn_only', 'mlp_only', 'none'],
+                    help='transfer mode at growth/transition: both, attn_only, mlp_only, none (re-initialize from scratch)')
 parser.add_argument('--grow_condition', default=None, type=str,
-                    choices=['base', 'width_growth', 'head_growth', 'both_growth', 'base_width_growth', 'base_head_growth', 'base_both_growth'],
+                    choices=['base', 'width_growth', 'head_growth', 'both_growth', 'base_width_growth', 'base_head_growth', 'base_both_growth',
+                             'noswitch_base', 'noswitch_width_growth', 'noswitch_head_growth'],
                     help='growth condition: base, width_growth, head_growth, both_growth')
 parser.add_argument('--grow_iter', default=-1, type=int,
                     help='epoch iteration at which to grow the model (-1 for halfway)')
@@ -528,7 +530,10 @@ elif args.wandb_group_name == "memo_may25_zipf_onelayerattention_large_doresampl
     print("Model has", num_parameters, "parameters")
     if num_parameters > 1e9:
         sys.exit() 
-elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresample", "memo_sep27_zipf_onelayerattention_grow", "memo_grow_onelayerattention"] or "grow" in args.wandb_group_name:
+elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresample", \
+  "memo_sep27_zipf_onelayerattention_grow", \
+  "memo_grow_onelayerattention"] or \
+  "grow" in args.wandb_group_name:
     args.arch = "OneLayerAttention"
     args.vocab_size = 2
     
@@ -537,46 +542,8 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
     args.base_num_hidden_features = 32
     args.base_num_hidden_features_mlp = args.base_num_heads * args.base_num_hidden_features
     
-    # 1. Growth settings (Tasks 0 to 35: start at 8h/32d, grow at epoch 50 to target size)
-    arch_conditions = [
-        {"name": "base", "num_heads": 8, "num_hidden_features": 32, "desc": "base_8h_32d"},
-        {"name": "width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "width_growth_8h_64d"},
-        {"name": "head_growth", "num_heads": 16, "num_hidden_features": 32, "desc": "head_growth_16h_32d"},
-        {"name": "both_growth", "num_heads": 16, "num_hidden_features": 64, "desc": "both_growth_16h_64d"},
-    ]
-    transfer_modes = ["attn_only", "mlp_only", "both"]
-    
-    grow_settings = []
-    for arch in arch_conditions:
-        for t_mode in transfer_modes:
-            grow_settings.append({
-                "grow_condition": arch["name"],
-                "num_heads": arch["num_heads"],
-                "num_hidden_features": arch["num_hidden_features"],
-                "transfer_mode": t_mode,
-                "desc": f"{arch['desc']}_{t_mode}",
-                "is_base_experiment": (arch["name"] == "base"),
-            })
-
-    # 2. Base experiment settings for larger models (Tasks 36 to 62: start directly at target size from epoch 0)
-    base_arch_conditions = [
-        {"name": "base_width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "base_width_8h_64d"},
-        {"name": "base_head_growth", "num_heads": 16, "num_hidden_features": 32, "desc": "base_head_16h_32d"},
-        {"name": "base_both_growth", "num_heads": 16, "num_hidden_features": 64, "desc": "base_both_16h_64d"},
-    ]
-    base_settings = []
-    for arch in base_arch_conditions:
-        for t_mode in transfer_modes:
-            base_settings.append({
-                "grow_condition": arch["name"],
-                "num_heads": arch["num_heads"],
-                "num_hidden_features": arch["num_hidden_features"],
-                "transfer_mode": t_mode,
-                "desc": f"{arch['desc']}_{t_mode}",
-                "is_base_experiment": True,
-            })
-
-    all_settings = grow_settings + base_settings
+    # Settings and task-id mapping live in grow_settings.py
+    from grow_settings import all_settings, select_by_task_id
             
     if getattr(args, "grow_condition", None) is not None and getattr(args, "transfer_mode", None) is not None:
         selected_setting = next((s for s in all_settings if s["grow_condition"] == args.grow_condition and s["transfer_mode"] == args.transfer_mode), None)
@@ -593,21 +560,14 @@ elif args.wandb_group_name in ["memo_sep27_zipf_onelayerattention_large_doresamp
         setting_idx = args.SLURM_ARRAY_TASK_ID % len(matching)
         seed_offset = args.SLURM_ARRAY_TASK_ID // len(matching)
         selected_setting = matching[setting_idx]
-    elif args.SLURM_ARRAY_TASK_ID >= 36:
-        # Base experiments at larger sizes (Tasks 36 to 62: 9 settings x 3 seeds)
-        offset_task = args.SLURM_ARRAY_TASK_ID - 36
-        setting_idx = offset_task % len(base_settings)
-        seed_offset = offset_task // len(base_settings)
-        selected_setting = base_settings[setting_idx]
     else:
-        # Growth experiments (Tasks 0 to 35: 12 settings x 3 seeds)
-        setting_idx = args.SLURM_ARRAY_TASK_ID % len(grow_settings)
-        seed_offset = args.SLURM_ARRAY_TASK_ID // len(grow_settings)
-        selected_setting = grow_settings[setting_idx]
+        selected_setting, seed_offset = select_by_task_id(args.SLURM_ARRAY_TASK_ID)
         
     args.grow_condition = selected_setting["grow_condition"]
     args.transfer_mode = selected_setting["transfer_mode"]
     args.grow_desc = selected_setting["desc"]
+    # False for the no-switch experiments: grow / re-initialize at grow_iter but keep the same sequences
+    args.resample_at_switch = selected_setting.get("resample_at_switch", True)
     args.seed_offset = seed_offset
     is_base = selected_setting.get("is_base_experiment", False) or args.grow_condition.startswith("base")
     
@@ -1139,30 +1099,34 @@ for iter in range(args.num_iters // num_iters_per_epoch):
             all_sequences_across_switches["transfer_mode"] = args.transfer_mode
 
         # Resample all sequences when model size changes (or at switch epoch for base model)
-        print("\n" + "="*60)
-        print(f"RESAMPLING ALL SEQUENCES AT EPOCH {iter} (iter {iter * num_iters_per_epoch})")
-        train_dataset.generate_sequences()
-        all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
-        all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences))
-        with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
-            pickle.dump(all_sequences_across_switches, f)
+        # (skipped in the no-switch experiments, which keep training on the same sequences)
+        if getattr(args, "resample_at_switch", True):
+            print("\n" + "="*60)
+            print(f"RESAMPLING ALL SEQUENCES AT EPOCH {iter} (iter {iter * num_iters_per_epoch})")
+            train_dataset.generate_sequences()
+            all_sequences_across_switches["sequences"].append(copy.deepcopy(train_dataset.sequences))
+            all_sequences_across_switches["switch_start_iter"].append([iter] * len(train_dataset.sequences))
+            with open(f"{dirprefix}/{fileprefix}_all_sequences.pkl", "wb") as f:
+                pickle.dump(all_sequences_across_switches, f)
 
-        if args.sequence_sampling_distribution == "zipf":
-            _iwl_cutoff = min(200000, args.K)
-            iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
-            iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
-            iwl_dataset.original_indices = iwl_indices
-            iwl_dataset.train_dataset = train_dataset
-            iwl_dataset.len_data = len(iwl_dataset.sequences)
-            iwl_test_loader = torch.utils.data.DataLoader(
-                iwl_dataset,
-                sampler=val_sampler,
-                **{'batch_size': args.batch_size, 'num_workers': args.workers,
-                   "shuffle": False, 'pin_memory': True}
-            )
-        num_apppearances = np.zeros(args.K)
-        print(f"Resampled all {args.K} sequences! Appearance counts reset to 0.")
-        print("="*60 + "\n")
+            if args.sequence_sampling_distribution == "zipf":
+                _iwl_cutoff = min(200000, args.K)
+                iwl_indices = np.concatenate([np.arange(0, _iwl_cutoff, 10), np.arange(_iwl_cutoff, args.K)]).astype(int)
+                iwl_dataset.sequences = train_dataset.sequences[iwl_indices]
+                iwl_dataset.original_indices = iwl_indices
+                iwl_dataset.train_dataset = train_dataset
+                iwl_dataset.len_data = len(iwl_dataset.sequences)
+                iwl_test_loader = torch.utils.data.DataLoader(
+                    iwl_dataset,
+                    sampler=val_sampler,
+                    **{'batch_size': args.batch_size, 'num_workers': args.workers,
+                       "shuffle": False, 'pin_memory': True}
+                )
+            num_apppearances = np.zeros(args.K)
+            print(f"Resampled all {args.K} sequences! Appearance counts reset to 0.")
+            print("="*60 + "\n")
+        else:
+            print(f"NOT resampling sequences at epoch {iter}: training continues on the same data.")
         
         
     # Switch the sequences several times throughout the training
