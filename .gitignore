@@ -21,7 +21,7 @@ hipp.sh
 icl_memorization/cache 
 icl_memorization/slurms
 icl_memorization/wandb
-icl_memorization/figs*
+icl_memorization/figs_camera_ready
 *.csv
 figs/
 specialization_icl/l2l
