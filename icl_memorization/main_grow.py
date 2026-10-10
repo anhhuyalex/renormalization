@@ -229,7 +229,8 @@ parser.add_argument('--transfer_mode', default=None, type=str,
                     help='transfer mode at growth/transition: both, attn_only, mlp_only, none (re-initialize from scratch)')
 parser.add_argument('--grow_condition', default=None, type=str,
                     choices=['base', 'width_growth', 'head_growth', 'both_growth', 'base_width_growth', 'base_head_growth', 'base_both_growth',
-                             'noswitch_base', 'noswitch_width_growth', 'noswitch_head_growth'],
+                             'noswitch_base', 'noswitch_width_growth', 'noswitch_head_growth',
+                             'base_noswitch_width_growth', 'base_noswitch_head_growth', 'base_noswitch_both_growth'],
                     help='growth condition: base, width_growth, head_growth, both_growth')
 parser.add_argument('--grow_iter', default=-1, type=int,
                     help='epoch iteration at which to grow the model (-1 for halfway)')

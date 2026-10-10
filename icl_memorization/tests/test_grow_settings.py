@@ -3,6 +3,7 @@
 - Tasks 0-71 must map to exactly what they did before the no-switch experiments were added.
 - Tasks 63-71 must be the large model sizes with transfer_mode == "none".
 - Tasks 72-107 must be the small-model no-switch experiments (no growth / width / head growth x 4 transfer modes).
+- Tasks 108-143 must be the large-model no-switch experiments (3 large sizes, no growth, x 4 transfer modes).
 
 Run from icl_memorization/:  python -m pytest tests/test_grow_settings.py
 """
@@ -116,6 +117,34 @@ def test_tasks_72_to_107_cover_every_condition_mode_seed_once():
 def test_only_noswitch_tasks_skip_resampling():
     for t in range(72):
         assert select_by_task_id(t)[0].get("resample_at_switch", True) is True
+    for t in range(72, 144):
+        assert select_by_task_id(t)[0]["resample_at_switch"] is False
+
+
+@pytest.mark.parametrize("task", range(108, 144))
+def test_tasks_108_to_143_are_large_model_no_switch(task):
+    s, seed_offset = select_by_task_id(task)
+    assert s["grow_condition"].startswith("base_noswitch_")  # base experiment: no growth
+    assert (s["num_heads"], s["num_hidden_features"]) in LARGE_SIZES
+    assert s["transfer_mode"] in ("attn_only", "mlp_only", "both", "none")
+    assert s["resample_at_switch"] is False
+    assert s["is_base_experiment"] is True  # starts directly at the target size
+    assert seed_offset in (0, 1, 2)
+
+
+def test_tasks_108_to_143_cover_every_condition_mode_seed_once():
+    seen = [(select_by_task_id(t)[0]["grow_condition"], select_by_task_id(t)[0]["transfer_mode"], select_by_task_id(t)[1])
+            for t in range(108, 144)]
+    expected = {(c, m, so) for c in ("base_noswitch_width_growth", "base_noswitch_head_growth", "base_noswitch_both_growth")
+                for m in ("attn_only", "mlp_only", "both", "none") for so in range(3)}
+    assert len(seen) == len(set(seen)) == 36 and set(seen) == expected
+
+
+def test_large_noswitch_sizes_match_large_base_experiments():
+    sizes = {r[1].replace("base_", ""): (r[2], r[3]) for r in ORIGINAL_0_TO_62[36:]}
+    for t in range(108, 144):
+        s, _ = select_by_task_id(t)
+        assert (s["num_heads"], s["num_hidden_features"]) == sizes[s["grow_condition"].replace("base_noswitch_", "")]
 
 
 def test_noswitch_size_matches_growth_experiment_sizes():
@@ -134,11 +163,11 @@ def test_main_grow_skips_resample_when_flag_false():
     assert 'if getattr(args, "resample_at_switch", True):' in src
 
 
-def test_sbatch_array_is_72_to_107():
+def test_sbatch_array_is_108_to_143():
     with open(os.path.join(ROOT, "main_grow.sh")) as f:
         m = re.search(r"^#SBATCH --array=(\d+)-(\d+)", f.read(), re.M)
     assert m is not None
-    assert (int(m.group(1)), int(m.group(2))) == (72, 107)
+    assert (int(m.group(1)), int(m.group(2))) == (108, 143)
 
 
 def test_transfer_mode_none_is_accepted_by_cli():
@@ -147,7 +176,8 @@ def test_transfer_mode_none_is_accepted_by_cli():
     m = re.search(r"'--transfer_mode'.*?choices=\[(.*?)\]", src, re.S)
     assert m is not None and "'none'" in m.group(1)
     m = re.search(r"'--grow_condition'.*?choices=\[(.*?)\]", src, re.S)
-    assert m is not None and all(f"'{c}'" in m.group(1) for c in ("noswitch_base", "noswitch_width_growth", "noswitch_head_growth"))
+    assert m is not None and all(f"'{c}'" in m.group(1) for c in ("noswitch_base", "noswitch_width_growth", "noswitch_head_growth",
+                                                                  "base_noswitch_width_growth", "base_noswitch_head_growth", "base_noswitch_both_growth"))
 
 
 def test_none_mode_copies_nothing():

@@ -6,11 +6,14 @@ Task layout:
     63-71  base experiments at larger sizes, re-initialized with no transfer (3 settings x 3 seeds)
     72-107 no-switch experiments: start at 8h/32d, grow (or not) at epoch 50, but KEEP THE SAME SEQUENCES
            (3 sizes x 4 transfer modes = 12 settings x 3 seeds)
+    108-143 base experiments at larger sizes, no switch: start at the target size, restart / keep weights at
+           epoch 50 but KEEP THE SAME SEQUENCES (3 sizes x 4 transfer modes = 12 settings x 3 seeds)
 """
 
 NUM_SEEDS = 3
 FIRST_BASE_TASK = 36
 FIRST_NOSWITCH_TASK = 72
+FIRST_LARGE_NOSWITCH_TASK = 108
 transfer_modes = ["attn_only", "mlp_only", "both"]
 
 # 1. Growth settings (Tasks 0 to 35: start at 8h/32d, grow at epoch 50 to target size)
@@ -86,11 +89,34 @@ for arch in noswitch_arch_conditions:
             "resample_at_switch": False,
         })
 
-all_settings = grow_settings + base_settings + base_reinit_settings + noswitch_settings
+# 5. Large-model no-switch experiments (Tasks 108 to 143): same larger sizes as the base experiments (start
+#    directly at the target size, no growth), with the 4 transfer modes, and the sequences are NOT resampled.
+large_noswitch_arch_conditions = [
+    {"name": "base_noswitch_width_growth", "num_heads": 8, "num_hidden_features": 64, "desc": "base_noswitch_width_8h_64d"},
+    {"name": "base_noswitch_head_growth", "num_heads": 16, "num_hidden_features": 32, "desc": "base_noswitch_head_16h_32d"},
+    {"name": "base_noswitch_both_growth", "num_heads": 16, "num_hidden_features": 64, "desc": "base_noswitch_both_16h_64d"},
+]
+large_noswitch_settings = []
+for arch in large_noswitch_arch_conditions:
+    for t_mode in noswitch_transfer_modes:
+        large_noswitch_settings.append({
+            "grow_condition": arch["name"],
+            "num_heads": arch["num_heads"],
+            "num_hidden_features": arch["num_hidden_features"],
+            "transfer_mode": t_mode,
+            "desc": f"{arch['desc']}_{t_mode}",
+            "is_base_experiment": True,  # starts directly at the target size
+            "resample_at_switch": False,
+        })
+
+all_settings = grow_settings + base_settings + base_reinit_settings + noswitch_settings + large_noswitch_settings
 
 
 def select_by_task_id(task_id):
     """Return (setting, seed_offset) for a SLURM array task id."""
+    if task_id >= FIRST_LARGE_NOSWITCH_TASK:
+        offset_task = task_id - FIRST_LARGE_NOSWITCH_TASK
+        return large_noswitch_settings[offset_task % len(large_noswitch_settings)], offset_task // len(large_noswitch_settings)
     if task_id >= FIRST_NOSWITCH_TASK:
         offset_task = task_id - FIRST_NOSWITCH_TASK
         return noswitch_settings[offset_task % len(noswitch_settings)], offset_task // len(noswitch_settings)
