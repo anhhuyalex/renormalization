@@ -188,7 +188,7 @@ def plot_train_loss_panel(ax, df_data, title="Train Loss vs. Number of Parameter
     marker_map = {h: markers[i % len(markers)] for i, h in enumerate(H_values)}
 
     D_values = sorted(df_data["num_hidden_features"].unique())
-    cmap = mpl.cm.turbo
+    cmap = plt.get_cmap("rocket")
     dmin = min(D_values) if d_min is None else d_min
     dmax = max(D_values) if d_max is None else d_max
     norm = mpl.colors.LogNorm(vmin=dmin, vmax=dmax)
@@ -287,7 +287,7 @@ def plot_broken_axis_panel(ax1, ax2, avg_df, norm, title=None):
     common_kwargs = dict(
         y="accuracy",
         hue="num_parameters",
-        palette="turbo",
+        palette="rocket",
         hue_norm=norm,
         legend=False,
         errorbar=None,
@@ -359,16 +359,44 @@ def plot_broken_axis_panel(ax1, ax2, avg_df, norm, title=None):
         ax1.set_title(title, x=1.04, y=1.0, pad=8, fontsize=15)
 
 
-# Figure 2 bottom-row data provenance.  Panels (a) and (b) use the one-layer
-# no-resampling experiment; panel (c) uses the corresponding GPT-2 resampling
-# experiment used for the data-switch evaluation.
+# Figure 2 top-row and bottom-row data provenance.
+# Panels (a) and (b) use the no-resampling experiments;
+# panel (c) uses the resampling experiments used for data-switch evaluation.
+FIGURE2_TOP_AB_EXPERIMENTS = (
+    "memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresample",
+)
+FIGURE2_TOP_C_EXPERIMENTS = (
+    "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample",
+)
+FIGURE2_TOP_AB_RECORD_GLOBS = [
+    f"/scratch/qanguyen/gautam/cache/{experiment}/*"
+    for experiment in (
+        [FIGURE2_TOP_AB_EXPERIMENTS]
+        if isinstance(FIGURE2_TOP_AB_EXPERIMENTS, str)
+        else FIGURE2_TOP_AB_EXPERIMENTS
+    )
+]
+FIGURE2_TOP_C_RECORD_GLOBS = [
+    f"/scratch/qanguyen/gautam/cache/{experiment}/*"
+    for experiment in (
+        [FIGURE2_TOP_C_EXPERIMENTS]
+        if isinstance(FIGURE2_TOP_C_EXPERIMENTS, str)
+        else FIGURE2_TOP_C_EXPERIMENTS
+    )
+]
+# Retain singular aliases for backward compatibility
 FIGURE2_TOP_EXPERIMENT = (
-    "memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresample"
+    FIGURE2_TOP_AB_EXPERIMENTS[0]
+    if isinstance(FIGURE2_TOP_AB_EXPERIMENTS, (tuple, list))
+    else FIGURE2_TOP_AB_EXPERIMENTS
 )
-FIGURE2_TOP_RECORD_GLOB = (
-    "/scratch/qanguyen/gautam/cache/"
-    f"{FIGURE2_TOP_EXPERIMENT}/*"
+FIGURE2_TOP_RECORD_GLOB = FIGURE2_TOP_AB_RECORD_GLOBS[0]
+FIGURE2_TOP_C_EXPERIMENT = (
+    FIGURE2_TOP_C_EXPERIMENTS[0]
+    if isinstance(FIGURE2_TOP_C_EXPERIMENTS, (tuple, list))
+    else FIGURE2_TOP_C_EXPERIMENTS
 )
+FIGURE2_TOP_C_RECORD_GLOB = FIGURE2_TOP_C_RECORD_GLOBS[0]
 FIGURE2_TOP_A_CACHE = "./cache/df_train_loss_12layer.csv"
 FIGURE2_TOP_B_CACHE = "./cache/df_capacity_12layer.csv"
 FIGURE2_TOP_C_CACHE = "./cache/df_dataswitch_12layer.csv"
@@ -506,41 +534,139 @@ def _extract_figure2_top_run(folder):
     }
 
 
-def regenerate_figure2_top_cache():
-    """Rebuild the top-row Figure 2 caches from raw GPT-2 records."""
-    folders = sorted(glob.glob(FIGURE2_TOP_RECORD_GLOB))
-    if not folders:
+def _extract_figure2_top_c_run(folder):
+    """Extract panel-c data-switch accuracy from one GPT-2 resampling run."""
+    record_paths = [
+        path for path in glob.glob(os.path.join(folder, "*.pkl"))
+        if not path.endswith("_all_sequences.pkl")
+    ]
+    if len(record_paths) != 1:
+        return []
+    try:
+        with open(record_paths[0], "rb") as file:
+            data = FastFigure2TopUnpickler(file).load()
+    except Exception:
+        return []
+
+    logs = data.get("logs", [])
+    if not logs:
+        return []
+    args = data.get("args", {})
+    num_hidden_features = args.get("num_hidden_features", 1)
+    num_heads = args.get("num_heads", 1)
+    width = num_hidden_features * num_heads
+    model_parameters = sum(
+        parameter.numel() for parameter in data.get("model", {}).values()
+        if hasattr(parameter, "numel")
+    )
+    if model_parameters == 0:
+        num_layers = args.get("num_layers", 12)
+        context_length = args.get("len_context", 100)
+        vocab_size = args.get("vocab_size", 2)
+        model_parameters = (
+            num_layers * (12 * width ** 2 + 13 * width)
+            + (context_length + 2 * vocab_size + 2) * width
+            + vocab_size
+        )
+
+    final_loss = logs[-1].get("train_loss")
+    failed = False
+    if final_loss is not None:
+        failed = (
+            (model_parameters > 3e6 and final_loss > 0.21)
+            or (model_parameters > 1e6 and final_loss > 0.4)
+        )
+
+    data_switch_rows = []
+    for log in logs:
+        epoch = log.get("epoch")
+        if epoch is None or not (0 <= epoch <= 10 or 40 <= epoch <= 50):
+            continue
+        test_metrics = log.get("test_metrics", {})
+        accuracy = test_metrics.get("accuracy")
+        sequence_rank = test_metrics.get("sequence_rank")
+        if accuracy is None or sequence_rank is None:
+            continue
+        accuracy = np.asarray(accuracy)
+        sequence_rank = np.asarray(sequence_rank) * 10
+        first_3000 = sequence_rank <= 3000
+        if np.any(first_3000):
+            data_switch_rows.append({
+                "num_parameters": model_parameters,
+                "iteration": epoch * 1000,
+                "accuracy": float(accuracy[first_3000].mean()),
+                "failed": failed,
+            })
+    return data_switch_rows
+
+
+def regenerate_figure2_top_ab_cache():
+    """Rebuild the top-row panels (a, b) Figure 2 caches from raw GPT-2 records."""
+    all_folders = sorted({
+        folder
+        for record_glob in FIGURE2_TOP_AB_RECORD_GLOBS
+        for folder in glob.glob(record_glob)
+    })
+    if not all_folders:
         raise FileNotFoundError(
-            f"No Figure 2 top-row records match {FIGURE2_TOP_RECORD_GLOB}."
+            f"No Figure 2 top-row (a, b) records match any of: {FIGURE2_TOP_AB_RECORD_GLOBS}."
         )
     print(
-        "Regenerating Figure 2 top-row caches from "
-        f"{FIGURE2_TOP_EXPERIMENT} ({len(folders)} runs)"
+        "Regenerating Figure 2 top-row (a, b) caches from "
+        f"{', '.join(FIGURE2_TOP_AB_EXPERIMENTS)} ({len(all_folders)} runs)"
     )
-    with Pool(processes=min(20, len(folders))) as pool:
+    with Pool(processes=min(20, len(all_folders))) as pool:
         results = [
-            result for result in pool.imap_unordered(_extract_figure2_top_run, folders)
+            result for result in pool.imap_unordered(_extract_figure2_top_run, all_folders)
             if result is not None
         ]
     if not results:
-        raise RuntimeError("No usable Figure 2 top-row records were found.")
+        raise RuntimeError("No usable Figure 2 top-row (a, b) records were found.")
 
     loss_frame = pd.DataFrame([result["loss"] for result in results])
     capacity_frame = pd.DataFrame(
         row for result in results for row in result["capacity"]
     )
-    data_switch_frame = pd.DataFrame(
-        row for result in results for row in result["data_switch"]
-    )
-    if capacity_frame.empty or data_switch_frame.empty:
-        raise RuntimeError("The extracted Figure 2 top-row data is incomplete.")
+    if loss_frame.empty or capacity_frame.empty:
+        raise RuntimeError("The extracted Figure 2 top-row (a, b) data is incomplete.")
     os.makedirs("./cache", exist_ok=True)
     loss_frame.to_csv(FIGURE2_TOP_A_CACHE, index=False)
     capacity_frame.to_csv(FIGURE2_TOP_B_CACHE, index=False)
-    data_switch_frame.to_csv(FIGURE2_TOP_C_CACHE, index=False)
     print(f"Wrote {len(loss_frame)} rows to {FIGURE2_TOP_A_CACHE}")
     print(f"Wrote {len(capacity_frame)} rows to {FIGURE2_TOP_B_CACHE}")
+
+
+def regenerate_figure2_top_c_cache():
+    """Rebuild the top-row panel (c) Figure 2 cache from raw GPT-2 resampling records."""
+    all_folders = sorted({
+        folder
+        for record_glob in FIGURE2_TOP_C_RECORD_GLOBS
+        for folder in glob.glob(record_glob)
+    })
+    if not all_folders:
+        raise FileNotFoundError(
+            f"No Figure 2 top-row panel (c) records match any of: {FIGURE2_TOP_C_RECORD_GLOBS}."
+        )
+    print(
+        "Regenerating Figure 2 top-row panel (c) cache from "
+        f"{', '.join(FIGURE2_TOP_C_EXPERIMENTS)} ({len(all_folders)} runs)"
+    )
+    data_switch_rows = []
+    with Pool(processes=min(20, len(all_folders))) as pool:
+        for run_rows in pool.imap_unordered(_extract_figure2_top_c_run, all_folders):
+            data_switch_rows.extend(run_rows)
+    data_switch_frame = pd.DataFrame(data_switch_rows)
+    if data_switch_frame.empty:
+        raise RuntimeError("The extracted Figure 2 top-row panel (c) data is empty.")
+    os.makedirs("./cache", exist_ok=True)
+    data_switch_frame.to_csv(FIGURE2_TOP_C_CACHE, index=False)
     print(f"Wrote {len(data_switch_frame)} rows to {FIGURE2_TOP_C_CACHE}")
+
+
+def regenerate_figure2_top_cache():
+    """Rebuild all top-row Figure 2 caches from raw GPT-2 records."""
+    regenerate_figure2_top_ab_cache()
+    regenerate_figure2_top_c_cache()
 
 
 def filter_figure2_bottom_row_models(dataframe):
@@ -768,10 +894,12 @@ def regenerate_figure2_bottom_c_cache():
 
 def ensure_figure2_caches(force_regenerate=False):
     """Create missing Figure 2 caches, or replace them when forced."""
-    top_caches = [FIGURE2_TOP_A_CACHE, FIGURE2_TOP_B_CACHE, FIGURE2_TOP_C_CACHE]
+    top_ab_caches = [FIGURE2_TOP_A_CACHE, FIGURE2_TOP_B_CACHE]
     bottom_ab_caches = [FIGURE2_BOTTOM_A_CACHE, FIGURE2_BOTTOM_B_CACHE]
-    if force_regenerate or any(not os.path.isfile(path) for path in top_caches):
-        regenerate_figure2_top_cache()
+    if force_regenerate or any(not os.path.isfile(path) for path in top_ab_caches):
+        regenerate_figure2_top_ab_cache()
+    if force_regenerate or not os.path.isfile(FIGURE2_TOP_C_CACHE):
+        regenerate_figure2_top_c_cache()
     if force_regenerate or any(not os.path.isfile(path) for path in bottom_ab_caches):
         regenerate_figure2_bottom_ab_cache()
     if force_regenerate or not os.path.isfile(FIGURE2_BOTTOM_C_CACHE):
@@ -1130,6 +1258,14 @@ def create_figure2(force_regenerate_cache=False):
     ensure_figure2_caches(force_regenerate=force_regenerate_cache)
     utils.set_plot_style()
     print(
+        "Figure 2 top-row panels (a, b) experiments: "
+        f"{', '.join(FIGURE2_TOP_AB_EXPERIMENTS)}"
+    )
+    print(
+        "Figure 2 top-row panel (c) experiments: "
+        f"{', '.join(FIGURE2_TOP_C_EXPERIMENTS)}"
+    )
+    print(
         "Figure 2 bottom-row panels (a, b) experiments: "
         f"{', '.join(FIGURE2_BOTTOM_AB_EXPERIMENTS)}"
     )
@@ -1219,7 +1355,7 @@ def create_figure2(force_regenerate_cache=False):
     ax_c1_left = fig.add_subplot(gs_c1[0])
     ax_c1_right = fig.add_subplot(gs_c1[1], sharey=ax_c1_left)
 
-    # 12-layer data switch data (exclusively from memo_may1_zipf_gpt2_vary_num_hidden_features_num_heads_doresample)
+    # 12-layer data switch data from FIGURE2_TOP_C_EXPERIMENTS (memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample)
     avg_df_12 = pd.read_csv(FIGURE2_TOP_C_CACHE)
 
     # 1-layer data-switch panel from FIGURE2_BOTTOM_C_EXPERIMENT.
@@ -1241,14 +1377,14 @@ def create_figure2(force_regenerate_cache=False):
                            title="Average Accuracy Over First 3000 Ranked Sequences")
 
     # Colorbars for Column (c)
-    sm_c0 = mpl.cm.ScalarMappable(cmap="turbo", norm=norm_c0)
+    sm_c0 = mpl.cm.ScalarMappable(cmap="rocket", norm=norm_c0)
     sm_c0.set_array([])
     cbar_c0 = fig.colorbar(sm_c0, ax=[ax_c0_left, ax_c0_right], pad=0.02)
     cbar_c0.set_label("Number of Parameters", fontsize=13)
     cbar_c0.formatter = mticker.LogFormatterSciNotation()
     cbar_c0.update_ticks()
 
-    sm_c1 = mpl.cm.ScalarMappable(cmap="turbo", norm=norm_c1)
+    sm_c1 = mpl.cm.ScalarMappable(cmap="rocket", norm=norm_c1)
     sm_c1.set_array([])
     cbar_c1 = fig.colorbar(sm_c1, ax=[ax_c1_left, ax_c1_right], pad=0.02)
     cbar_c1.set_label("Number of Parameters", fontsize=13)

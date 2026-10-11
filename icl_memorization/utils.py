@@ -871,7 +871,7 @@ def set_plot_style():
         },
     )
 
-def add_colorbar(fig, ax, norm, cmap="turbo", label=None, log_ticks=False):
+def add_colorbar(fig, ax, norm, cmap="rocket", label=None, log_ticks=False):
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=ax)

@@ -34,7 +34,7 @@ for mode in ['shared', 'separate']:
         norm_de = mpl.colors.LogNorm(vmin=params_de.min(), vmax=params_de.max())
         norm_f = mpl.colors.LogNorm(vmin=params_f.min(), vmax=params_f.max())
     
-    cmap = plt.cm.turbo
+    cmap = plt.get_cmap("rocket")
     param_to_color_de = {p: cmap(norm_de(p)) for p in params_de}
     
     # d
@@ -60,13 +60,13 @@ for mode in ['shared', 'separate']:
     # f
     sns.scatterplot(
         data=df_f, x="probe_novel_sequences_0", y="logit_probe_accuracy",
-        hue="num_parameters", palette="turbo", hue_norm=norm_f,
+        hue="num_parameters", palette="rocket", hue_norm=norm_f,
         legend=False, marker="+", s=120, linewidth=2.5, edgecolor="black",
         ax=axes[2]
     )
     axes[2].set_title(f"f ({mode})")
     
-    sm = mpl.cm.ScalarMappable(norm=norm_f, cmap="turbo")
+    sm = mpl.cm.ScalarMappable(norm=norm_f, cmap="rocket")
     sm.set_array([])
     cbar = fig.colorbar(sm, ax=axes[2], pad=0.02)
     cbar.set_label("Number of Parameters")

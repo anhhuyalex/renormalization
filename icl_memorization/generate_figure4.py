@@ -203,7 +203,7 @@ cbar_top_ax.set_ylabel("Accuracy", fontsize=13)
 
 # ----------------- BOTTOM ROW -----------------
 # Norms and colormaps
-cmap = plt.cm.turbo
+cmap = plt.get_cmap("rocket")
 norm_de = mpl.colors.LogNorm(vmin=params_de.min(), vmax=params_de.max())
 param_to_color_de = {p: cmap(norm_de(p)) for p in params_de}
 
@@ -265,7 +265,7 @@ sns.scatterplot(
     x="probe_novel_sequences_0",
     y="logit_probe_accuracy",
     hue="num_parameters",
-    palette="turbo",
+    palette="rocket",
     hue_norm=norm_f,
     legend=False,
     marker="+",
@@ -282,7 +282,7 @@ ax_f.set_ylim(-0.1, 2.55)
 add_spines(ax_f, linewidth=1.2)
 
 # Bottom Colorbar on cbar_bottom_ax
-sm_bottom = mpl.cm.ScalarMappable(norm=norm_f, cmap="turbo")
+sm_bottom = mpl.cm.ScalarMappable(norm=norm_f, cmap="rocket")
 sm_bottom.set_array([])
 cbar_bottom = fig.colorbar(sm_bottom, cax=cbar_bottom_ax)
 cbar_bottom.set_label("Number of Parameters", fontsize=13)
