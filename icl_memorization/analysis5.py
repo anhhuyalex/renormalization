@@ -9,6 +9,9 @@ import re
 from multiprocessing import Pool
 from collections import defaultdict
 import copy
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from scipy.special import logit
 
 # Configure environment to locate TeX tools and required libraries
 fmri_root = os.path.dirname(os.path.dirname(sys.executable))
@@ -23,6 +26,9 @@ for p in [os.path.join(FMRI_DIR, "bin"), fmri_bin]:
 for p in [os.path.join(FMRI_DIR, "lib"), fmri_lib]:
     if os.path.isdir(p) and p not in os.environ.get("LD_LIBRARY_PATH", ""):
         os.environ["LD_LIBRARY_PATH"] = p + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+
+if "MPLCONFIGDIR" not in os.environ:
+    os.environ["MPLCONFIGDIR"] = f"/tmp/matplotlib_{os.getuid()}" 
 
 import numpy as np
 import pandas as pd
@@ -45,14 +51,8 @@ def apply_figure_style():
     mpl.rcParams.update({
         "text.usetex": True,
         "font.family": "serif",
-        "font.serif": [
-            "Times New Roman",
-            "Times",
-            "DejaVu Serif",
-            "STIXGeneral",
-            "Computer Modern Roman",
-        ],
-        "mathtext.fontset": "stix",
+        "font.serif": ["Computer Modern Roman"],
+        "text.latex.preamble": r"\usepackage{times}\usepackage{amsmath}\usepackage{amssymb}",
         "font.size": 12,
         "axes.labelsize": 13,
         "axes.titlesize": 14,
@@ -1117,6 +1117,306 @@ def ensure_figure4_caches(force_regenerate=False):
         regenerate_figure4_caches()
 
 
+FIGURE4_POST_SWAP_CACHE = "./figs/Figure6/df_first_sequences_loader_post_swap.csv"
+FIGURE4_FIRST_SEQUENCES_CACHE = "./figs/Figure6/df_first_sequences_loader.csv"
+FIGURE4_SECOND_SEQUENCES_CACHE = "./figs/Figure6/df_second_sequences_loader.csv"
+
+
+def _add_figure4_spines(ax, linewidth=1.2, color="black"):
+    for side in ["left", "right", "top", "bottom"]:
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_linewidth(linewidth)
+        ax.spines[side].set_edgecolor(color)
+
+
+def _set_linear_rescaled_ticks(
+    ax,
+    x_values,
+    y_values,
+    x_scale=1e4,
+    y_scale=1e7,
+    x_tick_step=1.5,
+    y_tick_step=1.0,
+    show_yticklabels=True,
+):
+    x_values = np.asarray(x_values, dtype=float)
+    y_values = np.asarray(y_values, dtype=float)
+
+    ncols = len(x_values)
+    nrows = len(y_values)
+
+    x_min = x_values.min() / x_scale
+    x_max = x_values.max() / x_scale
+    y_min = y_values.min() / y_scale
+    y_max = y_values.max() / y_scale
+
+    x_ticks_lab = np.arange(
+        0,
+        np.floor(x_max / x_tick_step) * x_tick_step + 0.5 * x_tick_step,
+        x_tick_step,
+    )
+    y_ticks_lab = np.arange(
+        np.ceil(y_min / y_tick_step) * y_tick_step,
+        y_max + 0.5 * y_tick_step,
+        y_tick_step,
+    )
+
+    if len(x_ticks_lab) == 0 or not np.isclose(x_ticks_lab[0], 0):
+        x_ticks_lab = np.insert(x_ticks_lab, 0, 0.0)
+    if len(y_ticks_lab) == 0:
+        y_ticks_lab = np.array([y_min, y_max])
+
+    x_ticks_lab = x_ticks_lab[(x_ticks_lab >= x_min) & (x_ticks_lab <= x_max)]
+    y_ticks_lab = y_ticks_lab[(y_ticks_lab >= y_min) & (y_ticks_lab <= y_max)]
+
+    x_pos = np.interp(
+        x_ticks_lab * x_scale,
+        [x_values.min(), x_values.max()],
+        [0.5, ncols - 0.5],
+    )
+    y_pos = np.interp(
+        y_ticks_lab * y_scale,
+        [y_values.min(), y_values.max()],
+        [0.5, nrows - 0.5],
+    )
+
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(
+        [f"{v:.1f}".rstrip("0").rstrip(".") for v in x_ticks_lab],
+        rotation=90,
+    )
+
+    ax.set_yticks(y_pos)
+    if show_yticklabels:
+        ax.set_yticklabels(
+            [f"{v:.1f}".rstrip("0").rstrip(".") for v in y_ticks_lab],
+            rotation=0,
+        )
+    else:
+        ax.set_yticklabels([])
+
+
+def create_figure4(force_regenerate_cache=False):
+    """Create publication-quality Figure 4 for NeurIPS camera-ready submission.
+
+    Combines:
+      Top Row: Attention accuracy heatmaps (Second sequences, First sequences, Post-swap)
+      Bottom Row: Linear decodability vs iteration (Attention, MLP) and logit probe accuracy
+    """
+    ensure_figure4_caches(force_regenerate=force_regenerate_cache)
+    apply_figure_style()
+
+    # Top row data
+    df_post = pd.read_csv(FIGURE4_POST_SWAP_CACHE)
+    df_first = pd.read_csv(FIGURE4_FIRST_SEQUENCES_CACHE)
+    df_second = pd.read_csv(FIGURE4_SECOND_SEQUENCES_CACHE)
+
+    # Bottom row data
+    df_de = pd.read_csv(FIGURE4_LINEAR_PROBE_CACHE)
+    final_it = df_de["iteration"].max()
+    df_de["iteration"] = pd.to_numeric(df_de["iteration"], errors="coerce")
+    df_de["probe_novel_sequences_0"] = pd.to_numeric(df_de["probe_novel_sequences_0"], errors="coerce")
+    df_de["probe_novel_sequences_3"] = pd.to_numeric(df_de["probe_novel_sequences_3"], errors="coerce")
+    df_de["num_parameters"] = pd.to_numeric(df_de["num_parameters"], errors="coerce")
+
+    df_final = df_de[df_de["iteration"] == final_it]
+    best_idx = df_final.groupby("num_parameters")["probe_novel_sequences_0"].idxmax()
+    best_runs = df_final.loc[best_idx, ["num_parameters", "irun"]]
+
+    df_best = (
+        df_de.merge(best_runs, on=["num_parameters", "irun"], how="inner")
+        .sort_values(["num_parameters", "iteration"])
+        .reset_index(drop=True)
+    )
+    params_de = np.sort(df_best["num_parameters"].unique())
+
+    df_f = pd.read_csv(FIGURE4_FORK_PROGRESS_CACHE)
+    eps = np.finfo(float).eps
+    p = df_f["probe_accuracy"].clip(eps, 1 - eps)
+    df_f["logit_probe_accuracy"] = logit(p)
+
+    fig = plt.figure(figsize=(15.5, 10.5))
+    gs = fig.add_gridspec(2, 4, width_ratios=[1, 1, 1, 0.035], wspace=0.25, hspace=0.48)
+
+    ax_a = fig.add_subplot(gs[0, 0])
+    ax_b = fig.add_subplot(gs[0, 1])
+    ax_c = fig.add_subplot(gs[0, 2])
+    cbar_top_ax = fig.add_subplot(gs[0, 3])
+
+    ax_d = fig.add_subplot(gs[1, 0])
+    ax_e = fig.add_subplot(gs[1, 1])
+    ax_f = fig.add_subplot(gs[1, 2])
+    cbar_bottom_ax = fig.add_subplot(gs[1, 3])
+
+    # ----------------- TOP ROW -----------------
+    top_datasets = [
+        (ax_a, df_second, "Second Sequences Accuracy", "a", True),
+        (ax_b, df_first, "First Sequences Accuracy", "b", False),
+        (ax_c, df_post, "First Sequences Post-Swap Accuracy", "c", False),
+    ]
+
+    for ax, raw_df, title, panel_lbl, is_first in top_datasets:
+        df_sub = pd.DataFrame(
+            raw_df[(raw_df["num_parameters"] > 2e6) & (raw_df["num_parameters"] < 6e7)]
+        ).copy()
+        df_sub["rank"] = pd.to_numeric(df_sub["rank"], errors="coerce")
+        df_sub["num_parameters"] = pd.to_numeric(df_sub["num_parameters"], errors="coerce")
+        df_sub["is_correct"] = pd.to_numeric(df_sub["is_correct"], errors="coerce")
+
+        pivot_df = (
+            df_sub.pivot_table(
+                columns="rank",
+                index="num_parameters",
+                values="is_correct",
+                aggfunc="mean",
+            )
+            .sort_index()
+            .sort_index(axis=1)
+        )
+
+        sns.heatmap(
+            pivot_df,
+            cmap="YlGnBu",
+            vmin=0.5,
+            vmax=0.8,
+            ax=ax,
+            cbar=(panel_lbl == "c"),
+            cbar_ax=cbar_top_ax if (panel_lbl == "c") else None,
+            cbar_kws={"label": "Accuracy"} if (panel_lbl == "c") else None,
+        )
+
+        ax.set_title(title, fontsize=14, pad=10)
+        ax.set_xlabel(r"Rank ($	imes 10^4$)", fontsize=13)
+        ax.set_ylabel(r"Number of Parameters ($	imes 10^7$)" if is_first else "", fontsize=13)
+
+        _set_linear_rescaled_ticks(
+            ax,
+            x_values=pivot_df.columns.to_numpy(),
+            y_values=pivot_df.index.to_numpy(),
+            x_scale=1e4,
+            y_scale=1e7,
+            x_tick_step=1.5,
+            y_tick_step=1.0,
+            show_yticklabels=is_first,
+        )
+
+        _add_figure4_spines(ax, linewidth=1.2)
+
+    _add_figure4_spines(cbar_top_ax, linewidth=1.2)
+    cbar_top_ax.set_ylabel("Accuracy", fontsize=13)
+
+    # ----------------- BOTTOM ROW -----------------
+    cmap = plt.get_cmap("rocket")
+    norm_de = mpl.colors.LogNorm(vmin=params_de.min(), vmax=params_de.max())
+    param_to_color_de = {p: cmap(norm_de(p)) for p in params_de}
+    norm_f = mpl.colors.LogNorm(vmin=df_f["num_parameters"].min(), vmax=df_f["num_parameters"].max())
+
+    # Panel d
+    sns.lineplot(
+        data=df_best,
+        x="iteration",
+        y="probe_novel_sequences_0",
+        hue="num_parameters",
+        hue_order=params_de,
+        palette=param_to_color_de,
+        marker="+",
+        markeredgecolor="black",
+        markersize=4,
+        linewidth=2.2,
+        estimator=None,
+        sort=False,
+        ax=ax_d,
+    )
+    if ax_d.get_legend():
+        ax_d.get_legend().remove()
+    ax_d.set_xlabel("Iteration", fontsize=13)
+    ax_d.set_ylabel("Linear Decodability", fontsize=13)
+    ax_d.set_title("Linear Decodability vs. Iteration", fontsize=14, pad=10)
+    ax_d.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter(useMathText=True))
+    ax_d.ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
+    ax_d.set_ylim(-0.05, 0.9)
+    _add_figure4_spines(ax_d, linewidth=1.2)
+
+    # Panel e
+    sns.lineplot(
+        data=df_best,
+        x="iteration",
+        y="probe_novel_sequences_3",
+        hue="num_parameters",
+        hue_order=params_de,
+        palette=param_to_color_de,
+        marker="+",
+        markeredgecolor="black",
+        markersize=4,
+        linewidth=2.2,
+        estimator=None,
+        sort=False,
+        ax=ax_e,
+    )
+    if ax_e.get_legend():
+        ax_e.get_legend().remove()
+    ax_e.set_xlabel("Iteration", fontsize=13)
+    ax_e.set_ylabel("Linear Decodability", fontsize=13)
+    ax_e.set_title("Linear Decodability for MLPs vs. Iteration", fontsize=14, pad=10)
+    ax_e.xaxis.set_major_formatter(mpl.ticker.ScalarFormatter(useMathText=True))
+    ax_e.ticklabel_format(style="sci", axis="x", scilimits=(0, 0))
+    ax_e.set_ylim(-0.05, 0.9)
+    _add_figure4_spines(ax_e, linewidth=1.2)
+
+    # Panel f
+    sns.scatterplot(
+        data=df_f,
+        x="probe_novel_sequences_0",
+        y="logit_probe_accuracy",
+        hue="num_parameters",
+        palette="rocket",
+        hue_norm=norm_f,
+        legend=False,
+        marker="+",
+        s=110,
+        linewidth=2.2,
+        edgecolor="black",
+        ax=ax_f,
+    )
+    ax_f.set_xlabel("Linear Decodability", fontsize=13)
+    ax_f.set_ylabel("Logit of Probe Accuracy", fontsize=13)
+    ax_f.set_title("Linear Decodability vs. Accuracy Logit", fontsize=14, pad=10)
+    ax_f.set_xlim(-0.05, 1.0)
+    ax_f.set_ylim(-0.1, 2.55)
+    _add_figure4_spines(ax_f, linewidth=1.2)
+
+    # Bottom Colorbar
+    sm_bottom = mpl.cm.ScalarMappable(norm=norm_f, cmap="rocket")
+    sm_bottom.set_array([])
+    cbar_bottom = fig.colorbar(sm_bottom, cax=cbar_bottom_ax)
+    cbar_bottom.set_label("Number of Parameters", fontsize=13)
+    cbar_bottom.formatter = mpl.ticker.LogFormatterSciNotation()
+    cbar_bottom.update_ticks()
+    _add_figure4_spines(cbar_bottom_ax, linewidth=1.2)
+
+    # Subpanel labels
+    fig.canvas.draw()
+    pos_a = ax_a.get_position()
+    pos_b = ax_b.get_position()
+    pos_c = ax_c.get_position()
+    pos_d = ax_d.get_position()
+    pos_e = ax_e.get_position()
+    pos_f = ax_f.get_position()
+
+    y_top_label = pos_a.y1 + 0.025
+    y_bot_label = pos_d.y1 + 0.048
+    dx = -0.012
+
+    fig.text(pos_a.x0 + dx, y_top_label, r"\textbf{a}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_b.x0 + dx, y_top_label, r"\textbf{b}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_c.x0 + dx, y_top_label, r"\textbf{c}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_d.x0 + dx, y_bot_label, r"\textbf{d}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_e.x0 + dx, y_bot_label, r"\textbf{e}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_f.x0 + dx, y_bot_label, r"\textbf{f}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+
+    return fig
+
+
 # =============================================================================
 # FIGURE 4PRE: Saturation Appearances vs Sequence Rank
 # =============================================================================
@@ -1871,51 +2171,77 @@ def create_figure_s10(head_idx=4, num_sequences=10,
 
 
 # =============================================================================
-# MAIN EXECUTION
+# FIGURE GENERATORS AND MAIN EXECUTION
 # =============================================================================
-def main(force_regenerate_cache=False):
-    savefigdir = "./figs_camera_ready"
+def generate_figure1(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
     utils.ensure_dir(savefigdir)
-
-    if force_regenerate_cache:
-        force_regenerate_all_figure_caches()
-    else:
-        # Figure 4 is generated by generate_figure4.py, but its two input
-        # tables are maintained here alongside the other camera-ready caches.
-        ensure_figure4_caches()
-
-    # 1. Figure 1
-    print("Generating Figure 1...")
+    print("Generating Figure 1...", flush=True)
     fig1 = create_figure1()
     for name in ["Figure1_combined", "Figure1"]:
         fig1.savefig(f"{savefigdir}/{name}.pdf", format="pdf", bbox_inches="tight")
         fig1.savefig(f"{savefigdir}/{name}.eps", format="eps", bbox_inches="tight")
         fig1.savefig(f"{savefigdir}/{name}.png", format="png", dpi=300, bbox_inches="tight")
-    print(f"Saved Figure 1 to {savefigdir}")
+    print(f"Saved Figure 1 to {savefigdir}", flush=True)
     plt.close(fig1)
 
-    # 2. Figure 4pre
-    print("Generating Figure 4pre...")
+
+def generate_figure2(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    print("Generating Figure 2...", flush=True)
+    fig2 = create_figure2(force_regenerate_cache=force_regenerate_cache)
+    for name in ["Figure2_combined", "Figure2"]:
+        fig2.savefig(f"{savefigdir}/{name}.pdf", format="pdf", bbox_inches="tight")
+        fig2.savefig(f"{savefigdir}/{name}.eps", format="eps", bbox_inches="tight")
+        fig2.savefig(f"{savefigdir}/{name}.png", format="png", dpi=300, bbox_inches="tight")
+    print(f"Saved Figure 2 to {savefigdir}", flush=True)
+    plt.close(fig2)
+
+
+def generate_figure4(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    print("Generating Figure 4...", flush=True)
+    fig4 = create_figure4(force_regenerate_cache=force_regenerate_cache)
+
+    master_pdf = f"{savefigdir}/Figure4.pdf"
+    master_eps = f"{savefigdir}/Figure4.eps"
+    master_png = f"{savefigdir}/Figure4.png"
+
+    fig4.savefig(master_pdf, format="pdf", bbox_inches="tight")
+    fig4.savefig(master_eps, format="eps", bbox_inches="tight")
+    fig4.savefig(master_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig4)
+
+    utils.ensure_dir(f"{savefigdir}/Figure4")
+    utils.ensure_dir("./figs/Figure4")
+    for prefix in [
+        f"{savefigdir}/Figure4_combined",
+        f"{savefigdir}/Figure4/Figure4",
+        f"{savefigdir}/Figure4/Figure4_combined",
+        "./figs/Figure4/Figure4",
+        "./figs/Figure4/Figure4_combined",
+    ]:
+        shutil.copyfile(master_pdf, f"{prefix}.pdf")
+        shutil.copyfile(master_eps, f"{prefix}.eps")
+        shutil.copyfile(master_png, f"{prefix}.png")
+
+    print(f"Saved Figure 4 to {savefigdir}", flush=True)
+
+
+def generate_figure4pre(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    print("Generating Figure 4pre...", flush=True)
     fig4pre = create_figure4pre(force_regenerate_cache=force_regenerate_cache)
     for name in ["Figure4pre_combined", "Figure4pre"]:
         fig4pre.savefig(f"{savefigdir}/{name}.pdf", format="pdf", bbox_inches="tight")
         fig4pre.savefig(f"{savefigdir}/{name}.eps", format="eps", bbox_inches="tight")
         fig4pre.savefig(f"{savefigdir}/{name}.png", format="png", dpi=300, bbox_inches="tight")
-    print(f"Saved Figure 4pre to {savefigdir}")
+    print(f"Saved Figure 4pre to {savefigdir}", flush=True)
     plt.close(fig4pre)
 
-    # 3. Figure 2
-    print("Generating Figure 2...")
-    fig2 = create_figure2()
-    for name in ["Figure2_combined", "Figure2"]:
-        fig2.savefig(f"{savefigdir}/{name}.pdf", format="pdf", bbox_inches="tight")
-        fig2.savefig(f"{savefigdir}/{name}.eps", format="eps", bbox_inches="tight")
-        fig2.savefig(f"{savefigdir}/{name}.png", format="png", dpi=300, bbox_inches="tight")
-    print(f"Saved Figure 2 to {savefigdir}")
-    plt.close(fig2)
 
-    # 4. Figure 5
-    print("Generating Figure 5...")
+def generate_figure5(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    print("Generating Figure 5...", flush=True)
     fig5 = create_figure5()
     for extension in ["pdf", "eps"]:
         fig5.savefig(
@@ -1931,11 +2257,13 @@ def main(force_regenerate_cache=False):
         bbox_inches="tight",
         facecolor="white",
     )
-    print(f"Saved Figure 5 to {savefigdir}")
+    print(f"Saved Figure 5 to {savefigdir}", flush=True)
     plt.close(fig5)
 
-    # 5. Supplemental Figure 9
-    print("Generating Figure Supplemental 9...")
+
+def generate_figure_s9(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    print("Generating Figure Supplemental 9...", flush=True)
     fig_s9 = create_figure_s9()
     for name in ["FigureS9", "FigureS9_combined", "Figure_Supplemental_9"]:
         for extension in ["pdf", "eps"]:
@@ -1952,11 +2280,13 @@ def main(force_regenerate_cache=False):
             bbox_inches="tight",
             facecolor="white",
         )
-    print(f"Saved Figure Supplemental 9 to {savefigdir}")
+    print(f"Saved Figure Supplemental 9 to {savefigdir}", flush=True)
     plt.close(fig_s9)
 
-    # 6. Supplemental Figure 10
-    print("Generating Figure Supplemental 10...")
+
+def generate_figure_s10(savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    print("Generating Figure Supplemental 10...", flush=True)
     fig_s10 = create_figure_s10()
     for name in ["FigureS10", "FigureS10_combined", "Figure_Supplemental_10"]:
         for extension in ["pdf", "eps"]:
@@ -1973,21 +2303,144 @@ def main(force_regenerate_cache=False):
             bbox_inches="tight",
             facecolor="white",
         )
-    print(f"Saved Figure Supplemental 10 to {savefigdir}")
+    print(f"Saved Figure Supplemental 10 to {savefigdir}", flush=True)
     plt.close(fig_s10)
+
+
+FIGURE_GENERATORS = {
+    "1": generate_figure1,
+    "2": generate_figure2,
+    "4": generate_figure4,
+    "4pre": generate_figure4pre,
+    "5": generate_figure5,
+    "s9": generate_figure_s9,
+    "s10": generate_figure_s10,
+}
+
+FIGURE_ALIASES = {
+    "1": "1", "fig1": "1", "figure1": "1",
+    "2": "2", "fig2": "2", "figure2": "2",
+    "4": "4", "fig4": "4", "figure4": "4",
+    "4pre": "4pre", "fig4pre": "4pre", "figure4pre": "4pre",
+    "5": "5", "fig5": "5", "figure5": "5",
+    "s9": "s9", "figs9": "s9", "figures9": "s9", "s-9": "s9", "figure_s9": "s9",
+    "s10": "s10", "figs10": "s10", "figures10": "s10", "s-10": "s10", "figure_s10": "s10",
+}
+ALL_FIGURE_KEYS = ["1", "2", "4", "4pre", "5", "s9", "s10"]
+
+
+def _run_single_figure_task(fig_key, savefigdir, force_regenerate_cache=False):
+    start = time.time()
+    generator = FIGURE_GENERATORS[fig_key]
+    generator(savefigdir=savefigdir, force_regenerate_cache=force_regenerate_cache)
+    duration = time.time() - start
+    return fig_key, duration
+
+
+def parse_figure_list(figures_arg):
+    if not figures_arg:
+        return ALL_FIGURE_KEYS
+
+    selected = []
+    for item in figures_arg:
+        item_lower = str(item).strip().lower()
+        if item_lower == "all":
+            return ALL_FIGURE_KEYS
+        for sub in item_lower.split(","):
+            sub = sub.strip()
+            if not sub:
+                continue
+            if sub == "all":
+                return ALL_FIGURE_KEYS
+            if sub in FIGURE_ALIASES:
+                canonical = FIGURE_ALIASES[sub]
+                if canonical not in selected:
+                    selected.append(canonical)
+            else:
+                valid = ", ".join(sorted(set(FIGURE_ALIASES.keys())))
+                raise ValueError(f"Unknown figure identifier: '{sub}'. Valid options: {valid}, all")
+    return selected or ALL_FIGURE_KEYS
+
+
+def main(figures=None, parallel=False, workers=None, savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+    utils.ensure_dir(savefigdir)
+    selected_keys = parse_figure_list(figures)
+
+    if force_regenerate_cache:
+        force_regenerate_all_figure_caches()
+
+    print(f"Figures selected to generate: {[k.upper() for k in selected_keys]}", flush=True)
+
+    if parallel and len(selected_keys) > 1:
+        num_workers = workers or min(len(selected_keys), os.cpu_count() or 8, 8)
+        print(f"Generating {len(selected_keys)} figures in parallel using {num_workers} processes...", flush=True)
+        start_all = time.time()
+        failed = []
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(_run_single_figure_task, key, savefigdir, force_regenerate_cache): key
+                for key in selected_keys
+            }
+            for future in as_completed(futures):
+                key = futures[future]
+                try:
+                    f_key, dur = future.result()
+                    print(f"[Figure {f_key.upper()}] Done in {dur:.2f}s", flush=True)
+                except Exception as e:
+                    print(f"[Figure {key.upper()}] ERROR: {e}", flush=True)
+                    import traceback
+                    traceback.print_exc()
+                    failed.append(key)
+        total_elapsed = time.time() - start_all
+        if failed:
+            raise RuntimeError(f"The following figures failed to generate: {failed}")
+        print(f"All {len(selected_keys)} figures completed in parallel in {total_elapsed:.2f}s", flush=True)
+    else:
+        start_all = time.time()
+        for key in selected_keys:
+            f_key, dur = _run_single_figure_task(key, savefigdir, force_regenerate_cache)
+            print(f"[Figure {f_key.upper()}] Done in {dur:.2f}s", flush=True)
+        total_elapsed = time.time() - start_all
+        print(f"All {len(selected_keys)} figures completed in {total_elapsed:.2f}s", flush=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate the camera-ready figures."
+        description="Generate publication-quality camera-ready figures."
+    )
+    parser.add_argument(
+        "--figures",
+        "--figure",
+        nargs="+",
+        default=["all"],
+        help="Figures to generate (options: 1, 2, 4, 4pre, 5, s9, s10, all). Default: all",
+    )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        help="Generate selected figures concurrently using multiple worker processes.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of parallel worker processes (default: min(num_figures, 8)).",
+    )
+    parser.add_argument(
+        "--output_dir",
+        default="./figs_camera_ready",
+        help="Directory where output figures will be written (default: ./figs_camera_ready).",
     )
     parser.add_argument(
         "--force_regenerate_cache",
         action="store_true",
-        help=(
-            "Rebuild every cache that has enough raw data, before generating "
-            "the figures."
-        ),
+        help="Rebuild caches before generating figures.",
     )
     cli_args = parser.parse_args()
-    main(force_regenerate_cache=cli_args.force_regenerate_cache)
+    main(
+        figures=cli_args.figures,
+        parallel=cli_args.parallel,
+        workers=cli_args.workers,
+        savefigdir=cli_args.output_dir,
+        force_regenerate_cache=cli_args.force_regenerate_cache,
+    )
