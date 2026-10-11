@@ -15,8 +15,14 @@ fmri_root = os.path.dirname(os.path.dirname(sys.executable))
 fmri_bin = os.path.join(fmri_root, "bin")
 fmri_lib = os.path.join(fmri_root, "lib")
 
-os.environ["PATH"] = fmri_bin + os.pathsep + os.environ.get("PATH", "")
-os.environ["LD_LIBRARY_PATH"] = fmri_lib + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+FMRI_DIR = "/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri"
+for p in [os.path.join(FMRI_DIR, "bin"), fmri_bin]:
+    if os.path.isdir(p) and p not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
+
+for p in [os.path.join(FMRI_DIR, "lib"), fmri_lib]:
+    if os.path.isdir(p) and p not in os.environ.get("LD_LIBRARY_PATH", ""):
+        os.environ["LD_LIBRARY_PATH"] = p + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
 
 import numpy as np
 import pandas as pd
@@ -33,6 +39,33 @@ import gpt
 import utils
 
 
+def apply_figure_style():
+    """Apply consistent publication-quality styling with LaTeX for all figures."""
+    utils.set_plot_style()
+    mpl.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": [
+            "Times New Roman",
+            "Times",
+            "DejaVu Serif",
+            "STIXGeneral",
+            "Computer Modern Roman",
+        ],
+        "mathtext.fontset": "stix",
+        "font.size": 12,
+        "axes.labelsize": 13,
+        "axes.titlesize": 14,
+        "xtick.labelsize": 11,
+        "ytick.labelsize": 11,
+        "legend.fontsize": 11,
+        "figure.titlesize": 16,
+    })
+
+
+apply_figure_style()
+
+
 # =============================================================================
 # FIGURE 1: Experimental Setup (Sequences + Zipf Sampling)
 # =============================================================================
@@ -44,7 +77,7 @@ def create_figure1():
       (b) Zipfian sampling distribution (Empirical vs Expected counts on log-log scale)
     Aligned side-by-side with bold subpanel labels 'a' and 'b'.
     """
-    utils.set_plot_style()
+    apply_figure_style()
 
     fig = plt.figure(figsize=(10.5, 3.6))
 
@@ -99,21 +132,21 @@ def create_figure1():
     ax_b.loglog(ranks[mask], counts[mask], ".", ms=3.0, color="C0", alpha=0.85, label="Empirical")
     ax_b.loglog(ranks, expected, "-", lw=1.8, color="C1", label="Expected")
 
-    ax_b.set_xlabel("Rank", fontsize=15)
-    ax_b.set_ylabel("Count", fontsize=15)
-    ax_b.set_title("Zipf Sampling", fontsize=15, pad=6)
+    ax_b.set_xlabel("Rank", fontsize=14)
+    ax_b.set_ylabel("Count", fontsize=14)
+    ax_b.set_title("Rank Frequency Distribution", fontsize=14, pad=6)
 
     ax_b.set_xlim(0.8, 1500)
     ax_b.set_ylim(4, 25000)
 
-    ax_b.tick_params(which="both", direction="in", top=True, right=True)
+    ax_b.tick_params(which="both", direction="in", top=False, right=False, labelsize=11)
     ax_b.legend(
         loc="upper right",
         frameon=True,
         edgecolor="0.6",
         facecolor="white",
         framealpha=0.9,
-        fontsize=12,
+        fontsize=11,
         handletextpad=0.5,
         borderpad=0.4,
     )
@@ -212,13 +245,14 @@ def plot_train_loss_panel(ax, df_data, title="Train Loss vs. Number of Parameter
     ax.set_xlabel("Number of Parameters", fontsize=14)
     ax.set_ylabel("Train Loss", fontsize=14)
     ax.set_xscale("log")
-    ax.tick_params(which="both", direction="in", top=True, right=True)
+    ax.tick_params(which="both", direction="in", top=True, right=True, labelsize=11)
 
     # Colorbar for D
     sm = mpl.cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
     cbar = ax.figure.colorbar(sm, ax=ax, pad=0.02)
     cbar.set_label(r"$D$", fontsize=14)
+    cbar.ax.tick_params(labelsize=11)
     cbar.ax.yaxis.set_major_formatter(mpl.ticker.LogFormatterMathtext(base=10))
 
     # Legend for H
@@ -275,8 +309,8 @@ def plot_power_law_panel(ax, capacity_df, iters_list, title, is_12layer=True):
     ax.set_ylim(1e1, 1.2e5)
     ax.set_xlabel("Number of parameters", fontsize=14)
     ax.set_ylabel("Maximum rank memorized", fontsize=14)
-    ax.tick_params(which="both", direction="in", top=True, right=True)
-    ax.legend(loc="upper left", frameon=True, fontsize=11.5)
+    ax.tick_params(which="both", direction="in", top=True, right=True, labelsize=11)
+    ax.legend(loc="upper left", frameon=True, fontsize=11)
 
 
 def plot_broken_axis_panel(ax1, ax2, avg_df, norm, title=None):
@@ -308,7 +342,7 @@ def plot_broken_axis_panel(ax1, ax2, avg_df, norm, title=None):
 
     # Red dashed line for data switch
     ax2.axvline(x=40000, color="red", linestyle="--", linewidth=1.5)
-    ax2.text(40250, 0.93, "Data Switch", color="red", fontsize=8.5)
+    ax2.text(40250, 0.93, "Data Switch", color="red", fontsize=9.5)
 
     ax1.set_xlim(0, 10000)
     ax2.set_xlim(40000, 50000)
@@ -332,7 +366,8 @@ def plot_broken_axis_panel(ax1, ax2, avg_df, norm, title=None):
 
     ax1.spines["right"].set_visible(False)
     ax2.spines["left"].set_visible(False)
-    ax2.tick_params(labelleft=False, left=False)
+    ax1.tick_params(labelsize=11)
+    ax2.tick_params(labelleft=False, left=False, labelsize=11)
 
     # Draw broken axis diagonal slash marks
     d = 0.015
@@ -1185,7 +1220,7 @@ def create_figure4pre(force_regenerate_cache=False):
     ensure_figure4pre_cache(force_regenerate=force_regenerate_cache)
     results = pd.read_csv(FIGURE4PRE_CACHE)
 
-    utils.set_plot_style()
+    apply_figure_style()
     params_to_analyze = [25399298, 56973314]
     fig, axes = plt.subplots(1, 2, figsize=(14, 6))
 
@@ -1209,14 +1244,15 @@ def create_figure4pre(force_regenerate_cache=False):
                 markeredgecolor="black",
                 ax=ax,
             )
-        ax.set_title(f"{num_params} Parameters", fontsize=20, pad=10)
+        ax.set_title(f"{num_params} Parameters", fontsize=15, pad=10)
         ax.set_xscale("log")
         ax.set_xlim(0.5, 100000)
         ax.set_yscale("log")
         ax.set_ylim(0.5, 100000)
-        ax.set_xlabel("Sequence rank", fontsize=20)
-        ax.set_ylabel("Saturation appearances", fontsize=20)
-        ax.legend(fontsize=14, loc="upper right")
+        ax.set_xlabel("Sequence rank", fontsize=14)
+        ax.set_ylabel("Saturation appearances", fontsize=14)
+        ax.tick_params(which="both", direction="in", labelsize=11)
+        ax.legend(fontsize=11, loc="upper right")
 
     fig.canvas.draw()
     pos_a = axes[0].get_position()
@@ -1228,8 +1264,8 @@ def create_figure4pre(force_regenerate_cache=False):
     dx = -0.025
     y_label = max(t_a.y1, t_b.y1) + 0.035
 
-    fig.text(pos_a.x0 + dx, y_label, r"	extbf{a}", fontsize=24, fontweight="bold", va="bottom", ha="left")
-    fig.text(pos_b.x0 + dx, y_label, r"	extbf{b}", fontsize=24, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_a.x0 + dx, y_label, r"\textbf{a}", fontsize=22, fontweight="bold", va="bottom", ha="left")
+    fig.text(pos_b.x0 + dx, y_label, r"\textbf{b}", fontsize=22, fontweight="bold", va="bottom", ha="left")
 
     return fig
 
@@ -1256,7 +1292,7 @@ def create_figure2(force_regenerate_cache=False):
                   with broken axis [0, 1.0] and [4.0, 5.0] x 10^4 (12-layer top, 1-layer bottom)
     """
     ensure_figure2_caches(force_regenerate=force_regenerate_cache)
-    utils.set_plot_style()
+    apply_figure_style()
     print(
         "Figure 2 top-row panels (a, b) experiments: "
         f"{', '.join(FIGURE2_TOP_AB_EXPERIMENTS)}"
@@ -1380,14 +1416,16 @@ def create_figure2(force_regenerate_cache=False):
     sm_c0 = mpl.cm.ScalarMappable(cmap="rocket", norm=norm_c0)
     sm_c0.set_array([])
     cbar_c0 = fig.colorbar(sm_c0, ax=[ax_c0_left, ax_c0_right], pad=0.02)
-    cbar_c0.set_label("Number of Parameters", fontsize=13)
+    cbar_c0.set_label("Number of Parameters", fontsize=14)
+    cbar_c0.ax.tick_params(labelsize=11)
     cbar_c0.formatter = mticker.LogFormatterSciNotation()
     cbar_c0.update_ticks()
 
     sm_c1 = mpl.cm.ScalarMappable(cmap="rocket", norm=norm_c1)
     sm_c1.set_array([])
     cbar_c1 = fig.colorbar(sm_c1, ax=[ax_c1_left, ax_c1_right], pad=0.02)
-    cbar_c1.set_label("Number of Parameters", fontsize=13)
+    cbar_c1.set_label("Number of Parameters", fontsize=14)
+    cbar_c1.ax.tick_params(labelsize=11)
     cbar_c1.formatter = mticker.LogFormatterSciNotation()
     cbar_c1.update_ticks()
 
@@ -1400,9 +1438,9 @@ def create_figure2(force_regenerate_cache=False):
     # -------------------------------------------------------------------------
     # Subpanel Labels: a, b, c
     # -------------------------------------------------------------------------
-    fig.text(0.035, 0.96, r"\textbf{a}", fontsize=24, fontweight="bold", va="top")
-    fig.text(0.355, 0.96, r"\textbf{b}", fontsize=24, fontweight="bold", va="top")
-    fig.text(0.665, 0.96, r"\textbf{c}", fontsize=24, fontweight="bold", va="top")
+    fig.text(0.035, 0.96, r"\textbf{a}", fontsize=22, fontweight="bold", va="top")
+    fig.text(0.355, 0.96, r"\textbf{b}", fontsize=22, fontweight="bold", va="top")
+    fig.text(0.665, 0.96, r"\textbf{c}", fontsize=22, fontweight="bold", va="top")
 
     return fig
 
@@ -1441,11 +1479,7 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
         The Matplotlib figure.  Saving is deliberately handled by ``main`` so
         callers can also embed the panel in a larger composition.
     """
-    utils.set_plot_style()
-    # Figure 5 has no mathematical text.  Use Matplotlib's embedded text
-    # instead of a TeX subprocess so the camera-ready asset is portable across
-    # rendering hosts.
-    mpl.rcParams["text.usetex"] = False
+    apply_figure_style()
 
     experiment_dirs = sorted(glob.glob(record_glob))
     if len(experiment_dirs) != 1:
@@ -1529,15 +1563,15 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
             interpolation="nearest",
             aspect="equal",
         )
-        axes[head].set_title(f"Head {head + 1}", fontsize=9.5, pad=3)
+        axes[head].set_title(f"Head {head + 1}", fontsize=10, pad=3)
         if head >= 4:
-            axes[head].set_xlabel("Key position", fontsize=9, labelpad=2)
+            axes[head].set_xlabel("Key position", fontsize=9.5, labelpad=2)
         if head % 4 == 0:
-            axes[head].set_ylabel("Query position", fontsize=9, labelpad=2)
+            axes[head].set_ylabel("Query position", fontsize=9.5, labelpad=2)
         axes[head].set_xticks([0, 50])
         axes[head].set_yticks([0, 25, 50, 75])
         axes[head].tick_params(
-            axis="both", which="major", labelsize=7.25, length=2.5, width=0.7,
+            axis="both", which="major", labelsize=7.5, length=2.5, width=0.7,
             pad=1.5,
         )
         for spine in axes[head].spines.values():
@@ -1560,8 +1594,8 @@ def create_figure5(sequence_idx=0, num_heads_to_plot=8,
         aspect=30,
         ticks=[0.0, 0.25, 0.50, 0.75, 1.0],
     )
-    colorbar.set_label("Attention weight", fontsize=9, labelpad=5)
-    colorbar.ax.tick_params(labelsize=7.25, length=2.5, width=0.7, pad=1.5)
+    colorbar.set_label("Attention weight", fontsize=9.5, labelpad=5)
+    colorbar.ax.tick_params(labelsize=7.5, length=2.5, width=0.7, pad=1.5)
     colorbar.outline.set_linewidth(0.8)
 
     return fig
@@ -1586,8 +1620,7 @@ def create_figure_s9(sequence_idx=9, num_heads_to_plot=16,
     Returns:
         The Matplotlib figure object.
     """
-    utils.set_plot_style()
-    mpl.rcParams["text.usetex"] = False
+    apply_figure_style()
 
     experiment_dirs = sorted(glob.glob(record_glob))
     if len(experiment_dirs) != 1:
@@ -1667,15 +1700,15 @@ def create_figure_s9(sequence_idx=9, num_heads_to_plot=16,
             interpolation="nearest",
             aspect="equal",
         )
-        axes[head].set_title(f"Head {head + 1}", fontsize=9.5, pad=3)
+        axes[head].set_title(f"Head {head + 1}", fontsize=10, pad=3)
         if head >= 12:
-            axes[head].set_xlabel("Key position", fontsize=9, labelpad=2)
+            axes[head].set_xlabel("Key position", fontsize=9.5, labelpad=2)
         if head % 4 == 0:
-            axes[head].set_ylabel("Query position", fontsize=9, labelpad=2)
+            axes[head].set_ylabel("Query position", fontsize=9.5, labelpad=2)
         axes[head].set_xticks([0, 50])
         axes[head].set_yticks([0, 25, 50, 75])
         axes[head].tick_params(
-            axis="both", which="major", labelsize=7.25, length=2.5, width=0.7,
+            axis="both", which="major", labelsize=7.5, length=2.5, width=0.7,
             pad=1.5,
         )
         for spine in axes[head].spines.values():
@@ -1685,7 +1718,7 @@ def create_figure_s9(sequence_idx=9, num_heads_to_plot=16,
         axis.set_visible(False)
 
     fig.suptitle(
-        "Attention patterns for Sequence 10 - 64 features, 16 heads",
+        r"Attention patterns for Sequence 10 -- 64 features, 16 heads",
         fontsize=12,
         y=0.965,
         fontweight="normal",
@@ -1701,8 +1734,8 @@ def create_figure_s9(sequence_idx=9, num_heads_to_plot=16,
         aspect=30,
         ticks=[0.0, 0.25, 0.50, 0.75, 1.0],
     )
-    colorbar.set_label("Attention weight", fontsize=9, labelpad=5)
-    colorbar.ax.tick_params(labelsize=7.25, length=2.5, width=0.7, pad=1.5)
+    colorbar.set_label("Attention weight", fontsize=9.5, labelpad=5)
+    colorbar.ax.tick_params(labelsize=7.5, length=2.5, width=0.7, pad=1.5)
     colorbar.outline.set_linewidth(0.8)
 
     return fig
@@ -1716,7 +1749,7 @@ def create_figure_s10(head_idx=4, num_sequences=10,
     Head 5 (0-indexed head_idx=4) evaluated on Sequences 1 through 10.
 
     Suptitle:
-        Attention patterns for Sequences 1 to 10 (Head 5 in a model with 64 features, 16 heads)
+        r"Attention patterns for Sequences 1 to 10 (Head 5 in a model with 64 features, 16 heads)",
 
     Args:
         head_idx: 0-indexed head index (default 4 corresponds to Head 5).
@@ -1726,8 +1759,7 @@ def create_figure_s10(head_idx=4, num_sequences=10,
     Returns:
         The Matplotlib figure object.
     """
-    utils.set_plot_style()
-    mpl.rcParams["text.usetex"] = False
+    apply_figure_style()
 
     experiment_dirs = sorted(glob.glob(record_glob))
     if len(experiment_dirs) != 1:
@@ -1797,15 +1829,15 @@ def create_figure_s10(head_idx=4, num_sequences=10,
             interpolation="nearest",
             aspect="equal",
         )
-        axes[i].set_title(f"Sequence {i + 1}", fontsize=9.5, pad=3)
+        axes[i].set_title(f"Sequence {i + 1}", fontsize=10, pad=3)
         if i >= 5:  # bottom row
-            axes[i].set_xlabel("Key position", fontsize=9, labelpad=2)
+            axes[i].set_xlabel("Key position", fontsize=9.5, labelpad=2)
         if i % 5 == 0:  # leftmost column
-            axes[i].set_ylabel("Query position", fontsize=9, labelpad=2)
+            axes[i].set_ylabel("Query position", fontsize=9.5, labelpad=2)
         axes[i].set_xticks([0, 50])
         axes[i].set_yticks([0, 25, 50, 75])
         axes[i].tick_params(
-            axis="both", which="major", labelsize=7.25, length=2.5, width=0.7,
+            axis="both", which="major", labelsize=7.5, length=2.5, width=0.7,
             pad=1.5,
         )
         for spine in axes[i].spines.values():
@@ -1815,8 +1847,8 @@ def create_figure_s10(head_idx=4, num_sequences=10,
         axis.set_visible(False)
 
     fig.suptitle(
-        "Attention patterns for Sequences 1 to 10 (Head 5 in a model with 64 features, 16 heads)",
-        fontsize=11.5,
+        r"Attention patterns for Sequences 1 to 10 (Head 5 in a model with 64 features, 16 heads)",
+        fontsize=12,
         y=0.965,
         fontweight="normal",
     )
@@ -1831,8 +1863,8 @@ def create_figure_s10(head_idx=4, num_sequences=10,
         aspect=30,
         ticks=[0.0, 0.25, 0.50, 0.75, 1.0],
     )
-    colorbar.set_label("Attention weight", fontsize=9, labelpad=5)
-    colorbar.ax.tick_params(labelsize=7.25, length=2.5, width=0.7, pad=1.5)
+    colorbar.set_label("Attention weight", fontsize=9.5, labelpad=5)
+    colorbar.ax.tick_params(labelsize=7.5, length=2.5, width=0.7, pad=1.5)
     colorbar.outline.set_linewidth(0.8)
 
     return fig
