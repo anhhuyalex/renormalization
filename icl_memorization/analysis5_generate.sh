@@ -11,10 +11,16 @@ set -euo pipefail
 project_dir="/mnt/cup/labs/norman/qanguyen/renormalization/icl_memorization"
 cd "$project_dir"
 
-# TeX tools, libraries, and Python environment
+# TeX tools, libraries, font maps, and Python environment
 FMRI_DIR="/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri"
+FMRI_SHARE="${FMRI_DIR}/share"
 export PATH="${FMRI_DIR}/bin:${PATH}"
 export LD_LIBRARY_PATH="${FMRI_DIR}/lib:${LD_LIBRARY_PATH:-}"
+export TEXMFVAR="${FMRI_SHARE}/texmf-var"
+export TEXMFCONFIG="${FMRI_SHARE}/texmf-config"
+export TEXMFDIST="${FMRI_SHARE}/texmf-dist"
+export TEXMFLOCAL="${FMRI_SHARE}/texmf-local"
+export TEXMFCNF="${FMRI_SHARE}:${TEXMFCNF:-}"
 
 # Fast local cache to avoid NFS locking and directory collision
 export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/matplotlib_${UID:-$(id -u)}}"

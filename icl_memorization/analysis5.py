@@ -19,6 +19,16 @@ fmri_bin = os.path.join(fmri_root, "bin")
 fmri_lib = os.path.join(fmri_root, "lib")
 
 FMRI_DIR = "/mnt/cup/labs/norman/qanguyen/patdiff_seq/fmri"
+FMRI_SHARE = os.path.join(FMRI_DIR, "share")
+
+# TeX directories needed by dvipng to resolve Type1 font maps (psfonts.map, ptmb7t.vf, utmb8a.pfb)
+os.environ["TEXMFVAR"] = os.path.join(FMRI_SHARE, "texmf-var")
+os.environ["TEXMFCONFIG"] = os.path.join(FMRI_SHARE, "texmf-config")
+os.environ["TEXMFDIST"] = os.path.join(FMRI_SHARE, "texmf-dist")
+os.environ["TEXMFLOCAL"] = os.path.join(FMRI_SHARE, "texmf-local")
+prev_cnf = os.environ.get("TEXMFCNF", "")
+os.environ["TEXMFCNF"] = f"{FMRI_SHARE}:{prev_cnf}" if prev_cnf else f"{FMRI_SHARE}:"
+
 for p in [os.path.join(FMRI_DIR, "bin"), fmri_bin]:
     if os.path.isdir(p) and p not in os.environ.get("PATH", ""):
         os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
@@ -401,7 +411,7 @@ FIGURE2_TOP_AB_EXPERIMENTS = (
     "memo_apr19_zipf_gpt2_vary_num_hidden_features_num_heads_noresample",
 )
 FIGURE2_TOP_C_EXPERIMENTS = (
-    "memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample",
+    "memo_may1_zipf_gpt2_vary_num_hidden_features_num_heads_doresample",
 )
 FIGURE2_TOP_AB_RECORD_GLOBS = [
     f"/scratch/qanguyen/gautam/cache/{experiment}/*"
@@ -443,7 +453,7 @@ FIGURE2_BOTTOM_AB_EXPERIMENTS = (
 
 
 FIGURE2_BOTTOM_C_EXPERIMENT = (
-    "memo_jan4_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample"
+    "memo_jan20_zipf_onelayerattention_vary_num_hidden_features_num_heads_doresample"
 )
 FIGURE2_BOTTOM_MAX_PARAMETERS = 7e7
 FIGURE2_BOTTOM_AB_RECORD_GLOBS = [
@@ -583,9 +593,9 @@ def _extract_figure2_top_c_run(folder):
     except Exception:
         return []
 
-    logs = data.get("logs", [])
-    if not logs:
+    if "logs" not in data or len(data["logs"]) < 10:
         return []
+    logs = data["logs"]
     args = data.get("args", {})
     num_hidden_features = args.get("num_hidden_features", 1)
     num_heads = args.get("num_heads", 1)
@@ -635,7 +645,22 @@ def _extract_figure2_top_c_run(folder):
     return data_switch_rows
 
 
-def regenerate_figure2_top_ab_cache():
+def get_default_workers(requested=None, max_cap=None):
+    """Determine effective worker count respecting Slurm allocations."""
+    if requested is not None and requested > 0:
+        return min(requested, max_cap) if max_cap else requested
+    slurm_cpus = os.environ.get("SLURM_CPUS_PER_TASK")
+    if slurm_cpus:
+        try:
+            count = int(slurm_cpus)
+            return min(count, max_cap) if max_cap else count
+        except ValueError:
+            pass
+    available = os.cpu_count() or 8
+    return min(available, max_cap) if max_cap else available
+
+
+def regenerate_figure2_top_ab_cache(workers=None):
     """Rebuild the top-row panels (a, b) Figure 2 caches from raw GPT-2 records."""
     all_folders = sorted({
         folder
@@ -650,7 +675,8 @@ def regenerate_figure2_top_ab_cache():
         "Regenerating Figure 2 top-row (a, b) caches from "
         f"{', '.join(FIGURE2_TOP_AB_EXPERIMENTS)} ({len(all_folders)} runs)"
     )
-    with Pool(processes=min(20, len(all_folders))) as pool:
+    num_workers = min(get_default_workers(workers), len(all_folders))
+    with Pool(processes=num_workers) as pool:
         results = [
             result for result in pool.imap_unordered(_extract_figure2_top_run, all_folders)
             if result is not None
@@ -671,7 +697,7 @@ def regenerate_figure2_top_ab_cache():
     print(f"Wrote {len(capacity_frame)} rows to {FIGURE2_TOP_B_CACHE}")
 
 
-def regenerate_figure2_top_c_cache():
+def regenerate_figure2_top_c_cache(workers=None):
     """Rebuild the top-row panel (c) Figure 2 cache from raw GPT-2 resampling records."""
     all_folders = sorted({
         folder
@@ -687,7 +713,8 @@ def regenerate_figure2_top_c_cache():
         f"{', '.join(FIGURE2_TOP_C_EXPERIMENTS)} ({len(all_folders)} runs)"
     )
     data_switch_rows = []
-    with Pool(processes=min(20, len(all_folders))) as pool:
+    num_workers = min(get_default_workers(workers), len(all_folders))
+    with Pool(processes=num_workers) as pool:
         for run_rows in pool.imap_unordered(_extract_figure2_top_c_run, all_folders):
             data_switch_rows.extend(run_rows)
     data_switch_frame = pd.DataFrame(data_switch_rows)
@@ -698,10 +725,10 @@ def regenerate_figure2_top_c_cache():
     print(f"Wrote {len(data_switch_frame)} rows to {FIGURE2_TOP_C_CACHE}")
 
 
-def regenerate_figure2_top_cache():
+def regenerate_figure2_top_cache(workers=None):
     """Rebuild all top-row Figure 2 caches from raw GPT-2 records."""
-    regenerate_figure2_top_ab_cache()
-    regenerate_figure2_top_c_cache()
+    regenerate_figure2_top_ab_cache(workers=workers)
+    regenerate_figure2_top_c_cache(workers=workers)
 
 
 def filter_figure2_bottom_row_models(dataframe):
@@ -790,7 +817,7 @@ def _one_layer_parameter_count_from_folder(folder):
     return 6 * width ** 2 + 114 * width + 2
 
 
-def regenerate_figure2_bottom_ab_cache():
+def regenerate_figure2_bottom_ab_cache(workers=None):
     """Rebuild Figure 2 bottom-row panels (a, b) from their raw records.
 
     The fast unpickler reads model tensor shapes without allocating model
@@ -827,7 +854,7 @@ def regenerate_figure2_bottom_ab_cache():
             "All Figure 2 bottom-row records exceed the "
             f"{FIGURE2_BOTTOM_MAX_PARAMETERS:g}-parameter limit."
         )
-    num_workers = min(12, len(folders))
+    num_workers = min(get_default_workers(workers), len(folders))
     with Pool(processes=num_workers) as pool:
         for run_loss_rows, run_capacity_rows, error in pool.imap_unordered(
             _extract_figure2_bottom_ab_run, folders
@@ -865,15 +892,38 @@ def _extract_figure2_bottom_c_run(folder):
     except Exception as error:
         return [], f"{record_paths[0]}: {error}"
 
+    if "logs" not in data:
+        return [], None
+
     model_parameters = sum(
-        value for value in data.get("model", {}).values()
-        if isinstance(value, (int, np.integer))
+        (value.numel() if hasattr(value, "numel") else value)
+        for value in data.get("model", {}).values()
+        if isinstance(value, (int, np.integer)) or hasattr(value, "numel")
     )
-    if model_parameters > FIGURE2_BOTTOM_MAX_PARAMETERS:
+    args = data.get("args", {})
+    logs = data["logs"]
+
+    if logs:
+        print(
+            "len(data['logs'])", len(logs),
+            "key", logs[0].keys(),
+            "arch", args.get("arch"),
+            "num_parameters", model_parameters,
+            "num_layers", args.get("num_layers"),
+            "num_heads", args.get("num_heads"),
+            "num_hidden_features", args.get("num_hidden_features"),
+            flush=True,
+        )
+
+    if model_parameters > 1e6 and logs[-1].get("train_loss", 0) > 0.3:
+        return [], None
+    if model_parameters > 7e7:
+        return [], None
+    if len(logs) < 10:
         return [], None
 
     rows = []
-    for log in data.get("logs", []):
+    for log in logs:
         epoch = log.get("epoch")
         if epoch is None or not (0 <= epoch <= 10 or 40 <= epoch <= 50):
             continue
@@ -895,7 +945,7 @@ def _extract_figure2_bottom_c_run(folder):
     return rows, None
 
 
-def regenerate_figure2_bottom_c_cache():
+def regenerate_figure2_bottom_c_cache(workers=None):
     """Rebuild Figure 2 bottom panel (c) from the Jan 20 resampling records."""
     all_folders = sorted(glob.glob(FIGURE2_BOTTOM_C_RECORD_GLOB))
     folders = []
@@ -915,7 +965,8 @@ def regenerate_figure2_bottom_c_cache():
     )
 
     rows = []
-    with Pool(processes=min(12, len(folders))) as pool:
+    num_workers = min(get_default_workers(workers), len(folders))
+    with Pool(processes=num_workers) as pool:
         for run_rows, error in pool.imap_unordered(_extract_figure2_bottom_c_run, folders):
             if error is not None:
                 print(f"Skipping unreadable record {error}")
@@ -927,18 +978,52 @@ def regenerate_figure2_bottom_c_cache():
     print(f"Wrote {len(cache_frame)} rows to {FIGURE2_BOTTOM_C_CACHE}")
 
 
-def ensure_figure2_caches(force_regenerate=False):
+def ensure_figure2_caches(force_regenerate=False, parallel=False, workers=None):
     """Create missing Figure 2 caches, or replace them when forced."""
     top_ab_caches = [FIGURE2_TOP_A_CACHE, FIGURE2_TOP_B_CACHE]
     bottom_ab_caches = [FIGURE2_BOTTOM_A_CACHE, FIGURE2_BOTTOM_B_CACHE]
+    tasks_to_run = []
     if force_regenerate or any(not os.path.isfile(path) for path in top_ab_caches):
-        regenerate_figure2_top_ab_cache()
+        tasks_to_run.append(("top_ab", regenerate_figure2_top_ab_cache))
     if force_regenerate or not os.path.isfile(FIGURE2_TOP_C_CACHE):
-        regenerate_figure2_top_c_cache()
+        tasks_to_run.append(("top_c", regenerate_figure2_top_c_cache))
     if force_regenerate or any(not os.path.isfile(path) for path in bottom_ab_caches):
-        regenerate_figure2_bottom_ab_cache()
+        tasks_to_run.append(("bottom_ab", regenerate_figure2_bottom_ab_cache))
     if force_regenerate or not os.path.isfile(FIGURE2_BOTTOM_C_CACHE):
-        regenerate_figure2_bottom_c_cache()
+        tasks_to_run.append(("bottom_c", regenerate_figure2_bottom_c_cache))
+
+    if not tasks_to_run:
+        return
+
+    total_workers = get_default_workers(workers)
+    if parallel and len(tasks_to_run) > 1:
+        print(
+            f"Regenerating {len(tasks_to_run)} Figure 2 cache sets concurrently using {total_workers} total CPUs...",
+            flush=True,
+        )
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _exec_cache_task(name, func):
+            if len(tasks_to_run) == 1:
+                task_workers = total_workers
+            elif name == "bottom_ab":
+                task_workers = max(2, total_workers * 2 // 3)
+            else:
+                remaining = max(1, total_workers - (total_workers * 2 // 3))
+                task_workers = max(2, remaining // max(1, len(tasks_to_run) - 1))
+            func(workers=task_workers)
+            return name
+
+        with ThreadPoolExecutor(max_workers=len(tasks_to_run)) as executor:
+            futures = [
+                executor.submit(_exec_cache_task, name, func)
+                for name, func in tasks_to_run
+            ]
+            for future in as_completed(futures):
+                future.result()
+    else:
+        for _, func in tasks_to_run:
+            func(workers=total_workers)
 
 
 # =============================================================================
@@ -1072,16 +1157,17 @@ def _extract_figure4_fork_progress_run(task):
     return rows, None
 
 
-def _regenerate_figure4_cache(record_glob, experiment, extractor, cache_path):
+def _regenerate_figure4_cache(record_glob, experiment, extractor, cache_path, workers=None):
     """Run a Figure 4 extractor and save its complete table."""
     folders = sorted(glob.glob(record_glob))
     if not folders:
         raise FileNotFoundError(f"No Figure 4 records match {record_glob}.")
-    print(f"Regenerating Figure 4 cache from {experiment} ({len(folders)} runs)")
+    num_workers = min(get_default_workers(workers), len(folders))
+    print(f"Regenerating Figure 4 cache from {experiment} ({len(folders)} runs) with {num_workers} workers")
 
     rows = []
     tasks = list(enumerate(folders))
-    with Pool(processes=min(12, len(tasks))) as pool:
+    with Pool(processes=num_workers) as pool:
         for run_rows, error in pool.imap_unordered(extractor, tasks):
             if error is not None:
                 print(f"Skipping unreadable record {error}")
@@ -1094,27 +1180,29 @@ def _regenerate_figure4_cache(record_glob, experiment, extractor, cache_path):
     print(f"Wrote {len(frame)} rows to {cache_path}")
 
 
-def regenerate_figure4_caches():
+def regenerate_figure4_caches(workers=None):
     """Rebuild both data tables required by generate_figure4.py."""
     _regenerate_figure4_cache(
         FIGURE4_LINEAR_PROBE_RECORD_GLOB,
         FIGURE4_LINEAR_PROBE_EXPERIMENT,
         _extract_figure4_linear_probe_run,
         FIGURE4_LINEAR_PROBE_CACHE,
+        workers=workers,
     )
     _regenerate_figure4_cache(
         FIGURE4_FORK_PROGRESS_RECORD_GLOB,
         FIGURE4_FORK_PROGRESS_EXPERIMENT,
         _extract_figure4_fork_progress_run,
         FIGURE4_FORK_PROGRESS_CACHE,
+        workers=workers,
     )
 
 
-def ensure_figure4_caches(force_regenerate=False):
+def ensure_figure4_caches(force_regenerate=False, workers=None):
     """Create missing Figure 4 caches, or replace both when forced."""
     cache_paths = [FIGURE4_LINEAR_PROBE_CACHE, FIGURE4_FORK_PROGRESS_CACHE]
     if force_regenerate or any(not os.path.isfile(path) for path in cache_paths):
-        regenerate_figure4_caches()
+        regenerate_figure4_caches(workers=workers)
 
 
 FIGURE4_POST_SWAP_CACHE = "./figs/Figure6/df_first_sequences_loader_post_swap.csv"
@@ -1480,18 +1568,19 @@ def _extract_figure4pre_folder_saturation(folder):
     return rows
 
 
-def regenerate_figure4pre_cache():
+def regenerate_figure4pre_cache(workers=None):
     """Extract and rebuild the Figure 4pre saturation cache."""
     folders = sorted(glob.glob(FIGURE4PRE_RECORD_GLOB))
     if not folders:
         raise FileNotFoundError(
             f"No Figure 4pre records match {FIGURE4PRE_RECORD_GLOB}."
         )
+    num_workers = min(get_default_workers(workers), len(folders))
     print(
         f"Regenerating Figure 4pre saturation cache from {FIGURE4PRE_EXPERIMENT} "
-        f"({len(folders)} runs)..."
+        f"({len(folders)} runs) with {num_workers} workers..."
     )
-    with Pool(processes=min(12, len(folders))) as pool:
+    with Pool(processes=num_workers) as pool:
         all_results = pool.map(_extract_figure4pre_folder_saturation, folders)
 
     all_rows = [row for run_rows in all_results if run_rows for row in run_rows]
@@ -1510,9 +1599,9 @@ def regenerate_figure4pre_cache():
     print(f"Wrote {len(results)} rows to {FIGURE4PRE_CACHE}")
 
 
-def ensure_figure4pre_cache(force_regenerate=False):
+def ensure_figure4pre_cache(force_regenerate=False, workers=None):
     if force_regenerate or not os.path.isfile(FIGURE4PRE_CACHE):
-        regenerate_figure4pre_cache()
+        regenerate_figure4pre_cache(workers=workers)
 
 
 def create_figure4pre(force_regenerate_cache=False):
@@ -1570,19 +1659,19 @@ def create_figure4pre(force_regenerate_cache=False):
     return fig
 
 
-def force_regenerate_all_figure_caches():
+def force_regenerate_all_figure_caches(parallel=False, workers=None):
     """Rebuild every cache used by the camera-ready figures."""
     print("Figure 1: no data cache to regenerate.")
-    ensure_figure2_caches(force_regenerate=True)
-    ensure_figure4_caches(force_regenerate=True)
-    ensure_figure4pre_cache(force_regenerate=True)
+    ensure_figure2_caches(force_regenerate=True, parallel=parallel, workers=workers)
+    ensure_figure4_caches(force_regenerate=True, workers=workers)
+    ensure_figure4pre_cache(force_regenerate=True, workers=workers)
     print("Figure 5: no data cache to regenerate.")
 
 
 # =============================================================================
 # FIGURE 2: Full Assembly (2 rows x 3 columns)
 # =============================================================================
-def create_figure2(force_regenerate_cache=False):
+def create_figure2(force_regenerate_cache=False, cache_parallel=False, workers=None):
     """Create publication-quality Figure 2 for NeurIPS submission.
     Combines:
       Column (a): Final train loss vs parameter count (12-layer top, 1-layer bottom)
@@ -1591,7 +1680,7 @@ def create_figure2(force_regenerate_cache=False):
       Column (c): Average accuracy over first 3000 ranked sequences across data switch
                   with broken axis [0, 1.0] and [4.0, 5.0] x 10^4 (12-layer top, 1-layer bottom)
     """
-    ensure_figure2_caches(force_regenerate=force_regenerate_cache)
+    ensure_figure2_caches(force_regenerate=force_regenerate_cache, parallel=cache_parallel, workers=workers)
     apply_figure_style()
     print(
         "Figure 2 top-row panels (a, b) experiments: "
@@ -2362,12 +2451,44 @@ def parse_figure_list(figures_arg):
     return selected or ALL_FIGURE_KEYS
 
 
-def main(figures=None, parallel=False, workers=None, savefigdir="./figs_camera_ready", force_regenerate_cache=False):
+CACHE_TARGET_REGISTRY = {
+    "fig2_top_ab": regenerate_figure2_top_ab_cache,
+    "fig2_top_c": regenerate_figure2_top_c_cache,
+    "fig2_bottom_ab": regenerate_figure2_bottom_ab_cache,
+    "fig2_bottom_c": regenerate_figure2_bottom_c_cache,
+    "fig2_top": regenerate_figure2_top_cache,
+    "fig2": lambda workers=None: ensure_figure2_caches(force_regenerate=True, parallel=False, workers=workers),
+    "fig4": regenerate_figure4_caches,
+    "fig4pre": regenerate_figure4pre_cache,
+    "all": lambda workers=None: force_regenerate_all_figure_caches(parallel=False, workers=workers),
+}
+
+
+def run_cache_regeneration(cache_args, parallel=False, workers=None):
+    """Run standalone cache regeneration for specified target tables."""
+    if not cache_args:
+        cache_args = ["fig2"]
+    total_workers = get_default_workers(workers)
+    print(f"Cache targets requested: {cache_args} with {total_workers} CPUs (parallel={parallel})", flush=True)
+    for target in cache_args:
+        t_clean = str(target).lower().strip()
+        if t_clean in ["fig2", "figure2"]:
+            ensure_figure2_caches(force_regenerate=True, parallel=parallel, workers=total_workers)
+        elif t_clean in ["all"]:
+            force_regenerate_all_figure_caches(parallel=parallel, workers=total_workers)
+        elif t_clean in CACHE_TARGET_REGISTRY:
+            CACHE_TARGET_REGISTRY[t_clean](workers=total_workers)
+        else:
+            valid = ", ".join(sorted(CACHE_TARGET_REGISTRY.keys()))
+            raise ValueError(f"Unknown cache target: '{target}'. Valid targets: {valid}")
+
+
+def main(figures=None, parallel=False, workers=None, savefigdir="./figs_camera_ready", force_regenerate_cache=False, cache_parallel=False):
     utils.ensure_dir(savefigdir)
     selected_keys = parse_figure_list(figures)
 
     if force_regenerate_cache:
-        force_regenerate_all_figure_caches()
+        force_regenerate_all_figure_caches(parallel=cache_parallel, workers=workers)
 
     print(f"Figures selected to generate: {[k.upper() for k in selected_keys]}", flush=True)
 
@@ -2436,11 +2557,36 @@ if __name__ == "__main__":
         action="store_true",
         help="Rebuild caches before generating figures.",
     )
-    cli_args = parser.parse_args()
-    main(
-        figures=cli_args.figures,
-        parallel=cli_args.parallel,
-        workers=cli_args.workers,
-        savefigdir=cli_args.output_dir,
-        force_regenerate_cache=cli_args.force_regenerate_cache,
+    parser.add_argument(
+        "--regenerate_cache",
+        "--cache",
+        nargs="*",
+        default=None,
+        help=(
+            "Directly rebuild specified caches without rendering figures. "
+            "Options: fig2, fig2_top_ab, fig2_top_c, fig2_bottom_ab, fig2_bottom_c, "
+            "fig2_top, fig4, fig4pre, all."
+        ),
     )
+    parser.add_argument(
+        "--cache_parallel",
+        action="store_true",
+        help="Run independent cache regeneration stages concurrently.",
+    )
+    cli_args = parser.parse_args()
+
+    if cli_args.regenerate_cache is not None:
+        run_cache_regeneration(
+            cli_args.regenerate_cache,
+            parallel=cli_args.cache_parallel,
+            workers=cli_args.workers,
+        )
+    else:
+        main(
+            figures=cli_args.figures,
+            parallel=cli_args.parallel,
+            workers=cli_args.workers,
+            savefigdir=cli_args.output_dir,
+            force_regenerate_cache=cli_args.force_regenerate_cache,
+            cache_parallel=cli_args.cache_parallel,
+        )
