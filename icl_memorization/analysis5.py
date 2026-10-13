@@ -182,9 +182,31 @@ def create_figure1():
 # =============================================================================
 # FIGURE 2 HELPERS: Data Extraction, Power Law Fitting & Subpanels
 # =============================================================================
+class DummyParam(int):
+    """Integer subclass providing .numel() compatibility with PyTorch tensors."""
+    def numel(self):
+        return int(self)
+
+
+class DummyArray(np.ndarray):
+    """NumPy array subclass that drops massive attention weight buffers (~160MB/epoch)
+    to prevent memory exhaustion when reading checkpoints saved with --is_save_attn_reps."""
+    def __setstate__(self, state):
+        shape = state[1]
+        # Any array with > 100,000 elements (e.g. attn_reps 256*16*100*100 = 40.9M floats)
+        # is discarded without keeping its ~164MB memory buffer.
+        if math.prod(shape) > 100_000:
+            super().__setstate__((state[0], (0,), state[2], state[3], b""))
+        else:
+            super().__setstate__(state)
+
+
+def _dummy_numpy_reconstruct(subtype, shape, dtype):
+    return DummyArray(shape, dtype=dtype)
+
+
 class FastParamUnpickler(pickle.Unpickler):
     """Bypasses full tensor buffer allocation while preserving logs, args,
-
     and exact parameter counts from tensor shape metadata (~50x speedup).
     """
     def __init__(self, *args, **kwargs):
@@ -198,8 +220,10 @@ class FastParamUnpickler(pickle.Unpickler):
             def dummy_tensor(storage, storage_offset, size, stride, requires_grad, backward_hooks, metadata=None):
                 numel = math.prod(size)
                 self.param_count += numel
-                return numel
+                return DummyParam(numel)
             return dummy_tensor
+        if module in ("numpy.core.multiarray", "numpy._core.multiarray") and name == "_reconstruct":
+            return _dummy_numpy_reconstruct
         return super().find_class(module, name)
 
 
@@ -445,6 +469,7 @@ FIGURE2_TOP_C_RECORD_GLOB = FIGURE2_TOP_C_RECORD_GLOBS[0]
 FIGURE2_TOP_A_CACHE = "./cache/df_train_loss_12layer.csv"
 FIGURE2_TOP_B_CACHE = "./cache/df_capacity_12layer.csv"
 FIGURE2_TOP_C_CACHE = "./cache/df_dataswitch_12layer.csv"
+FIGURE2_TOP_C_MAX_PARAMETERS = 2e6
 FIGURE2_BOTTOM_AB_EXPERIMENTS = (
     "memo_jan24_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample",
     "memo_jan25_zipf_onelayerattention_vary_num_hidden_features_num_heads_noresample",
@@ -523,6 +548,9 @@ def _extract_figure2_top_run(folder):
             + (context_length + 2 * vocab_size + 2) * width
             + vocab_size
         )
+
+    if model_parameters >= FIGURE2_TOP_C_MAX_PARAMETERS:
+        return []
 
     final_loss = logs[-1].get("train_loss")
     if final_loss is None:
@@ -613,6 +641,9 @@ def _extract_figure2_top_c_run(folder):
             + (context_length + 2 * vocab_size + 2) * width
             + vocab_size
         )
+
+    if model_parameters >= FIGURE2_TOP_C_MAX_PARAMETERS:
+        return []
 
     final_loss = logs[-1].get("train_loss")
     failed = False
@@ -720,6 +751,7 @@ def regenerate_figure2_top_c_cache(workers=None):
     data_switch_frame = pd.DataFrame(data_switch_rows)
     if data_switch_frame.empty:
         raise RuntimeError("The extracted Figure 2 top-row panel (c) data is empty.")
+    data_switch_frame = data_switch_frame[data_switch_frame["num_parameters"] < FIGURE2_TOP_C_MAX_PARAMETERS].copy()
     os.makedirs("./cache", exist_ok=True)
     data_switch_frame.to_csv(FIGURE2_TOP_C_CACHE, index=False)
     print(f"Wrote {len(data_switch_frame)} rows to {FIGURE2_TOP_C_CACHE}")
@@ -854,8 +886,12 @@ def regenerate_figure2_bottom_ab_cache(workers=None):
             "All Figure 2 bottom-row records exceed the "
             f"{FIGURE2_BOTTOM_MAX_PARAMETERS:g}-parameter limit."
         )
-    num_workers = min(get_default_workers(workers), len(folders))
-    with Pool(processes=num_workers) as pool:
+    # memo_jan25 contains 233 checkpoints that each exceed 1GB to 13.6GB due
+    # to saved attention maps. Cap bottom_ab workers to 4 and recycle worker processes
+    # after 5 runs via maxtasksperchild to prevent RAM accumulation and Slurm OOM kills.
+    max_ab_workers = 4
+    num_workers = min(get_default_workers(workers, max_cap=max_ab_workers), len(folders))
+    with Pool(processes=num_workers, maxtasksperchild=5) as pool:
         for run_loss_rows, run_capacity_rows, error in pool.imap_unordered(
             _extract_figure2_bottom_ab_run, folders
         ):
@@ -895,10 +931,9 @@ def _extract_figure2_bottom_c_run(folder):
     if "logs" not in data:
         return [], None
 
-    model_parameters = sum(
-        (value.numel() if hasattr(value, "numel") else value)
-        for value in data.get("model", {}).values()
-        if isinstance(value, (int, np.integer)) or hasattr(value, "numel")
+    num_parameters = sum(
+        (p.numel() if hasattr(p, "numel") else p)
+        for k, p in data.get("model", {}).items()
     )
     args = data.get("args", {})
     logs = data["logs"]
@@ -908,16 +943,16 @@ def _extract_figure2_bottom_c_run(folder):
             "len(data['logs'])", len(logs),
             "key", logs[0].keys(),
             "arch", args.get("arch"),
-            "num_parameters", model_parameters,
+            "num_parameters", num_parameters,
             "num_layers", args.get("num_layers"),
             "num_heads", args.get("num_heads"),
             "num_hidden_features", args.get("num_hidden_features"),
             flush=True,
         )
 
-    if model_parameters > 1e6 and logs[-1].get("train_loss", 0) > 0.3:
+    if num_parameters > 1e6 and logs[-1].get("train_loss", 0) > 0.3:
         return [], None
-    if model_parameters > 7e7:
+    if num_parameters > 7e7:
         return [], None
     if len(logs) < 10:
         return [], None
@@ -938,7 +973,7 @@ def _extract_figure2_bottom_c_run(folder):
         if not np.any(first_3000):
             continue
         rows.append({
-            "num_parameters": model_parameters,
+            "num_parameters": num_parameters,
             "iteration": epoch * 1000,
             "accuracy": float(accuracy[first_3000].mean()),
         })
@@ -1780,8 +1815,10 @@ def create_figure2(force_regenerate_cache=False, cache_parallel=False, workers=N
     ax_c1_left = fig.add_subplot(gs_c1[0])
     ax_c1_right = fig.add_subplot(gs_c1[1], sharey=ax_c1_left)
 
-    # 12-layer data switch data from FIGURE2_TOP_C_EXPERIMENTS (memo_nov10_zipf_gpt2_vary_num_hidden_features_num_heads_doresample)
-    avg_df_12 = pd.read_csv(FIGURE2_TOP_C_CACHE)
+    # 12-layer data switch data from FIGURE2_TOP_C_EXPERIMENTS (memo_may1_zipf_gpt2_vary_num_hidden_features_num_heads_doresample)
+    plot_df = pd.read_csv(FIGURE2_TOP_C_CACHE)
+    plot_df = plot_df[plot_df["num_parameters"] < FIGURE2_TOP_C_MAX_PARAMETERS].copy()
+    avg_df_12 = plot_df
 
     # 1-layer data-switch panel from FIGURE2_BOTTOM_C_EXPERIMENT.
     avg_df_1 = pd.read_csv(FIGURE2_BOTTOM_C_CACHE)
